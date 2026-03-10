@@ -377,6 +377,13 @@ export class Game {
     // Convert to camera's local space (+x right, +y up, -z forward)
     toBoss.applyQuaternion(this.camera.quaternion.clone().invert());
     
+    // If looking roughly at the boss (dot product with forward > 0.9), hide the indicator
+    // In camera local space, forward is (0, 0, -1) so dot product is -toBoss.z
+    if (-toBoss.z > 0.9) {
+      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+      return;
+    }
+    
     // Project to 2D Screen direction (+y down for screen coords)
     let dx = toBoss.x;
     let dy = -toBoss.y;
