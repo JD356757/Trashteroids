@@ -40,6 +40,43 @@ const ASTEROID_DRAG = 0.995;
 const COLLISION_PASSES = 2;
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Glow sprite ─────────────────────────────────────────────────────────────
+// How much larger than the asteroid's bounding sphere the glow halo is
+const GLOW_RADIUS_MULTIPLIER = 1.5;
+// Pulsing speed (radians/second) – set to 0 to disable pulse
+const GLOW_PULSE_SPEED = 1.2;
+// Pulse amplitude as a fraction of base scale (0 = no pulse, 0.15 = ±15%)
+const GLOW_PULSE_AMPLITUDE = 0.15;
+// Glow brightness: 0.0 = invisible, 1.0 = full intensity
+const GLOW_BRIGHTNESS = 2;
+
+function makeGlowTexture(size = 256) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const half = size / 2;
+  const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+  const b = GLOW_BRIGHTNESS;
+  // Warm amber-white core fading to transparent orange edge
+  grad.addColorStop(0,    `rgba(255, 220, 140, ${0.55 * b})`);
+  grad.addColorStop(0.35, `rgba(220, 150,  60, ${0.22 * b})`);
+  grad.addColorStop(0.7,  `rgba(180, 100,  30, ${0.07 * b})`);
+  grad.addColorStop(1,    'rgba(160,  80,  20, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+
+const GLOW_TEXTURE  = makeGlowTexture();
+const GLOW_MATERIAL = new THREE.SpriteMaterial({
+  map: GLOW_TEXTURE,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true,
+  fog: false,
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 const BIG_FILES = [
   'big1.fbx','big2.fbx','big3.fbx','big4.fbx','big5.fbx','big6.fbx','big7.fbx',
 ];
@@ -86,6 +123,7 @@ export class AsteroidField {
   constructor(scene) {
     this.scene = scene;
     this.instances = [];
+    this._elapsed = 0;
 
     this._loadPool('/models/asteroid/big/',   BIG_FILES,   BIG_SCALE_MIN,   BIG_SCALE_MAX);
     this._loadPool('/models/asteroid/small/', SMALL_FILES, SMALL_SCALE_MIN, SMALL_SCALE_MAX);
@@ -142,6 +180,19 @@ export class AsteroidField {
             z: (Math.random() - 0.5) * 0.06,
           };
 
+          // ── Glow sprite (big asteroids only) ─────────────────────────────
+          let glowSprite = null;
+          if (isBig) {
+            glowSprite = new THREE.Sprite(GLOW_MATERIAL.clone());
+            const glowSize = colliderRadius * 2 * GLOW_RADIUS_MULTIPLIER;
+            glowSprite.scale.setScalar(glowSize);
+            glowSprite.position.copy(localCenter);
+            glowSprite.userData.glowBaseScale = glowSize;
+            glowSprite.userData.glowPhase     = Math.random() * Math.PI * 2;
+            instance.add(glowSprite);
+          }
+          // ─────────────────────────────────────────────────────────────────
+
           instance.updateMatrixWorld(true);
           collider.center.copy(instance.localToWorld(_worldCenter.copy(localCenter)));
 
@@ -160,6 +211,7 @@ export class AsteroidField {
             boundingSphere: collider,
             localCenter,
             velocity,
+            glowSprite,
             mass: Math.max(colliderRadius * colliderRadius * colliderRadius, 0.001),
           });
         }
@@ -168,6 +220,8 @@ export class AsteroidField {
   }
 
   update(delta) {
+    this._elapsed += delta;
+
     for (const ast of this.instances) {
       ast.mesh.position.addScaledVector(ast.velocity, delta);
       ast.mesh.rotation.x += ast.mesh.userData.rotSpeed.x * delta;
@@ -176,6 +230,16 @@ export class AsteroidField {
       ast.velocity.multiplyScalar(Math.pow(ASTEROID_DRAG, delta * 60));
       ast.mesh.updateMatrixWorld(true);
       ast.boundingSphere.center.copy(ast.mesh.localToWorld(_worldCenter.copy(ast.localCenter)));
+
+      // ── Animate glow pulse ───────────────────────────────────────────────
+      if (ast.glowSprite) {
+        const phase    = ast.glowSprite.userData.glowPhase;
+        const baseSize = ast.glowSprite.userData.glowBaseScale;
+        const pulse    = 1 + GLOW_PULSE_AMPLITUDE *
+                         Math.sin(this._elapsed * GLOW_PULSE_SPEED + phase);
+        ast.glowSprite.scale.setScalar(baseSize * pulse);
+      }
+      // ────────────────────────────────────────────────────────────────────
     }
 
     for (let pass = 0; pass < COLLISION_PASSES; pass++) {
