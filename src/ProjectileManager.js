@@ -14,7 +14,7 @@ export class ProjectileManager {
   }
 
   fire(origin, direction, playerVelocity) {
-    if (this.cooldown > 0) return;
+    if (this.cooldown > 0) return false;
     this.cooldown = this.cooldownTime;
 
     const dir = direction.clone().normalize();
@@ -53,6 +53,8 @@ export class ProjectileManager {
       prevPosition: core.position.clone(),
       travelled: 0,
     });
+
+    return true;
   }
 
   update(delta) {

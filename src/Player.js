@@ -22,6 +22,7 @@ export class Player {
   constructor(scene) {
     // Flight parameters
     this.thrustPower = 200;
+    this.recoilAcceleration = 70;
     this.mouseSensitivity = 0.0024;
     this.turnAcceleration = 16.0;
     this.maxTurnRate = 2.9;
@@ -135,6 +136,11 @@ export class Player {
   thrust(delta) {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
     this.velocity.addScaledVector(_forward, this.thrustPower * delta);
+  }
+
+  applyRecoil(duration) {
+    _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
+    this.velocity.addScaledVector(_forward, -this.recoilAcceleration * duration);
   }
 
   update(delta) {
