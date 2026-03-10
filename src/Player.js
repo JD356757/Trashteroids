@@ -27,11 +27,11 @@ export class Player {
     this.turnAcceleration = 16.0;
     this.maxTurnRate = 2.9;
     this.turnDamping = 7.5;
-    this.rollOnYaw = 0.4;           // cosmetic roll from turning (subtle)
+    this.rollOnYaw = -0.4;           // cosmetic roll from turning (subtle)
     this.rollReturnSpeed = 3.0;
     this.dampening = 0.98;
     this.manualRollSpeed = 3.0;     // how fast A/D rolls the ship
-    this.maxRoll = Math.PI / 2;     // ~25 degrees max roll either way
+    this.maxRoll = Math.PI / 4;     // ~25 degrees max roll either way
 
     // Model scale — tweak this to resize the ship
     this.modelScale = 0.005;

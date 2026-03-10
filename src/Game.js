@@ -36,8 +36,8 @@ export class Game {
     this.playerHitCooldown = 0;
     this.clock = new THREE.Clock();
 
-    // Camera follow smoothing (0–1, lower = more lag/visible movement)
-    this.cameraLerp = 0.5;
+    // Camera follow smoothing: use a framerate-independent follow speed (higher = tighter)
+    this.cameraFollowSpeed = 20.0;
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -56,12 +56,12 @@ export class Game {
 
     // Lighting — replace generic directional with a sun
     // AMBIENT_INTENSITY: controls overall scene brightness (0 = dark, 2 = bright)
-    const AMBIENT_INTENSITY = 1.0;
+    const AMBIENT_INTENSITY = 0.4;
     const ambient = new THREE.AmbientLight(0xffffff, AMBIENT_INTENSITY);
     this.scene.add(ambient);
 
     // Sun — a warm directional light from far away, locked in the background
-    this.sunLight = new THREE.DirectionalLight(0xfff5e0, 1.8);
+    this.sunLight = new THREE.DirectionalLight(0xfff5e0, 10);
     this.sunLight.position.set(2000, 1000, -3000);
     this.scene.add(this.sunLight);
 
@@ -146,15 +146,18 @@ export class Game {
     this.projectiles.update(delta);
     const playerPos = this.player.getPosition();
     this.debris.update(delta, this.levels.getSpawnConfig(), playerPos);
-    this.starfield.update(delta, this.camera);
     this.asteroidField.update(delta);
     this._checkAsteroidPlayerCollisions();
 
-    // Camera follows behind ship
-    this._updateCamera();
+    // Camera follows behind ship (updated before rendering)
+    this._updateCamera(delta);
 
     // Keep sun and planet locked relative to camera (unreachable background)
     this._updateBackground(delta);
+
+    // Starfield should be centered after the camera has moved to avoid
+    // one-frame parallax/zoom artifacts when the camera follows the ship.
+    this.starfield.update(delta, this.camera);
 
     // Collision: projectiles vs debris
     this._checkProjectileDebrisCollisions();
@@ -295,18 +298,21 @@ export class Game {
     this.hud.showMessage('EARTH IS SAVED!');
   }
 
-  _updateCamera() {
+  _updateCamera(delta) {
     if (DEBUG_FREEZE_CAMERA) return;
 
     const shipPos = this.player.mesh.position;
-    const shipQuat = this.player.mesh.quaternion;
+    // Use the ship's base quaternion (yaw + pitch) so the camera does not
+    // inherit the ship's cosmetic roll (visual tilt).
+    const shipQuat = this.player.baseQuaternion;
 
     // Desired camera position: offset behind & above the ship,
     // rotated by the ship's quaternion
     _camTarget.copy(_camOffset).applyQuaternion(shipQuat).add(shipPos);
 
-    // Smooth follow
-    this.camera.position.lerp(_camTarget, this.cameraLerp);
+    // Smooth follow (framerate-independent exponential smoothing)
+    const lerpAlpha = 1 - Math.exp(-this.cameraFollowSpeed * (delta || (1 / 60)));
+    this.camera.position.lerp(_camTarget, lerpAlpha);
 
     // Set camera up to the ship's local up so lookAt never flips
     // (default world-up (0,1,0) degenerates when looking near-vertical)
