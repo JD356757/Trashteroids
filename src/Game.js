@@ -210,7 +210,7 @@ export class Game {
     this.levels.update(this.score, playerPos);
     
     // Boss Indicator
-    this._updateBossIndicator();
+    this._updateBossIndicator(delta);
 
     // Boss-specific logic
     if (this.levels.current === 3) {
@@ -359,11 +359,12 @@ export class Game {
     this.bossMesh.add(bossLight);
   }
 
-  _updateBossIndicator() {
+  _updateBossIndicator(delta) {
     if (!this.levels.bossWorldPosition) return;
 
     if (this.levels.current === 3) {
-      this.hud.updateBossIndicator(false, 0, 0);
+      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+      this.hud.updateMinimap(false, 0, 0, 0);
       return;
     }
 
@@ -371,17 +372,54 @@ export class Game {
     const playerPos = this.player.getPosition();
     const dist = playerPos.distanceTo(bossPos);
 
-    const projected = bossPos.clone().project(this.camera);
-    let dx = projected.x;
-    let dy = -projected.y;
+    // Vector from camera to boss
+    const toBoss = bossPos.clone().sub(this.camera.position).normalize();
+    // Convert to camera's local space (+x right, +y up, -z forward)
+    toBoss.applyQuaternion(this.camera.quaternion.clone().invert());
     
-    if (projected.z > 1) {
-      dx = -dx;
-      dy = -dy;
+    // Project to 2D Screen direction (+y down for screen coords)
+    let dx = toBoss.x;
+    let dy = -toBoss.y;
+    
+    // Avoid singularity
+    if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+      dy = 1;
+    }
+
+    const dir = new THREE.Vector2(dx, dy).normalize();
+    
+    // Stiffen smoothing (less lerp time means faster reaction)
+    if (!this._indicatorDir) {
+      this._indicatorDir = dir.clone();
+    } else {
+      this._indicatorDir.lerp(dir, 20 * delta).normalize();
     }
     
+    dx = this._indicatorDir.x;
+    dy = this._indicatorDir.y;
+    
     const angle = Math.atan2(dx, -dy);
-    this.hud.updateBossIndicator(true, angle, Math.floor(dist));
+    
+    // Update Minimap (pass top-down 3D relative positions)
+    const camInvQuat = this.camera.quaternion.clone().invert();
+    this.hud.updateMinimap(true, bossPos, playerPos, camInvQuat, this.asteroidField.getColliders());
+    
+    // Clamp to screen edge (push indicator further in)
+    const halfW = window.innerWidth / 2;
+    const halfH = window.innerHeight / 2;
+    const marginW = 150; // Keep it inside screen, much further in
+    const marginH = 150; 
+    const boundX = halfW - marginW;
+    const boundY = halfH - marginH;
+    
+    const tX = boundX / (Math.abs(dx) || 0.0001);
+    const tY = boundY / (Math.abs(dy) || 0.0001);
+    const t = Math.min(tX, tY);
+    
+    const sx = halfW + dx * t;
+    const sy = halfH + dy * t;
+    
+    this.hud.updateBossIndicator(true, sx, sy, angle, Math.floor(dist));
   }
 
   _gameOver() {
