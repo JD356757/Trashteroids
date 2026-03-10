@@ -11,11 +11,11 @@ const _zAxis = new THREE.Vector3(0, 0, 1);
 
 // Map material name → texture file prefixes for PBR textures
 const MATERIAL_TEXTURE_MAP = {
-  'Body': 'Fighter_03_Body',
-  'Blue_Lights': 'Fighter_03_Blue_Lights',
+  'Body':         'Fighter_03_Body',
+  'Blue_Lights':  'Fighter_03_Blue_Lights',
   'White_Lights': 'Fighter_03_White_Lights',
-  'Rear_Lights': 'Fighter_03_Rear_Lights',
-  'Windows': 'Fighter_03_Windows',
+  'Rear_Lights':  'Fighter_03_Rear_Lights',
+  'Windows':      'Fighter_03_Windows',
 };
 
 export class Player {
@@ -27,11 +27,9 @@ export class Player {
     this.turnAcceleration = 16.0;
     this.maxTurnRate = 2.9;
     this.turnDamping = 7.5;
-    this.rollOnYaw = 0.4;           // cosmetic roll from turning (subtle)
+    this.rollOnYaw = 0.6;
     this.rollReturnSpeed = 3.0;
     this.dampening = 0.98;
-    this.manualRollSpeed = 3.0;     // how fast A/D rolls the ship
-    this.maxRoll = Math.PI / 2;     // ~25 degrees max roll either way
 
     // Model scale — tweak this to resize the ship
     this.modelScale = 0.005;
@@ -39,7 +37,6 @@ export class Player {
     // State
     this.velocity = new THREE.Vector3();
     this.currentRoll = 0;
-    this.manualRollInput = 0;       // -1 (A/left), 0, +1 (D/right)
     this.baseQuaternion = new THREE.Quaternion();
     this.yawRate = 0;
     this.pitchRate = 0;
@@ -86,9 +83,9 @@ export class Player {
         if (prefix) {
           const baseColor = texLoader.load(texPath + prefix + '_BaseColor.png');
           baseColor.colorSpace = THREE.SRGBColorSpace;
-          const normal = texLoader.load(texPath + prefix + '_Normal.png');
+          const normal    = texLoader.load(texPath + prefix + '_Normal.png');
           const roughness = texLoader.load(texPath + prefix + '_Roughness.png');
-          const metallic = texLoader.load(texPath + prefix + '_Metallic.png');
+          const metallic  = texLoader.load(texPath + prefix + '_Metallic.png');
 
           const mat = new THREE.MeshStandardMaterial({
             map: baseColor,
@@ -178,10 +175,8 @@ export class Player {
     // Integrate position
     this.mesh.position.addScaledVector(this.velocity, delta);
 
-    // Roll combines: cosmetic tilt from turning + manual A/D input
-    const turnRoll = -(this.yawRate / this.maxTurnRate) * this.rollOnYaw;
-    const manualRoll = this.manualRollInput * this.maxRoll;
-    const targetRoll = THREE.MathUtils.clamp(turnRoll + manualRoll, -this.maxRoll, this.maxRoll);
+    // Roll is driven by actual turn rate rather than raw mouse delta.
+    const targetRoll = -(this.yawRate / this.maxTurnRate) * this.rollOnYaw;
     this.currentRoll = THREE.MathUtils.lerp(this.currentRoll, targetRoll, Math.min(1, this.rollReturnSpeed * delta));
 
     // Compose visual quaternion: base (yaw+pitch) * cosmetic roll
