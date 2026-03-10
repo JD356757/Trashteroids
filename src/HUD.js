@@ -6,6 +6,22 @@ export class HUD {
     this.bossContainer = document.getElementById('boss-bar-container');
     this.bossFill = document.getElementById('boss-bar-fill');
     this.overlay = document.getElementById('overlay');
+    this.bossIndicator = document.getElementById('boss-indicator');
+    this.bossIndicatorArrow = document.getElementById('boss-indicator-arrow');
+    this.bossIndicatorDist = document.getElementById('boss-indicator-dist');
+  }
+
+  updateBossIndicator(visible, angle, distance) {
+    if (!visible) {
+      if (!this.bossIndicator.classList.contains('hidden')) {
+        this.bossIndicator.classList.add('hidden');
+      }
+      return;
+    }
+    this.bossIndicator.classList.remove('hidden');
+    this.bossIndicator.style.transform = `translate(-50%, -50%) rotate(${angle}rad) translateY(-200px)`;
+    this.bossIndicatorDist.style.transform = `translateX(-50%) rotate(${-angle}rad)`;
+    this.bossIndicatorDist.textContent = `${distance} mi`;
   }
 
   update(score, level, lives) {
