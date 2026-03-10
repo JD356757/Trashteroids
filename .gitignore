@@ -1,0 +1,35 @@
+# Node.js
+node_modules/
+
+# Vite / build output
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# dotenv
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs / editors
+.vscode/
+.idea/
+
+# npm
+package-lock.json
+
+# Misc caches
+.cache/
+*.tgz
+
+# temporary
+tmp/
+
+# local debug
+coverage/
