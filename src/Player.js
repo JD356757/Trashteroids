@@ -45,9 +45,8 @@ export class Player {
     this.pitchRate = 0;
     this.turnInputYaw = 0;
     this.turnInputPitch = 0;
-    this.yaw = 0;
-    this.pitch = 0;
-    this.maxPitch = Math.PI / 2 - 0.1;
+    // Orientation is stored in `baseQuaternion`. We no longer track
+    // Euler yaw/pitch angles so the ship can rotate freely in all axes.
 
     // Use a Group as the root so position/quaternion math works
     // even before the FBX finishes loading
@@ -156,21 +155,21 @@ export class Player {
     this.yawRate *= turnDecay;
     this.pitchRate *= turnDecay;
 
-    this.yawRate = THREE.MathUtils.clamp(this.yawRate, -this.maxTurnRate, this.maxTurnRate);
-    this.pitchRate = THREE.MathUtils.clamp(this.pitchRate, -this.maxTurnRate, this.maxTurnRate);
+    // Integrate angular velocities into the base quaternion by applying
+    // rotations around the ship's local axes. This makes turning operate in
+    // the ship's local frame (no global "up"), and removes angle clamps.
+    const yawAngle = this.yawRate * delta;
+    const pitchAngle = this.pitchRate * delta;
 
-    this.yaw += this.yawRate * delta;
-
-    const nextPitch = this.pitch + this.pitchRate * delta;
-    this.pitch = THREE.MathUtils.clamp(nextPitch, -this.maxPitch, this.maxPitch);
-    if (this.pitch !== nextPitch) {
-      this.pitchRate = 0;
+    if (yawAngle !== 0) {
+      _yawQ.setFromAxisAngle(_yAxis, yawAngle);
+      this.baseQuaternion.multiply(_yawQ);
     }
-
-    // Rebuild base quaternion from yaw (world Y) then pitch (local X)
-    _yawQ.setFromAxisAngle(_yAxis, this.yaw);
-    _pitchQ.setFromAxisAngle(_xAxis, this.pitch);
-    this.baseQuaternion.copy(_yawQ).multiply(_pitchQ);
+    if (pitchAngle !== 0) {
+      _pitchQ.setFromAxisAngle(_xAxis, pitchAngle);
+      this.baseQuaternion.multiply(_pitchQ);
+    }
+    this.baseQuaternion.normalize();
 
     // Framerate-independent drag: same decay per real second regardless of FPS
     this.velocity.multiplyScalar(Math.pow(this.dampening, delta * 60));

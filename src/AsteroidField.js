@@ -42,7 +42,7 @@ const COLLISION_PASSES = 2;
 
 // ─── Glow sprite ─────────────────────────────────────────────────────────────
 // How much larger than the asteroid's bounding sphere the glow halo is
-const GLOW_RADIUS_MULTIPLIER = 1.5;
+const GLOW_RADIUS_MULTIPLIER = 1.2;
 // Pulsing speed (radians/second) – set to 0 to disable pulse
 const GLOW_PULSE_SPEED = 1.2;
 // Pulse amplitude as a fraction of base scale (0 = no pulse, 0.15 = ±15%)
