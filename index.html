@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trashteroid</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <!-- HUD overlay -->
+  <div id="hud">
+    <div id="hud-score">SCORE: 0</div>
+    <div id="hud-level">LEVEL 1 — 15,000 mi</div>
+    <div id="hud-lives">LIVES: ♥♥♥</div>
+  </div>
+
+  <!-- Title / cutscene overlay -->
+  <div id="overlay">
+    <h1>TRASHTEROID</h1>
+    <p class="subtitle">YEAR 2167 — A colossal trash asteroid is on a collision course with Earth.</p>
+    <p class="subtitle">Pilot your spacecraft. Vaporize the waste. Save the planet.</p>
+    <button id="start-btn">START MISSION</button>
+    <p class="hint">Press <kbd>9</kbd> to skip cutscenes</p>
+  </div>
+
+  <!-- Boss health bar (hidden until Level 3) -->
+  <div id="boss-bar-container" class="hidden">
+    <div id="boss-bar-label">TRASHTEROID</div>
+    <div id="boss-bar-track"><div id="boss-bar-fill"></div></div>
+  </div>
+
+  <!-- Crosshair reticle (visible during gameplay) -->
+  <div id="crosshair" class="hidden">
+    <div class="crosshair-ring"></div>
+    <div class="crosshair-line crosshair-left"></div>
+    <div class="crosshair-line crosshair-right"></div>
+    <div class="crosshair-line crosshair-bottom"></div>
+    <div class="crosshair-dot"></div>
+  </div>
+
+  <canvas id="game-canvas"></canvas>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
