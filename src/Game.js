@@ -31,6 +31,7 @@ export class Game {
   constructor(canvas) {
     this.canvas = canvas;
     this.running = false;
+    this._elapsed = 0;
     this.score = 0;
     this.lives = 3;
     this.playerHitCooldown = 0;
@@ -56,7 +57,7 @@ export class Game {
 
     // Lighting — replace generic directional with a sun
     // AMBIENT_INTENSITY: controls overall scene brightness (0 = dark, 2 = bright)
-    const AMBIENT_INTENSITY = 0.4;
+    const AMBIENT_INTENSITY = 0.2;
     const ambient = new THREE.AmbientLight(0xffffff, AMBIENT_INTENSITY);
     this.scene.add(ambient);
 
@@ -66,11 +67,37 @@ export class Game {
     this.scene.add(this.sunLight);
 
     // Small visible sun sphere (emissive, no shadows needed)
-    const sunGeo = new THREE.SphereGeometry(100, 32, 32);
-    const sunMat = new THREE.MeshBasicMaterial({ color: 0xffee88, fog: false });
+    const sunGeo = new THREE.SphereGeometry(300, 32, 32);
+    const sunMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
     this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
     this.sunMesh.position.copy(this.sunLight.position);
     this.scene.add(this.sunMesh);
+
+    // Sun glow sprite — same radial-gradient technique as asteroid glows
+    const sunGlowCanvas = document.createElement('canvas');
+    sunGlowCanvas.width = sunGlowCanvas.height = 512;
+    const sgCtx = sunGlowCanvas.getContext('2d');
+    const sgHalf = 256;
+    const sgGrad = sgCtx.createRadialGradient(sgHalf, sgHalf, 0, sgHalf, sgHalf, sgHalf);
+    sgGrad.addColorStop(0, 'rgba(255, 248, 200, 0.95)');
+    sgGrad.addColorStop(0.18, 'rgba(255, 220, 100, 0.75)');
+    sgGrad.addColorStop(0.45, 'rgba(255, 160,  40, 0.35)');
+    sgGrad.addColorStop(0.72, 'rgba(220, 100,  20, 0.10)');
+    sgGrad.addColorStop(1, 'rgba(180,  60,   0, 0)');
+    sgCtx.fillStyle = sgGrad;
+    sgCtx.fillRect(0, 0, 512, 512);
+    const sunGlowTex = new THREE.CanvasTexture(sunGlowCanvas);
+    const sunGlowMat = new THREE.SpriteMaterial({
+      map: sunGlowTex,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      fog: false,
+    });
+    this.sunGlowSprite = new THREE.Sprite(sunGlowMat);
+    this.sunGlowSprite.scale.setScalar(700);  // base halo size
+    this.sunGlowSprite.position.copy(this.sunLight.position);
+    this.scene.add(this.sunGlowSprite);
 
     // Neon-style point lights for arcade feel
     const neonCyan = new THREE.PointLight(0x00ffff, 1.5, 60);
@@ -343,6 +370,7 @@ export class Game {
   }
 
   _updateBackground(delta) {
+    this._elapsed += delta;
     const camPos = this.camera.position;
 
     // Sun stays at fixed offset from camera — always in background
@@ -352,6 +380,13 @@ export class Game {
       camPos.z - 3000
     );
     this.sunMesh.position.copy(this.sunLight.position);
+
+    // Animate sun glow sprite — gentle pulse like asteroid glows
+    if (this.sunGlowSprite) {
+      this.sunGlowSprite.position.copy(this.sunLight.position);
+      const pulse = 1 + 0.08 * Math.sin(this._elapsed * 0.9);
+      this.sunGlowSprite.scale.setScalar(3000 * pulse);
+    }
 
     // Planet stays at fixed offset from camera — unreachable
     if (this.planet) {
@@ -370,9 +405,9 @@ export class Game {
 
     const diffuse = texLoader.load(texPath + 'Earth_Stylized.png');
     diffuse.colorSpace = THREE.SRGBColorSpace;
-    const normal  = texLoader.load(texPath + 'Earth_NormalNRM_6K.jpg');
-    const clouds  = texLoader.load(texPath + 'Earth_Clouds_6K.jpg');
-    const night   = texLoader.load(texPath + 'Earth_Illumination_6K.jpg');
+    const normal = texLoader.load(texPath + 'Earth_NormalNRM_6K.jpg');
+    const clouds = texLoader.load(texPath + 'Earth_Clouds_6K.jpg');
+    const night = texLoader.load(texPath + 'Earth_Illumination_6K.jpg');
 
     // Main planet sphere
     const planetGeo = new THREE.SphereGeometry(1600, 64, 64);

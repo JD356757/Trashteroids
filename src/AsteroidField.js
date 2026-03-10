@@ -28,8 +28,8 @@ const BIG_RATIO = 0.4;
 const SPAWN_RADIUS_MIN = 30;
 const SPAWN_RADIUS_MAX = 120;
 // Scale ranges per size class
-const BIG_SCALE_MIN   = 0.2;
-const BIG_SCALE_MAX   = 1;
+const BIG_SCALE_MIN = 0.2;
+const BIG_SCALE_MAX = 1;
 const SMALL_SCALE_MIN = 0.08;
 const SMALL_SCALE_MAX = 0.2;
 const BOUNDING_SPHERE_SCALE = 0.6;
@@ -40,14 +40,51 @@ const ASTEROID_DRAG = 0.995;
 const COLLISION_PASSES = 2;
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Glow sprite ─────────────────────────────────────────────────────────────
+// How much larger than the asteroid's bounding sphere the glow halo is
+const GLOW_RADIUS_MULTIPLIER = 1.5;
+// Pulsing speed (radians/second) – set to 0 to disable pulse
+const GLOW_PULSE_SPEED = 1.2;
+// Pulse amplitude as a fraction of base scale (0 = no pulse, 0.15 = ±15%)
+const GLOW_PULSE_AMPLITUDE = 0.15;
+// Glow brightness: 0.0 = invisible, 1.0 = full intensity
+const GLOW_BRIGHTNESS = 2;
+
+function makeGlowTexture(size = 256) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const half = size / 2;
+  const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+  const b = GLOW_BRIGHTNESS;
+  // Warm amber-white core fading to transparent orange edge
+  grad.addColorStop(0,    `rgba(255, 220, 140, ${0.55 * b})`);
+  grad.addColorStop(0.35, `rgba(220, 150,  60, ${0.22 * b})`);
+  grad.addColorStop(0.7,  `rgba(180, 100,  30, ${0.07 * b})`);
+  grad.addColorStop(1,    'rgba(160,  80,  20, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+
+const GLOW_TEXTURE  = makeGlowTexture();
+const GLOW_MATERIAL = new THREE.SpriteMaterial({
+  map: GLOW_TEXTURE,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true,
+  fog: false,
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 const BIG_FILES = [
-  'big1.fbx','big2.fbx','big3.fbx','big4.fbx','big5.fbx','big6.fbx','big7.fbx',
+  'big1.fbx', 'big2.fbx', 'big3.fbx', 'big4.fbx', 'big5.fbx', 'big6.fbx', 'big7.fbx',
 ];
 
 const SMALL_FILES = [
-  'rock.002.fbx','rock.003.fbx','rock.004.fbx','rock.005.fbx','rock.006.fbx',
-  'rock.013.fbx','rock.014.fbx','rock.015.fbx','rock.016.fbx','rock.017.fbx',
-  'rock.018.fbx','rock.019.fbx','rock.020.fbx','rock.021.fbx','rock.022.fbx',
+  'rock.002.fbx', 'rock.003.fbx', 'rock.004.fbx', 'rock.005.fbx', 'rock.006.fbx',
+  'rock.013.fbx', 'rock.014.fbx', 'rock.015.fbx', 'rock.016.fbx', 'rock.017.fbx',
+  'rock.018.fbx', 'rock.019.fbx', 'rock.020.fbx', 'rock.021.fbx', 'rock.022.fbx',
   'rock.023.fbx',
 ];
 
@@ -69,8 +106,8 @@ function applyMaterial(obj) {
 
 function randomOnSphere(rMin, rMax) {
   const theta = Math.random() * Math.PI * 2;
-  const phi   = Math.acos(2 * Math.random() - 1);
-  const r     = rMin + Math.random() * (rMax - rMin);
+  const phi = Math.acos(2 * Math.random() - 1);
+  const r = rMin + Math.random() * (rMax - rMin);
   return new THREE.Vector3(
     Math.sin(phi) * Math.cos(theta) * r,
     Math.sin(phi) * Math.sin(theta) * r,
@@ -87,14 +124,14 @@ export class AsteroidField {
     this.scene = scene;
     this.instances = [];
 
-    this._loadPool('/models/asteroid/big/',   BIG_FILES,   BIG_SCALE_MIN,   BIG_SCALE_MAX);
+    this._loadPool('/models/asteroid/big/', BIG_FILES, BIG_SCALE_MIN, BIG_SCALE_MAX);
     this._loadPool('/models/asteroid/small/', SMALL_FILES, SMALL_SCALE_MIN, SMALL_SCALE_MAX);
   }
 
   _loadPool(basePath, files, scaleMin, scaleMax) {
     const loader = new FBXLoader();
-    const isBig  = basePath.includes('/big/');
-    const bigCount   = Math.round(ASTEROID_COUNT * BIG_RATIO);
+    const isBig = basePath.includes('/big/');
+    const bigCount = Math.round(ASTEROID_COUNT * BIG_RATIO);
     const smallCount = ASTEROID_COUNT - bigCount;
     const count = isBig ? bigCount : smallCount;
 
@@ -142,6 +179,19 @@ export class AsteroidField {
             z: (Math.random() - 0.5) * 0.06,
           };
 
+          // ── Glow sprite (big asteroids only) ─────────────────────────────
+          let glowSprite = null;
+          if (isBig) {
+            glowSprite = new THREE.Sprite(GLOW_MATERIAL.clone());
+            const glowSize = colliderRadius * 2 * GLOW_RADIUS_MULTIPLIER;
+            glowSprite.scale.setScalar(glowSize);
+            glowSprite.position.copy(localCenter);
+            glowSprite.userData.glowBaseScale = glowSize;
+            glowSprite.userData.glowPhase = Math.random() * Math.PI * 2;
+            instance.add(glowSprite);
+          }
+          // ─────────────────────────────────────────────────────────────────
+
           instance.updateMatrixWorld(true);
           collider.center.copy(instance.localToWorld(_worldCenter.copy(localCenter)));
 
@@ -176,6 +226,16 @@ export class AsteroidField {
       ast.velocity.multiplyScalar(Math.pow(ASTEROID_DRAG, delta * 60));
       ast.mesh.updateMatrixWorld(true);
       ast.boundingSphere.center.copy(ast.mesh.localToWorld(_worldCenter.copy(ast.localCenter)));
+
+      // ── Animate glow pulse ───────────────────────────────────────────────
+      if (ast.glowSprite) {
+        const phase = ast.glowSprite.userData.glowPhase;
+        const baseSize = ast.glowSprite.userData.glowBaseScale;
+        const pulse = 1 + GLOW_PULSE_AMPLITUDE *
+          Math.sin(this._elapsed * GLOW_PULSE_SPEED + phase);
+        ast.glowSprite.scale.setScalar(baseSize * pulse);
+      }
+      // ────────────────────────────────────────────────────────────────────
     }
 
     for (let pass = 0; pass < COLLISION_PASSES; pass++) {
