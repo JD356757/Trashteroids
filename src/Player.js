@@ -23,7 +23,7 @@ export class Player {
     // Flight parameters
     this.thrustPower = 200;
     this.recoilAcceleration = 70;
-    this.mouseSensitivity = 0.0024;
+    this.mouseSensitivity = 0.024;
     this.turnAcceleration = 16.0;
     this.maxTurnRate = 2.9;
     this.turnDamping = 7.5;
