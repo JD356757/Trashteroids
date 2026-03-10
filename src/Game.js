@@ -8,6 +8,7 @@ import { HUD } from './HUD.js';
 import { Starfield } from './Starfield.js';
 import { AsteroidField } from './AsteroidField.js';
 
+
 // Reusable vectors for camera follow
 // Offset: higher + further back so ship sits in the lower portion of the screen
 const _camOffset = new THREE.Vector3(0, 2.2, 11);
