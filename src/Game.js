@@ -17,8 +17,15 @@ const _shipForward = new THREE.Vector3();
 const _segment = new THREE.Vector3();
 const _toCenter = new THREE.Vector3();
 const _closestPoint = new THREE.Vector3();
+const _collisionNormal = new THREE.Vector3();
+const _velocityNormal = new THREE.Vector3();
+const _velocityTangent = new THREE.Vector3();
 // Debug flag: when true the camera will not follow the ship (helps observe movement)
 const DEBUG_FREEZE_CAMERA = false;
+const PLAYER_COLLISION_RADIUS = 1.1;
+const ASTEROID_BOUNCE = 0.35;
+const ASTEROID_SURFACE_FRICTION = 0.92;
+const PLAYER_HIT_COOLDOWN = 1.0;
 
 export class Game {
   constructor(canvas) {
@@ -26,6 +33,7 @@ export class Game {
     this.running = false;
     this.score = 0;
     this.lives = 3;
+    this.playerHitCooldown = 0;
     this.clock = new THREE.Clock();
 
     // Camera follow smoothing (0–1, lower = more lag/visible movement)
@@ -107,6 +115,7 @@ export class Game {
     requestAnimationFrame(() => this._loop());
 
     const delta = this.clock.getDelta();
+    this.playerHitCooldown = Math.max(0, this.playerHitCooldown - delta);
 
     // Mouse → pitch / yaw
     const { dx, dy } = this.input.consumeMouseDelta();
@@ -120,7 +129,10 @@ export class Game {
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
     if (this.input.isDown(' ') || this.input.isDown('mouseleft')) {
       _shipForward.set(0, 0, -1).applyQuaternion(this.player.getQuaternion());
-      this.projectiles.fire(this.player.getPosition(), _shipForward, this.player.velocity);
+      const fired = this.projectiles.fire(this.player.getPosition(), _shipForward, this.player.velocity);
+      if (fired) {
+        this.player.applyRecoil(this.projectiles.cooldownTime);
+      }
     }
 
     // Update subsystems
@@ -130,6 +142,7 @@ export class Game {
     this.debris.update(delta, this.levels.getSpawnConfig(), playerPos);
     this.starfield.update(delta, this.camera);
     this.asteroidField.update(delta);
+    this._checkAsteroidPlayerCollisions();
 
     // Camera follows behind ship
     this._updateCamera();
@@ -186,11 +199,8 @@ export class Game {
 
       // Direct hit
       if (dist < 1.5) {
-        this.lives--;
+        this._damagePlayer();
         this.debris.remove(i);
-        if (this.lives <= 0) {
-          this._gameOver();
-        }
         continue;
       }
 
@@ -200,6 +210,54 @@ export class Game {
         this.debris.remove(i);
       }
     }
+  }
+
+  _checkAsteroidPlayerCollisions() {
+    const asteroids = this.asteroidField.getColliders();
+    const playerPos = this.player.mesh.position;
+
+    for (let i = 0; i < asteroids.length; i++) {
+      const sphere = asteroids[i].boundingSphere;
+      const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius;
+
+      _collisionNormal.copy(playerPos).sub(sphere.center);
+      const distanceSq = _collisionNormal.lengthSq();
+      if (distanceSq >= minDistance * minDistance) continue;
+
+      this._damagePlayer();
+      if (!this.running) return;
+
+      let distance = Math.sqrt(distanceSq);
+      if (distance === 0) {
+        _collisionNormal.set(0, 0, 1).applyQuaternion(this.player.mesh.quaternion);
+        distance = 1;
+      } else {
+        _collisionNormal.multiplyScalar(1 / distance);
+      }
+
+      playerPos.addScaledVector(_collisionNormal, minDistance - distance);
+
+      const normalSpeed = this.player.velocity.dot(_collisionNormal);
+      if (normalSpeed >= 0) continue;
+
+      _velocityNormal.copy(_collisionNormal).multiplyScalar(normalSpeed);
+      _velocityTangent.copy(this.player.velocity).sub(_velocityNormal).multiplyScalar(ASTEROID_SURFACE_FRICTION);
+      this.player.velocity.copy(_velocityTangent).addScaledVector(_collisionNormal, -normalSpeed * ASTEROID_BOUNCE);
+    }
+  }
+
+  _damagePlayer() {
+    if (this.playerHitCooldown > 0 || this.lives <= 0) {
+      return false;
+    }
+
+    this.lives--;
+    this.playerHitCooldown = PLAYER_HIT_COOLDOWN;
+    if (this.lives <= 0) {
+      this._gameOver();
+    }
+
+    return true;
   }
 
   _updateBoss(delta) {
@@ -298,7 +356,7 @@ export class Game {
     const texLoader = new THREE.TextureLoader();
     const texPath = '/textures/planet/';
 
-    const diffuse = texLoader.load(texPath + 'Earth_Diffuse_6K.jpg');
+    const diffuse = texLoader.load(texPath + 'Earth_Stylized.png');
     diffuse.colorSpace = THREE.SRGBColorSpace;
     const normal  = texLoader.load(texPath + 'Earth_NormalNRM_6K.jpg');
     const clouds  = texLoader.load(texPath + 'Earth_Clouds_6K.jpg');
@@ -309,8 +367,8 @@ export class Game {
     const planetMat = new THREE.MeshStandardMaterial({
       map: diffuse,
       normalMap: normal,
-      emissiveMap: night,
-      emissive: new THREE.Color(0.3, 0.3, 0.15),
+      // emissiveMap: night,
+      // emissive: new THREE.Color(0.3, 0.3, 0.15),
       roughness: 0.8,
       metalness: 0.1,
       fog: false,
