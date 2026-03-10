@@ -3,20 +3,19 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
 // ─── Tunable parameters ──────────────────────────────────────────────────────
 // Total number of asteroids placed in the scene
-const ASTEROID_COUNT = 25;
+const ASTEROID_COUNT = 1000;
 
 // 0.0 = all small, 1.0 = all big, 0.4 = 40% big / 60% small
 const BIG_RATIO = 0.4;
 
 // Placement shell (world units from origin)
-const SPAWN_RADIUS_MIN = 30;
-const SPAWN_RADIUS_MAX = 120;
-
+const SPAWN_RADIUS_MIN = 1000;
+const SPAWN_RADIUS_MAX = 50000;
 // Scale ranges per size class
-const BIG_SCALE_MIN   = 0.18;
-const BIG_SCALE_MAX   = 0.4;
-const SMALL_SCALE_MIN = 0.07;
-const SMALL_SCALE_MAX = 0.18;
+const BIG_SCALE_MIN   = 10;
+const BIG_SCALE_MAX   = 20;
+const SMALL_SCALE_MIN = 2.5;
+const SMALL_SCALE_MAX = 5;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BIG_FILES = [
