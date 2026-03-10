@@ -39,7 +39,8 @@ export class Game {
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x000011, 0.004);
+    this.scene.fog = new THREE.FogExp2(0x000011, 0.000001);
+    //change fog here 0 is no fog
 
     // Camera — extend far plane for distant planet
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 50000);
