@@ -129,6 +129,9 @@ export class Game {
 
     // Planet — large Earth in the background, unreachable
     this._loadPlanet();
+    
+    // Boss Mesh setup
+    this._initBossMesh();
 
     // Handle resize
     window.addEventListener('resize', () => this._onResize());
@@ -204,7 +207,10 @@ export class Game {
     this._checkDebrisPlayerCollisions();
 
     // Level progression
-    this.levels.update(this.score);
+    this.levels.update(this.score, playerPos);
+    
+    // Boss Indicator
+    this._updateBossIndicator();
 
     // Boss-specific logic
     if (this.levels.current === 3) {
@@ -315,18 +321,67 @@ export class Game {
     // Boss health bar shown in HUD
     this.hud.updateBossBar(this.levels.boss.health, this.levels.boss.maxHealth);
 
+    if (this.bossMesh) {
+      this.bossMesh.rotation.y += delta * 0.1;
+      this.bossMesh.rotation.x += delta * 0.05;
+    }
+
     // Check projectile hits on boss (distance-based)
     const projectiles = this.projectiles.getActive();
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
-      if (this._projectileHitsSphere(p, this.levels.boss.position, 8)) {
+      if (this._projectileHitsSphere(p, this.levels.boss.position, 200)) {
         this.levels.boss.health -= 10;
+        this._spawnSparks(p.position.clone(), { count: 30, ttl: 0.5 });
         this.projectiles.remove(i);
         if (this.levels.boss.health <= 0) {
+          if (this.bossMesh) this.bossMesh.visible = false;
+          this._spawnSparks(this.levels.boss.position, { count: 500, ttl: 3.0 });
           this._victory();
         }
       }
     }
+  }
+
+  _initBossMesh() {
+    const bossGeo = new THREE.IcosahedronGeometry(200, 2);
+    const bossMat = new THREE.MeshStandardMaterial({
+      color: 0x444455,
+      roughness: 0.9,
+      metalness: 0.3,
+      flatShading: true
+    });
+    this.bossMesh = new THREE.Mesh(bossGeo, bossMat);
+    this.bossMesh.position.copy(this.levels.bossWorldPosition);
+    this.scene.add(this.bossMesh);
+    
+    const bossLight = new THREE.PointLight(0xff4400, 2, 800);
+    this.bossMesh.add(bossLight);
+  }
+
+  _updateBossIndicator() {
+    if (!this.levels.bossWorldPosition) return;
+
+    if (this.levels.current === 3) {
+      this.hud.updateBossIndicator(false, 0, 0);
+      return;
+    }
+
+    const bossPos = this.levels.bossWorldPosition;
+    const playerPos = this.player.getPosition();
+    const dist = playerPos.distanceTo(bossPos);
+
+    const projected = bossPos.clone().project(this.camera);
+    let dx = projected.x;
+    let dy = -projected.y;
+    
+    if (projected.z > 1) {
+      dx = -dx;
+      dy = -dy;
+    }
+    
+    const angle = Math.atan2(dx, -dy);
+    this.hud.updateBossIndicator(true, angle, Math.floor(dist));
   }
 
   _gameOver() {

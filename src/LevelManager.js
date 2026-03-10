@@ -48,6 +48,8 @@ export class LevelManager {
   constructor() {
     this.current = 1;
     this.boss = null;
+    this.bossWorldPosition = new THREE.Vector3(0, 0, -2000); // Boss is far away
+    this.bossZoneRadiusSq = 1000 * 1000;
   }
 
   setLevel(n) {
@@ -65,19 +67,21 @@ export class LevelManager {
     return LEVEL_CONFIGS[this.current].label;
   }
 
-  update(score) {
-    if (this.current === 1 && score >= LEVEL_CONFIGS[2].scoreThreshold) {
-      this.setLevel(2);
-    } else if (this.current === 2 && score >= LEVEL_CONFIGS[3].scoreThreshold) {
-      this.setLevel(3);
+  update(score, playerPos) {
+    if (!playerPos) return;
+    const distSq = playerPos.distanceToSquared(this.bossWorldPosition);
+    if (distSq < this.bossZoneRadiusSq) {
+      if (this.current !== 3) this.setLevel(3);
+    } else if (distSq < 6000 * 6000) {
+      if (this.current !== 2 && this.current !== 3) this.setLevel(2);
     }
   }
 
   _initBoss() {
     this.boss = {
-      health: 500,
-      maxHealth: 500,
-      position: new THREE.Vector3(0, 2, -70),
+      health: 800,
+      maxHealth: 800,
+      position: this.bossWorldPosition.clone(),
     };
   }
 }
