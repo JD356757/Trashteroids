@@ -118,6 +118,12 @@ export class Game {
     this.hud = new HUD();
     this.starfield = new Starfield(this.scene);
 
+    // Effects: transient particle systems and screen-space popups
+    this._effectGroup = new THREE.Group();
+    this.scene.add(this._effectGroup);
+    this._sparks = [];
+    this._popups = [];
+
     // Large decorative asteroid field around the player zone
     this.asteroidField = new AsteroidField(this.scene);
 
@@ -174,6 +180,8 @@ export class Game {
     const playerPos = this.player.getPosition();
     this.debris.update(delta, this.levels.getSpawnConfig(), playerPos);
     this.asteroidField.update(delta);
+    // Check projectile collisions against asteroids (sparks)
+    this._checkProjectileAsteroidCollisions();
     this._checkAsteroidPlayerCollisions();
 
     // Camera follows behind ship (updated before rendering)
@@ -185,6 +193,9 @@ export class Game {
     // Starfield should be centered after the camera has moved to avoid
     // one-frame parallax/zoom artifacts when the camera follows the ship.
     this.starfield.update(delta, this.camera);
+
+    // Update transient effects (particles + screen popups)
+    this._updateEffects(delta);
 
     // Collision: projectiles vs debris
     this._checkProjectileDebrisCollisions();
@@ -213,7 +224,10 @@ export class Game {
       for (let j = debrisList.length - 1; j >= 0; j--) {
         const hitRadius = debrisList[j].hitRadius || 1.0;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
-          this.score += debrisList[j].points || 100;
+          const points = debrisList[j].points || 100;
+          this.score += points;
+          this._spawnSparks(_closestPoint.clone(), { count: 80, ttl: 0.9 });
+          this._spawnScorePopup(_closestPoint.clone(), points);
           this.projectiles.remove(i);
           this.debris.remove(j);
           break;
@@ -367,6 +381,119 @@ export class Game {
     const t = THREE.MathUtils.clamp(_toCenter.dot(_segment) / segmentLengthSq, 0, 1);
     _closestPoint.copy(start).addScaledVector(_segment, t);
     return _closestPoint.distanceTo(center) <= radius;
+  }
+
+  // Projectile vs asteroid collisions: spawn sparks at hit point
+  _checkProjectileAsteroidCollisions() {
+    const projectiles = this.projectiles.getActive();
+    const asteroids = this.asteroidField.getColliders();
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      for (let j = 0; j < asteroids.length; j++) {
+        const sphere = asteroids[j].boundingSphere;
+        if (this._projectileHitsSphere(projectiles[i], sphere.center, sphere.radius)) {
+          // _closestPoint was computed by _projectileHitsSphere
+          this._spawnSparks(_closestPoint.clone());
+          // NOTE: do NOT modify asteroid velocity from projectile hits;
+          // bullets are cosmetic and should not push asteroids.
+          this.projectiles.remove(i);
+          break;
+        }
+      }
+    }
+  }
+
+  // Spawn a short-lived spark particle burst at world `pos`.
+  _spawnSparks(pos, options = {}) {
+    const count = options.count || 40;
+    const positions = new Float32Array(count * 3);
+    const velocities = new Array(count);
+    for (let k = 0; k < count; k++) {
+      positions[k * 3] = pos.x;
+      positions[k * 3 + 1] = pos.y;
+      positions[k * 3 + 2] = pos.z;
+      const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).normalize();
+      velocities[k] = dir.multiplyScalar(18 * (0.5 + Math.random()));
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({ color: 0xffcc66, size: 0.6, sizeAttenuation: true, depthWrite: false });
+    const points = new THREE.Points(geom, mat);
+    this._effectGroup.add(points);
+
+    this._sparks.push({ mesh: points, velocities, life: 0, ttl: options.ttl || 0.75 });
+  }
+
+  // Spawn a small screen-space score popup at world `pos` with +amount.
+  _spawnScorePopup(pos, amount) {
+    const el = document.createElement('div');
+    el.textContent = `+${amount}`;
+    Object.assign(el.style, {
+      position: 'absolute',
+      left: '0px',
+      top: '0px',
+      color: '#ffd966',
+      fontWeight: '700',
+      pointerEvents: 'none',
+      transform: 'translate(-50%, -50%)',
+      textShadow: '0 1px 0 #000, 0 2px 6px rgba(0,0,0,0.6)',
+      willChange: 'transform, opacity'
+    });
+    document.body.appendChild(el);
+    this._popups.push({ el, worldPos: pos.clone(), life: 0, ttl: 1.0, startY: 0 });
+  }
+
+  _updateEffects(delta) {
+    // Update sparks
+    for (let i = this._sparks.length - 1; i >= 0; i--) {
+      const p = this._sparks[i];
+      p.life += delta;
+      const posAttr = p.mesh.geometry.getAttribute('position');
+      for (let k = 0; k < p.velocities.length; k++) {
+        const vx = p.velocities[k].x * delta;
+        const vy = p.velocities[k].y * delta;
+        const vz = p.velocities[k].z * delta;
+        posAttr.array[k * 3] += vx;
+        posAttr.array[k * 3 + 1] += vy;
+        posAttr.array[k * 3 + 2] += vz;
+        // apply damping
+        p.velocities[k].multiplyScalar(Math.pow(0.2, delta * 60));
+      }
+      posAttr.needsUpdate = true;
+
+      // fade out material
+      p.mesh.material.opacity = Math.max(0, 1 - p.life / p.ttl);
+      p.mesh.material.transparent = true;
+
+      if (p.life >= p.ttl) {
+        this._effectGroup.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        p.mesh.material.dispose();
+        this._sparks.splice(i, 1);
+      }
+    }
+
+    // Update screen popups
+    for (let i = this._popups.length - 1; i >= 0; i--) {
+      const pop = this._popups[i];
+      pop.life += delta;
+      const t = pop.life / pop.ttl;
+      // Project world pos to screen
+      const vec = pop.worldPos.clone().project(this.camera);
+      const halfW = this.renderer.domElement.clientWidth / 2;
+      const halfH = this.renderer.domElement.clientHeight / 2;
+      const x = (vec.x * halfW) + halfW + this.renderer.domElement.getBoundingClientRect().left;
+      const y = (-vec.y * halfH) + halfH + this.renderer.domElement.getBoundingClientRect().top;
+      pop.el.style.left = `${x}px`;
+      pop.el.style.top = `${y - t * 40}px`;
+      pop.el.style.opacity = `${Math.max(0, 1 - t)}`;
+
+      if (pop.life >= pop.ttl) {
+        pop.el.remove();
+        this._popups.splice(i, 1);
+      }
+    }
   }
 
   _updateBackground(delta) {
