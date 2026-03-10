@@ -127,6 +127,12 @@ export class Game {
       this.player.thrust(delta);
     }
 
+    // A / D → manual roll
+    let rollInput = 0;
+    if (this.input.isDown('a')) rollInput += 1;   // roll left
+    if (this.input.isDown('d')) rollInput -= 1;   // roll right
+    this.player.manualRollInput = rollInput;
+
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
     if (this.input.isDown(' ') || this.input.isDown('mouseleft')) {
       _shipForward.set(0, 0, -1).applyQuaternion(this.player.getQuaternion());
