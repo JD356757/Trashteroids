@@ -9,6 +9,7 @@ const _xAxis = new THREE.Vector3(1, 0, 0);
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
 const _localUp = new THREE.Vector3();
+const _particleColor = new THREE.Color();
 
 
 
@@ -43,6 +44,7 @@ export class Player {
     this.turnInputYaw = 0;
     this.turnInputPitch = 0;
     this.flashTimer = 0;
+    this.thrustActive = false;
     // Orientation is stored in `baseQuaternion`. We no longer track
     // Euler yaw/pitch angles so the ship can rotate freely in all axes.
 
@@ -56,56 +58,24 @@ export class Player {
     this.thrusterOffsetLeft = new THREE.Vector3(-2.55, 0, 1.6);
     this.thrusterOffsetRight = new THREE.Vector3(2.55, 0, 1.6);
 
-    this.engineGlows = [];
-
     this.shipLight = new THREE.PointLight(0xffd7a8, 1000, 4000, 0.2);
     this.shipLight.position.set(0, 0, 0);
     this.mesh.add(this.shipLight);
 
-    const createThruster = (offset) => {
-      const group = new THREE.Group();
-      group.position.copy(offset);
-
-      // Bright inner core
-      const coreGeo = new THREE.SphereGeometry(.1, 8, 8);
-      const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      const core = new THREE.Mesh(coreGeo, coreMat);
-
-      // Green neon halo
-      const haloGeo = new THREE.SphereGeometry(0.3, 12, 12);
-      const haloMat = new THREE.MeshBasicMaterial({
-        color: 0xFFC067,
-        transparent: true,
-        opacity: 0.3,
-        blending: THREE.AdditiveBlending
-      });
-      const halo = new THREE.Mesh(haloGeo, haloMat);
-
-      group.add(core);
-      group.add(halo);
-      this.mesh.add(group);
-      this.engineGlows.push(group);
-    };
-
-    createThruster(this.thrusterOffsetLeft);
-    createThruster(this.thrusterOffsetRight);
-
     // Particle exhaust emitter setup (replaces simple cone exhaust)
     this.thrustLevel = 0; // 0..1
 
-    // Emitter settings (mapped from user-provided settings)
+    // Nitro-style flame plume with a bright core and wider ember trail.
     this._emitterSettings = {
-      positionBase: new THREE.Vector3(0, 0, 2),
-      positionSpread: new THREE.Vector3(0.1, 0.1, 0.1),
-      velocityBase: new THREE.Vector3(10, 0, 0),
-      velocitySpread: new THREE.Vector3(5, 5, 5),
-      sizeBase: 2.0,
-      sizeSpread: 1.0,
-      colorBaseHSL: new THREE.Vector3(0.05, 1.0, 0.8),
-      colorSpreadHSL: new THREE.Vector3(0.1, 0.0, 0.3),
-      opacityBase: 1,
-      particlesPerSecond: 500,
-      particleDeathAge: 4.0,
+      positionBase: new THREE.Vector3(0, 0, -0.75),
+      positionSpread: new THREE.Vector3(0.06, 0.06, 0.14),
+      velocityBase: new THREE.Vector3(0, 0, 82),
+      velocitySpread: new THREE.Vector3(8, 8, 26),
+      sizeBase: 0.5,
+      sizeSpread: 1.5,
+      opacityBase: 2,
+      particlesPerSecond: 1800,
+      particleDeathAge: 0.42,
     };
 
     // Particle pool
@@ -113,6 +83,7 @@ export class Player {
     this._particleIndex = 0;
     this._particlePositions = new Float32Array(this._particlePoolSize * 3);
     this._particleVel = new Float32Array(this._particlePoolSize * 3);
+    this._particleColors = new Float32Array(this._particlePoolSize * 3);
     this._particleSizes = new Float32Array(this._particlePoolSize);
     this._particleAlphas = new Float32Array(this._particlePoolSize);
     this._particleAges = new Float32Array(this._particlePoolSize);
@@ -120,6 +91,7 @@ export class Player {
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(this._particlePositions, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(this._particleColors, 3));
     geom.setAttribute('size', new THREE.BufferAttribute(this._particleSizes, 1));
     geom.setAttribute('alpha', new THREE.BufferAttribute(this._particleAlphas, 1));
 
@@ -129,13 +101,14 @@ export class Player {
     const mat = new THREE.ShaderMaterial({
       uniforms: { map: { value: sprite } },
       vertexShader: `
+        attribute vec3 color;
         attribute float size;
         attribute float alpha;
         varying float vAlpha;
-        varying vec2 vUv;
+        varying vec3 vColor;
         void main() {
           vAlpha = alpha;
-          vUv = vec2(0.0);
+          vColor = color;
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
           gl_PointSize = size * (300.0 / -mvPosition.z);
           gl_Position = projectionMatrix * mvPosition;
@@ -144,9 +117,10 @@ export class Player {
       fragmentShader: `
         uniform sampler2D map;
         varying float vAlpha;
+        varying vec3 vColor;
         void main() {
           vec4 t = texture2D(map, gl_PointCoord);
-          gl_FragColor = vec4(t.rgb, t.a * vAlpha);
+          gl_FragColor = vec4(t.rgb * vColor, t.a * vAlpha);
         }
       `,
       transparent: true,
@@ -235,6 +209,7 @@ export class Player {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
     this.velocity.addScaledVector(_forward, this.thrustPower * delta);
     // mark thrust active for exhaust visuals
+    this.thrustActive = true;
     this.thrustLevel = 1.0;
   }
 
@@ -309,66 +284,70 @@ export class Player {
       this.yawRate += Math.sin(this.currentRoll) * this.rollYawCoupling * delta;
     }
 
-    // Engine glow pulsing with a slight stretch for a flame effect
-    const scale = 0.8 + Math.sin(Date.now() * 0.008) * 0.2;
-    this.engineGlows.forEach(glow => {
-      glow.scale.set(scale, scale, scale * 1.5);
-    });
-    this.shipLight.intensity = 28 + Math.sin(Date.now() * 0.008) * 3;
-
     // Particle emitter update
     if (this._particlePoints) {
-      // decay thrust level when not actively thrusting
-      this.thrustLevel = Math.max(0, this.thrustLevel - delta * 2.5);
+      const flameLevel = this.thrustActive ? this.thrustLevel : 0;
 
       const s = this._emitterSettings;
-      const spawnRate = s.particlesPerSecond * this.thrustLevel;
+      const spawnRate = s.particlesPerSecond * flameLevel;
       this._spawnAccumulator += spawnRate * delta;
       const spawnCount = Math.floor(this._spawnAccumulator);
       this._spawnAccumulator -= spawnCount;
+      this.shipLight.intensity = 12 + flameLevel * 36 + Math.sin(Date.now() * 0.016) * 4 * flameLevel;
 
-      // spawn from both thruster offsets
-      for (let i = 0; i < spawnCount; i++) {
-        const emitterOffset = (i % 2 === 0) ? this.thrusterOffsetLeft : this.thrusterOffsetRight;
-        const basePos = emitterOffset.clone().add(s.positionBase);
-        // random spread
-        basePos.x += (Math.random() * 2 - 1) * s.positionSpread.x;
-        basePos.y += (Math.random() * 2 - 1) * s.positionSpread.y;
-        basePos.z += (Math.random() * 2 - 1) * s.positionSpread.z;
-        // transform to world
-        const worldPos = this.mesh.localToWorld(basePos.clone());
+      if (!this.thrustActive) {
+        this._spawnAccumulator = 0;
+        this._particleLives.fill(0);
+        this._particleAlphas.fill(0);
+      }
 
-        const velLocal = new THREE.Vector3(
-          s.velocityBase.x + (Math.random() * 2 - 1) * s.velocitySpread.x,
-          s.velocityBase.y + (Math.random() * 2 - 1) * s.velocitySpread.y,
-          s.velocityBase.z + (Math.random() * 2 - 1) * s.velocitySpread.z
-        );
-        // rotate velocity by ship orientation
-        const worldVel = velLocal.applyQuaternion(this.mesh.quaternion);
-        // Add ship's current velocity so particles inherit ship motion
-        worldVel.x += this.velocity.x;
-        worldVel.y += this.velocity.y;
-        worldVel.z += this.velocity.z;
+      const emitters = [this.thrusterOffsetLeft, this.thrusterOffsetRight];
+      const spawnPerThruster = Math.max(1, Math.ceil(spawnCount / emitters.length));
 
-        const idx = this._particleIndex % this._particlePoolSize;
-        this._particleIndex++;
+      // Spawn in ship-local space so both boost plumes stay locked to the hull.
+      for (const emitterOffset of emitters) {
+        for (let i = 0; i < spawnPerThruster; i++) {
+          const basePos = emitterOffset.clone().add(s.positionBase);
+          basePos.x += (Math.random() * 2 - 1) * s.positionSpread.x;
+          basePos.y += (Math.random() * 2 - 1) * s.positionSpread.y;
+          basePos.z += (Math.random() * 2 - 1) * s.positionSpread.z;
 
-        // set position
-        this._particlePositions[idx * 3 + 0] = worldPos.x;
-        this._particlePositions[idx * 3 + 1] = worldPos.y;
-        this._particlePositions[idx * 3 + 2] = worldPos.z;
-        // set velocity
-        this._particleVel[idx * 3 + 0] = worldVel.x;
-        this._particleVel[idx * 3 + 1] = worldVel.y;
-        this._particleVel[idx * 3 + 2] = worldVel.z;
+          const velLocal = new THREE.Vector3(
+            s.velocityBase.x + (Math.random() * 2 - 1) * s.velocitySpread.x,
+            s.velocityBase.y + (Math.random() * 2 - 1) * s.velocitySpread.y,
+            s.velocityBase.z + (Math.random() * 2 - 1) * s.velocitySpread.z
+          );
+          const plumeTightness = 1 - flameLevel * 0.35;
+          velLocal.x *= plumeTightness;
+          velLocal.y *= plumeTightness;
 
-        // size
-        this._particleSizes[idx] = s.sizeBase + (Math.random() * 2 - 1) * s.sizeSpread;
-        // age/life
-        this._particleAges[idx] = 0;
-        this._particleLives[idx] = s.particleDeathAge;
-        // alpha initial
-        this._particleAlphas[idx] = s.opacityBase;
+          const idx = this._particleIndex % this._particlePoolSize;
+          this._particleIndex++;
+
+          this._particlePositions[idx * 3 + 0] = basePos.x;
+          this._particlePositions[idx * 3 + 1] = basePos.y;
+          this._particlePositions[idx * 3 + 2] = basePos.z;
+          this._particleVel[idx * 3 + 0] = velLocal.x;
+          this._particleVel[idx * 3 + 1] = velLocal.y;
+          this._particleVel[idx * 3 + 2] = velLocal.z;
+
+          this._particleSizes[idx] = (s.sizeBase + (Math.random() * 2 - 1) * s.sizeSpread) * (0.75 + flameLevel * 0.5);
+          this._particleAges[idx] = 0;
+          this._particleLives[idx] = s.particleDeathAge * (0.85 + flameLevel * 0.35);
+          this._particleAlphas[idx] = s.opacityBase * (0.8 + flameLevel * 0.2);
+
+          const heat = Math.random();
+          if (heat > 0.72) {
+            _particleColor.setRGB(0.45, 0.75, 1.0);
+          } else if (heat > 0.3) {
+            _particleColor.setRGB(1.0, 0.62 + Math.random() * 0.18, 0.14);
+          } else {
+            _particleColor.setRGB(1.0, 0.94, 0.72);
+          }
+          this._particleColors[idx * 3 + 0] = _particleColor.r;
+          this._particleColors[idx * 3 + 1] = _particleColor.g;
+          this._particleColors[idx * 3 + 2] = _particleColor.b;
+        }
       }
 
       // update all particles
@@ -387,15 +366,21 @@ export class Player {
         this._particlePositions[p * 3 + 0] += this._particleVel[p * 3 + 0] * delta;
         this._particlePositions[p * 3 + 1] += this._particleVel[p * 3 + 1] * delta;
         this._particlePositions[p * 3 + 2] += this._particleVel[p * 3 + 2] * delta;
+        this._particleVel[p * 3 + 0] *= 0.985;
+        this._particleVel[p * 3 + 1] *= 0.985;
+        this._particleVel[p * 3 + 2] *= 0.94;
 
-        // fade alpha over life
-        const a = 1.0 - age / life;
-        this._particleAlphas[p] = a * s.opacityBase;
+        const t = age / life;
+        const alphaEnvelope = Math.sin(Math.PI * Math.min(1, t)) * (1 - t * 0.35);
+        this._particleAlphas[p] = alphaEnvelope * s.opacityBase;
+        this._particleSizes[p] *= 0.985 + t * 0.025;
       }
 
       // push buffers to GPU
       const posAttr = this._particlePoints.geometry.attributes.position;
       posAttr.needsUpdate = true;
+      const colorAttr = this._particlePoints.geometry.attributes.color;
+      colorAttr.needsUpdate = true;
       const sizeAttr = this._particlePoints.geometry.attributes.size;
       sizeAttr.array.set(this._particleSizes);
       sizeAttr.needsUpdate = true;
@@ -429,6 +414,8 @@ export class Player {
     }
 
     // Mouse intent only applies for the current frame.
+    this.thrustActive = false;
+    this.thrustLevel = 0;
     this.turnInputYaw = 0;
     this.turnInputPitch = 0;
   }
