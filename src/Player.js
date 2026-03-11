@@ -15,7 +15,7 @@ const _localUp = new THREE.Vector3();
 export class Player {
   constructor(scene) {
     // Flight parameters
-    this.thrustPower = 600;
+    this.thrustPower = 1000;
     this.recoilAcceleration = 70;
     this.mouseSensitivity = 0.024;
     this.turnAcceleration = 16.0;
@@ -23,10 +23,10 @@ export class Player {
     this.turnDamping = 7.5;
     this.rollOnYaw = -0.4;           // cosmetic roll from turning (subtle)
     this.rollReturnSpeed = 3.0;
-    this.pitchOnPitch = 0.18;       // cosmetic pitch from pitch input (subtle)
+    this.pitchOnPitch = 0.3;       // cosmetic pitch from pitch input (subtle)
     this.dampening = 0.98;
     this.manualRollSpeed = 3.0;     // how fast A/D rolls the ship
-    this.maxRoll = Math.PI / 4;     // ~25 degrees max roll either way
+    this.maxRoll = Math.PI / 3;     // ~25 degrees max roll either way
     this.rollLiftPower = 180;       // lift force when rolled (swoop strength)
     this.rollYawCoupling = 1;     // how much roll induces yaw (banking turn)
 
