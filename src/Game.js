@@ -496,6 +496,16 @@ export class Game {
     _shipForward.set(0, 0, -1).applyQuaternion(shipQuat);
     _camLookTarget.copy(this.camera.position).addScaledVector(_shipForward, 200);
     this.camera.lookAt(_camLookTarget);
+
+    // Speed-responsive FOV: widen as the ship goes faster
+    const speed = this.player.velocity.length();
+    const fovMin = 60;
+    const fovMax = 90;
+    const speedForMaxFov = 600; // tune: speed at which FOV fully maxes out
+    const t = Math.min(speed / speedForMaxFov, 1);
+    const targetFov = fovMin + (fovMax - fovMin) * t;
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-3 * delta));
+    this.camera.updateProjectionMatrix();
   }
 
   _projectileHitsSphere(projectile, center, radius) {
