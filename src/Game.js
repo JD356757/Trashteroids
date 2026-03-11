@@ -46,6 +46,9 @@ export class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000011);
+    // Enable shadows
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Scene
     this.scene = new THREE.Scene();
@@ -62,9 +65,23 @@ export class Game {
     const ambient = new THREE.AmbientLight(0xffffff, AMBIENT_INTENSITY);
     this.scene.add(ambient);
 
+    // Subtle hemisphere fill to give shadowed sides some color/blend
+    const hemi = new THREE.HemisphereLight(0x666688, 0x111122, 0.12);
+    this.scene.add(hemi);
+
     // Sun — a warm directional light from far away, locked in the background
-    this.sunLight = new THREE.DirectionalLight(0xfff5e0, 10);
+    this.sunLight = new THREE.DirectionalLight(0xfff5e0, 2);
     this.sunLight.position.set(2000, 1000, -3000);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.set(2048, 2048);
+    this.sunLight.shadow.camera.near = 0.5;
+    this.sunLight.shadow.camera.far = 20000;
+    const d = 4000;
+    this.sunLight.shadow.camera.left = -d;
+    this.sunLight.shadow.camera.right = d;
+    this.sunLight.shadow.camera.top = d;
+    this.sunLight.shadow.camera.bottom = -d;
+    this.sunLight.shadow.bias = -0.0001;
     this.scene.add(this.sunLight);
 
     // Small visible sun sphere (emissive, no shadows needed)
@@ -279,7 +296,7 @@ export class Game {
 
     for (let i = 0; i < asteroids.length; i++) {
       const sphere = asteroids[i].boundingSphere;
-      const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius;
+      const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius * 0.8;
 
       _collisionNormal.copy(playerPos).sub(sphere.center);
       const distanceSq = _collisionNormal.lengthSq();
