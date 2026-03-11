@@ -15,7 +15,7 @@ const _localUp = new THREE.Vector3();
 export class Player {
   constructor(scene) {
     // Flight parameters
-    this.thrustPower = 400;
+    this.thrustPower = 900;
     this.recoilAcceleration = 70;
     this.mouseSensitivity = 0.024;
     this.turnAcceleration = 16.0;
