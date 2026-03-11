@@ -63,7 +63,7 @@ export class HUD {
 
     // Draw Asteroids
     if (asteroids && playerPos && camInvQuat) {
-      ctx.fillStyle = 'rgba(255, 167, 4, 0.6)';
+      ctx.fillStyle = '#b19bb3';
       for (let i = 0; i < asteroids.length; i++) {
         const ast = asteroids[i];
         _v.copy(ast.boundingSphere.center).sub(playerPos);
