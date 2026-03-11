@@ -674,19 +674,12 @@ export class Game {
 
     const diffuse = texLoader.load(texPath + 'Earth_Stylized.png');
     diffuse.colorSpace = THREE.SRGBColorSpace;
-    const normal = texLoader.load(texPath + 'Earth_NormalNRM_6K.jpg');
     const clouds = texLoader.load(texPath + 'Earth_Clouds_6K.jpg');
-    const night = texLoader.load(texPath + 'Earth_Illumination_6K.jpg');
 
     // Main planet sphere
     const planetGeo = new THREE.SphereGeometry(1600, 64, 64);
-    const planetMat = new THREE.MeshStandardMaterial({
+    const planetMat = new THREE.MeshBasicMaterial({
       map: diffuse,
-      normalMap: normal,
-      // emissiveMap: night,
-      // emissive: new THREE.Color(0.3, 0.3, 0.15),
-      roughness: 0.8,
-      metalness: 0.1,
       fog: false,
     });
     this.planet = new THREE.Mesh(planetGeo, planetMat);
@@ -695,7 +688,7 @@ export class Game {
 
     // Cloud layer — slightly larger, transparent sphere
     const cloudGeo = new THREE.SphereGeometry(805, 64, 64);
-    const cloudMat = new THREE.MeshStandardMaterial({
+    const cloudMat = new THREE.MeshBasicMaterial({
       alphaMap: clouds,
       transparent: true,
       opacity: 0.4,
