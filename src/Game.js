@@ -29,13 +29,14 @@ const ASTEROID_SURFACE_FRICTION = 0.92;
 const PLAYER_HIT_COOLDOWN = 1.0;
 
 export class Game {
-  constructor(canvas) {
+  constructor(canvas, startLevel = 1) {
     this.canvas = canvas;
     this.running = false;
     this._elapsed = 0;
     this.score = 0;
     this.lives = 100;
     this.playerHitCooldown = 0;
+    this._startLevel = startLevel;
     this.clock = new THREE.Clock();
 
     // Camera follow smoothing: use a framerate-independent follow speed (higher = tighter)
@@ -159,7 +160,7 @@ export class Game {
     if (this.running) return;
     this.running = true;
     this.clock.start();
-    this.levels.setLevel(1);
+    this.levels.setLevel(this._startLevel);
     this.hud.update(this.score, this.levels.current, this.lives);
     this._loop();
   }
@@ -501,7 +502,7 @@ export class Game {
     const speed = this.player.velocity.length();
     const fovMin = 60;
     const fovMax = 90;
-    const speedForMaxFov = 600; // tune: speed at which FOV fully maxes out
+    const speedForMaxFov = 400; // tune: speed at which FOV fully maxes out
     const t = Math.min(speed / speedForMaxFov, 1);
     const targetFov = fovMin + (fovMax - fovMin) * t;
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-3 * delta));
@@ -521,7 +522,7 @@ export class Game {
 
     _toCenter.copy(center).sub(start);
     const t = THREE.MathUtils.clamp(_toCenter.dot(_segment) / segmentLengthSq, 0, 1);
-    _closestPoint.copy(start).addScaledVector(_segment, t);
+    _closestPoint.copy(start).addScaledVector(_segment, t); 
     return _closestPoint.distanceTo(center) <= radius;
   }
 
