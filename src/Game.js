@@ -172,7 +172,7 @@ export class Game {
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
     if (this.input.isDown(' ') || this.input.isDown('mouseleft')) {
       _shipForward.set(0, 0, -1).applyQuaternion(this.player.getQuaternion());
-      const fired = this.projectiles.fire(this.player.getPosition(), _shipForward, this.player.velocity);
+      const fired = this.projectiles.fire(this.player.getPosition(), _shipForward, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
         this.player.applyRecoil(this.projectiles.cooldownTime);
       }
