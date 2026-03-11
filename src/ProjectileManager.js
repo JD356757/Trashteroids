@@ -8,7 +8,7 @@ export class ProjectileManager {
     this.scene = scene;
     this.active = [];    // { mesh, direction, position (ref) }
     this.speed = 540;     // units per second along direction
-    this.maxDist = 320;  // despawn after this travel distance
+    this.maxDist = 520;  // despawn after this travel distance
     this.cooldown = 0;
     this.cooldownTime = 0.08; // seconds between shots (rapid-fire)
   }
