@@ -13,7 +13,7 @@ export class ProjectileManager {
     this.cooldownTime = 0.08; // seconds between shots (rapid-fire)
   }
 
-  fire(origin, direction, playerVelocity) {
+  fire(origin, direction, playerVelocity, playerQuat) {
     if (this.cooldown > 0) return false;
     this.cooldown = this.cooldownTime;
 
@@ -22,37 +22,57 @@ export class ProjectileManager {
     const vel = dir.clone().multiplyScalar(this.speed);
     if (playerVelocity) vel.add(playerVelocity);
 
-    // Beam core
+    // Determine lateral right vector for dual-shot offsets.
+    // Prefer the ship's local right (includes roll) if available, otherwise
+    // fall back to cross(dir, worldUp).
+    const right = new THREE.Vector3();
+    if (playerQuat) {
+      right.set(1, 0, 0).applyQuaternion(playerQuat).normalize();
+    } else {
+      const up = new THREE.Vector3(0, 1, 0);
+      right.crossVectors(dir, up);
+      if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+      right.normalize();
+    }
+
+    const lateralOffset = 0.28; // how far apart the two bullets spawn
+
+    // Reusable geometries/materials per-shot (small, cheap)
     const coreGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.0, 6);
     coreGeo.rotateX(Math.PI / 2);
     const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
-    const core = new THREE.Mesh(coreGeo, coreMat);
 
-    // Glow shell
     const glowGeo = new THREE.CylinderGeometry(0.18, 0.18, 2.0, 6);
     glowGeo.rotateX(Math.PI / 2);
     const glowMat = new THREE.MeshBasicMaterial({
-      color: 0x00ff44,
+      color: 0x66ff88,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
-    core.add(glow);
 
-    // Position at front of ship
-    core.position.copy(origin).addScaledVector(dir, 1.5);
+    const offsets = [lateralOffset, -lateralOffset];
+    for (let i = 0; i < offsets.length; i++) {
+      const core = new THREE.Mesh(coreGeo, coreMat);
+      const glow = new THREE.Mesh(glowGeo, glowMat);
+      core.add(glow);
 
-    // Orient beam along its travel direction
-    core.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
+      // Position: forward from origin, then apply lateral offset
+      core.position.copy(origin).addScaledVector(dir, 1.5).addScaledVector(right, offsets[i]);
 
-    this.scene.add(core);
-    this.active.push({
-      mesh: core,
-      velocity: vel,
-      position: core.position,
-      prevPosition: core.position.clone(),
-      travelled: 0,
-    });
+      // Orient beam along its travel direction
+      core.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
+
+      this.scene.add(core);
+      this.active.push({
+        mesh: core,
+        velocity: vel.clone(),
+        position: core.position,
+        prevPosition: core.position.clone(),
+        travelled: 0,
+      });
+    }
 
     return true;
   }
