@@ -134,6 +134,70 @@ body {
   display: none !important;
 }
 
+/* ── Level Select Popup ── */
+#level-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  background: rgba(0, 0, 20, 0.92);
+  border: 2px solid #0ff;
+  border-radius: 8px;
+  padding: 32px 48px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(0, 255, 255, 0.3), inset 0 0 30px rgba(0, 255, 255, 0.05);
+  animation: popIn 0.25s ease-out;
+}
+@keyframes popIn {
+  from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+  to   { transform: translate(-50%, -50%) scale(1);   opacity: 1; }
+}
+#level-popup-label {
+  font-size: 24px;
+  color: #0ff;
+  text-shadow: 0 0 14px #0ff;
+  margin-bottom: 8px;
+}
+#level-popup-sub {
+  font-size: 11px;
+  color: #aaa;
+  margin-bottom: 24px;
+}
+#level-popup-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+#level-popup-yes,
+#level-popup-no {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 12px;
+  padding: 10px 24px;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 1px;
+  border-radius: 4px;
+  transition: background 0.2s, transform 0.1s;
+}
+#level-popup-yes {
+  background: #0f0;
+  color: #000;
+}
+#level-popup-yes:hover {
+  background: #0ff;
+  transform: scale(1.05);
+}
+#level-popup-no {
+  background: #333;
+  color: #fff;
+  border: 1px solid #555;
+}
+#level-popup-no:hover {
+  background: #555;
+  transform: scale(1.05);
+}
+
 /* ── Boss Indicator ── */
 #boss-indicator {
   position: fixed;
