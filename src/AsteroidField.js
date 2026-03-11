@@ -18,26 +18,41 @@ const BOUNDING_SPHERE_MATERIAL = new THREE.MeshBasicMaterial({
 });
 
 // ─── Tunable parameters ──────────────────────────────────────────────────────
-// Total number of asteroids placed in the scene
-const ASTEROID_COUNT = 300;
 
-// 0.0 = all small, 1.0 = all big, 0.4 = 40% big / 60% small
-const BIG_RATIO = 0.4;
+// 0.0 = all small, 1.0 = all big
+const BIG_RATIO = 0.9;
 
-// Placement shell (world units from origin)
-const SPAWN_RADIUS_MIN = 30;
-const SPAWN_RADIUS_MAX = 120;
 // Scale ranges per size class
-const BIG_SCALE_MIN = 0.2;
-const BIG_SCALE_MAX = 1;
-const SMALL_SCALE_MIN = 0.08;
-const SMALL_SCALE_MAX = 0.2;
-const BOUNDING_SPHERE_SCALE = 0.6;
+const BIG_SCALE_MIN = 1;
+const BIG_SCALE_MAX = 4;
+const SMALL_SCALE_MIN = 0.2;
+const SMALL_SCALE_MAX = 0.7;
+const BOUNDING_SPHERE_SCALE = 0.45;
 const MIN_DRIFT_SPEED = 0.6;
 const MAX_DRIFT_SPEED = 2.4;
 const ASTEROID_BOUNCE = 0.9;
 const ASTEROID_DRAG = 0.995;
 const COLLISION_PASSES = 2;
+
+// ─── Distance fade ───────────────────────────────────────────────────────────
+// Asteroids closer than FADE_NEAR are fully opaque.
+// Asteroids beyond FADE_FAR are fully transparent.
+const FADE_NEAR = 2500;
+const FADE_FAR  = 3000;
+// Minimum distance from the player for a new asteroid to spawn (skipped at game start)
+const MIN_SPAWN_DISTANCE = 2600;
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Player-centered procedural generation ───────────────────────────────────
+const INITIAL_SPAWN_DISTANCE = 1500;
+const SPAWN_SHELL_MIN = MIN_SPAWN_DISTANCE;
+const SPAWN_SHELL_MAX = 4000;
+const DESPAWN_DISTANCE = 4500;
+const TARGET_ASTEROID_COUNT = 600;
+const SPAWN_BATCH_PER_FRAME = 20;
+const MAX_SPAWN_ATTEMPTS_PER_FRAME = 100;
+const MIN_ASTEROID_PADDING = 120;
+const MAX_INSTANCES = 1000;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Glow sprite ─────────────────────────────────────────────────────────────
@@ -48,7 +63,7 @@ const GLOW_PULSE_SPEED = 1.2;
 // Pulse amplitude as a fraction of base scale (0 = no pulse, 0.15 = ±15%)
 const GLOW_PULSE_AMPLITUDE = 0.15;
 // Glow brightness: 0.0 = invisible, 1.0 = full intensity
-const GLOW_BRIGHTNESS = 2;
+const GLOW_BRIGHTNESS = 0;
 
 function makeGlowTexture(size = 256) {
   const canvas = document.createElement('canvas');
@@ -104,120 +119,258 @@ function applyMaterial(obj) {
   });
 }
 
-function randomOnSphere(rMin, rMax) {
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.acos(2 * Math.random() - 1);
-  const r = rMin + Math.random() * (rMax - rMin);
-  return new THREE.Vector3(
-    Math.sin(phi) * Math.cos(theta) * r,
-    Math.sin(phi) * Math.sin(theta) * r,
-    Math.cos(phi) * r,
-  );
+// Create a unique transparent material clone for a single asteroid instance.
+// All child meshes in the group share this one clone.
+function makeInstanceMaterial() {
+  const mat = ROCKY_MAT.clone();
+  mat.transparent = true;
+  mat.opacity = 0;
+  mat.depthWrite = true;
+  return mat;
+}
+
+function applyInstanceMaterial(group, mat) {
+  group.traverse((child) => {
+    if (!child.isMesh) return;
+    child.material = mat;
+  });
 }
 
 function randomUnitVector() {
-  return randomOnSphere(1, 1).normalize();
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  return new THREE.Vector3(
+    Math.sin(phi) * Math.cos(theta),
+    Math.sin(phi) * Math.sin(theta),
+    Math.cos(phi),
+  );
+}
+
+function randomPointInShell(center, minRadius, maxRadius) {
+  const radius = minRadius + Math.random() * (maxRadius - minRadius);
+  return randomUnitVector().multiplyScalar(radius).add(center);
 }
 
 export class AsteroidField {
   constructor(scene) {
     this.scene = scene;
-    this.instances = [];
+    this.instances = [];          // flat array of all active asteroid instances
+    this._elapsed = 0;
 
-    this._loadPool('/models/asteroid/big/', BIG_FILES, BIG_SCALE_MIN, BIG_SCALE_MAX);
-    this._loadPool('/models/asteroid/small/', SMALL_FILES, SMALL_SCALE_MIN, SMALL_SCALE_MAX);
+    // ── Model pools (filled async by _loadModels) ──────────────────────────
+    this._modelsBig = [];            // array of loaded/cloneable FBX roots
+    this._modelsSmall = [];
+    this._modelsReady = false;
+    this._pendingLoads = 0;
+    this._lastPlayerPos = null;
+    this._isInitialLoad = true;
+
+    this._loadModels();
   }
 
-  _loadPool(basePath, files, scaleMin, scaleMax) {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Model loading — load each FBX once; cloning happens in _generateChunk
+  // ═══════════════════════════════════════════════════════════════════════════
+  _loadModels() {
     const loader = new FBXLoader();
-    const isBig = basePath.includes('/big/');
-    const bigCount = Math.round(ASTEROID_COUNT * BIG_RATIO);
-    const smallCount = ASTEROID_COUNT - bigCount;
-    const count = isBig ? bigCount : smallCount;
+    const allFiles = [
+      ...BIG_FILES.map((f) => ({ path: '/models/asteroid/big/' + f, big: true })),
+      ...SMALL_FILES.map((f) => ({ path: '/models/asteroid/small/' + f, big: false })),
+    ];
+    this._pendingLoads = allFiles.length;
 
-    // How many asteroids each file is responsible for (spread evenly, at least 1)
-    const perFile = Math.max(1, Math.ceil(count / files.length));
-
-    let spawned = 0;
-    for (const file of files) {
-      if (spawned >= count) break;
-      const toSpawn = Math.min(perFile, count - spawned);
-      spawned += toSpawn;
-
-      loader.load(basePath + file, (fbx) => {
+    for (const entry of allFiles) {
+      loader.load(entry.path, (fbx) => {
         applyMaterial(fbx);
+        if (entry.big) this._modelsBig.push(fbx);
+        else this._modelsSmall.push(fbx);
 
-        for (let i = 0; i < toSpawn; i++) {
-          const instance = new THREE.Group();
-          const model = fbx.clone();
-
-          const s = scaleMin + Math.random() * (scaleMax - scaleMin);
-          model.scale.setScalar(s);
-
-          instance.add(model);
-
-          _bounds.setFromObject(model);
-          _bounds.getBoundingSphere(_boundingSphere);
-
-          const localCenter = _boundingSphere.center.clone();
-          const colliderRadius = _boundingSphere.radius * BOUNDING_SPHERE_SCALE;
-          const collider = new THREE.Sphere(new THREE.Vector3(), colliderRadius);
-          const velocity = randomUnitVector().multiplyScalar(
-            MIN_DRIFT_SPEED + Math.random() * (MAX_DRIFT_SPEED - MIN_DRIFT_SPEED)
-          );
-
-          instance.rotation.set(
-            Math.random() * Math.PI * 2,
-            Math.random() * Math.PI * 2,
-            Math.random() * Math.PI * 2,
-          );
-          instance.position.copy(randomOnSphere(SPAWN_RADIUS_MIN, SPAWN_RADIUS_MAX));
-
-          instance.userData.rotSpeed = {
-            x: (Math.random() - 0.5) * 0.12,
-            y: (Math.random() - 0.5) * 0.12,
-            z: (Math.random() - 0.5) * 0.06,
-          };
-
-          // ── Glow sprite (big asteroids only) ─────────────────────────────
-          let glowSprite = null;
-          if (isBig) {
-            glowSprite = new THREE.Sprite(GLOW_MATERIAL.clone());
-            const glowSize = colliderRadius * 2 * GLOW_RADIUS_MULTIPLIER;
-            glowSprite.scale.setScalar(glowSize);
-            glowSprite.position.copy(localCenter);
-            glowSprite.userData.glowBaseScale = glowSize;
-            glowSprite.userData.glowPhase = Math.random() * Math.PI * 2;
-            instance.add(glowSprite);
+        this._pendingLoads--;
+        if (this._pendingLoads === 0) {
+          this._modelsReady = true;
+          if (this._lastPlayerPos) {
+            this._maintainPopulation(this._lastPlayerPos, true);
+            this._isInitialLoad = false;
           }
-          // ─────────────────────────────────────────────────────────────────
-
-          instance.updateMatrixWorld(true);
-          collider.center.copy(instance.localToWorld(_worldCenter.copy(localCenter)));
-
-          if (SHOW_BOUNDING_SPHERES) {
-            const boundsMesh = new THREE.Mesh(
-              new THREE.SphereGeometry(colliderRadius, 16, 12),
-              BOUNDING_SPHERE_MATERIAL
-            );
-            boundsMesh.position.copy(localCenter);
-            instance.add(boundsMesh);
-          }
-
-          this.scene.add(instance);
-          this.instances.push({
-            mesh: instance,
-            boundingSphere: collider,
-            localCenter,
-            velocity,
-            mass: Math.max(colliderRadius * colliderRadius * colliderRadius, 0.001),
-          });
         }
       });
     }
   }
 
-  update(delta) {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Lifecycle helpers
+  // ═══════════════════════════════════════════════════════════════════════════
+  _disposeAsteroid(ast) {
+    this.scene.remove(ast.mesh);
+    if (ast.fadeMat) ast.fadeMat.dispose();
+    if (ast.glowSprite) {
+      ast.glowSprite.material.dispose();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Spawn helpers
+  // ═══════════════════════════════════════════════════════════════════════════
+  _canSpawnAt(center, radius, playerPosition, initialLoad) {
+    if (!initialLoad) {
+      const minPlayerDistance = MIN_SPAWN_DISTANCE + radius;
+      if (center.distanceToSquared(playerPosition) < minPlayerDistance * minPlayerDistance) {
+        return false;
+      }
+    }
+
+    for (const ast of this.instances) {
+      const minDistance = ast.boundingSphere.radius + radius + MIN_ASTEROID_PADDING;
+      if (ast.boundingSphere.center.distanceToSquared(center) < minDistance * minDistance) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Spawn / despawn
+  // ═══════════════════════════════════════════════════════════════════════════
+  _spawnAsteroid(playerPosition, initialLoad = false) {
+    if (this.instances.length >= MAX_INSTANCES) return false;
+
+    const isBig = Math.random() < BIG_RATIO;
+    const pool = isBig ? this._modelsBig : this._modelsSmall;
+    if (pool.length === 0) return false;
+
+    const modelIndex = Math.floor(Math.random() * pool.length);
+    const scaleMin = isBig ? BIG_SCALE_MIN : SMALL_SCALE_MIN;
+    const scaleMax = isBig ? BIG_SCALE_MAX : SMALL_SCALE_MAX;
+
+    const instance = new THREE.Group();
+    const model = pool[modelIndex].clone();
+    const scale = scaleMin + Math.random() * (scaleMax - scaleMin);
+    model.scale.setScalar(scale);
+    instance.add(model);
+
+    const fadeMat = makeInstanceMaterial();
+    applyInstanceMaterial(instance, fadeMat);
+
+    _bounds.setFromObject(model);
+    _bounds.getBoundingSphere(_boundingSphere);
+
+    const localCenter = _boundingSphere.center.clone();
+    const colliderRadius = _boundingSphere.radius * BOUNDING_SPHERE_SCALE;
+    const collider = new THREE.Sphere(new THREE.Vector3(), colliderRadius);
+
+    instance.rotation.set(
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2,
+    );
+
+    const spawnMin = initialLoad ? INITIAL_SPAWN_DISTANCE : SPAWN_SHELL_MIN;
+    instance.position.copy(randomPointInShell(playerPosition, spawnMin, SPAWN_SHELL_MAX));
+    instance.updateMatrixWorld(true);
+    collider.center.copy(instance.localToWorld(_worldCenter.copy(localCenter)));
+
+    if (!this._canSpawnAt(collider.center, colliderRadius, playerPosition, initialLoad)) {
+      fadeMat.dispose();
+      return false;
+    }
+
+    instance.userData.rotSpeed = {
+      x: (Math.random() - 0.5) * 0.12,
+      y: (Math.random() - 0.5) * 0.12,
+      z: (Math.random() - 0.5) * 0.06,
+    };
+
+    const velocity = randomUnitVector().multiplyScalar(
+      MIN_DRIFT_SPEED + Math.random() * (MAX_DRIFT_SPEED - MIN_DRIFT_SPEED)
+    );
+
+    let glowSprite = null;
+    if (isBig) {
+      glowSprite = new THREE.Sprite(GLOW_MATERIAL.clone());
+      const glowSize = colliderRadius * 2 * GLOW_RADIUS_MULTIPLIER;
+      glowSprite.scale.setScalar(glowSize);
+      glowSprite.position.copy(localCenter);
+      glowSprite.userData.glowBaseScale = glowSize;
+      glowSprite.userData.glowPhase = Math.random() * Math.PI * 2;
+      instance.add(glowSprite);
+    }
+
+    if (SHOW_BOUNDING_SPHERES) {
+      const boundsMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(colliderRadius, 16, 12),
+        BOUNDING_SPHERE_MATERIAL
+      );
+      boundsMesh.position.copy(localCenter);
+      instance.add(boundsMesh);
+    }
+
+    this.scene.add(instance);
+    this.instances.push({
+      mesh: instance,
+      boundingSphere: collider,
+      localCenter,
+      velocity,
+      mass: Math.max(colliderRadius * colliderRadius * colliderRadius, 0.001),
+      glowSprite,
+      fadeMat,
+    });
+
+    return true;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Population maintenance
+  // ═══════════════════════════════════════════════════════════════════════════
+  _removeDistantAsteroids(playerPosition) {
+    for (let i = this.instances.length - 1; i >= 0; i--) {
+      const ast = this.instances[i];
+      if (ast.boundingSphere.center.distanceToSquared(playerPosition) > DESPAWN_DISTANCE * DESPAWN_DISTANCE) {
+        this._disposeAsteroid(ast);
+        this.instances.splice(i, 1);
+      }
+    }
+  }
+
+  _maintainPopulation(playerPosition, initialLoad = false) {
+    if (!this._modelsReady || !playerPosition) return;
+
+    const target = Math.min(TARGET_ASTEROID_COUNT, MAX_INSTANCES);
+    const spawnBudget = initialLoad ? target : SPAWN_BATCH_PER_FRAME;
+    const attemptBudget = initialLoad ? target * 8 : MAX_SPAWN_ATTEMPTS_PER_FRAME;
+
+    let spawned = 0;
+    let attempts = 0;
+    while (
+      this.instances.length < target &&
+      spawned < spawnBudget &&
+      attempts < attemptBudget
+    ) {
+      if (this._spawnAsteroid(playerPosition, initialLoad)) {
+        spawned++;
+      }
+      attempts++;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Per-frame update
+  // ═══════════════════════════════════════════════════════════════════════════
+  update(delta, playerPosition) {
+    this._elapsed += delta;
+
+    if (playerPosition) {
+      this._lastPlayerPos = playerPosition;
+      if (this._modelsReady) {
+        if (this._isInitialLoad) {
+          this._maintainPopulation(playerPosition, true);
+          this._isInitialLoad = false;
+        }
+        this._removeDistantAsteroids(playerPosition);
+        this._maintainPopulation(playerPosition);
+      }
+    }
+
     for (const ast of this.instances) {
       ast.mesh.position.addScaledVector(ast.velocity, delta);
       ast.mesh.rotation.x += ast.mesh.userData.rotSpeed.x * delta;
@@ -226,6 +379,22 @@ export class AsteroidField {
       ast.velocity.multiplyScalar(Math.pow(ASTEROID_DRAG, delta * 60));
       ast.mesh.updateMatrixWorld(true);
       ast.boundingSphere.center.copy(ast.mesh.localToWorld(_worldCenter.copy(ast.localCenter)));
+
+      // ── Distance fade ────────────────────────────────────────────────────
+      if (playerPosition && ast.fadeMat) {
+        const dist = ast.boundingSphere.center.distanceTo(playerPosition);
+        let opacity;
+        if (dist <= FADE_NEAR) opacity = 1;
+        else if (dist >= FADE_FAR) opacity = 0;
+        else opacity = 1 - (dist - FADE_NEAR) / (FADE_FAR - FADE_NEAR);
+        ast.fadeMat.opacity = opacity;
+        ast.fadeMat.depthWrite = opacity > 0.5;
+        // Fade glow sprite in sync
+        if (ast.glowSprite) {
+          ast.glowSprite.material.opacity = opacity;
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────
 
       // ── Animate glow pulse ───────────────────────────────────────────────
       if (ast.glowSprite) {
@@ -257,7 +426,7 @@ export class AsteroidField {
 
         let distance = Math.sqrt(distanceSq);
         if (distance === 0) {
-          _collisionNormal.copy(randomUnitVector());
+          _collisionNormal.set(1, 0, 0);
           distance = 0.0001;
         } else {
           _collisionNormal.multiplyScalar(1 / distance);

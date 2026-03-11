@@ -10,9 +10,10 @@ import { AsteroidField } from './AsteroidField.js';
 
 // Reusable vectors for camera follow
 // Offset: higher + further back so ship sits in the lower portion of the screen
-const _camOffset = new THREE.Vector3(0, 2.2, 11);
+const _camOffset = new THREE.Vector3(0, 6, 18);
 const _camTarget = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
+const _smoothForward = new THREE.Vector3(0, 0, -1);
 const _shipForward = new THREE.Vector3();
 const _segment = new THREE.Vector3();
 const _toCenter = new THREE.Vector3();
@@ -38,7 +39,7 @@ export class Game {
     this.clock = new THREE.Clock();
 
     // Camera follow smoothing: use a framerate-independent follow speed (higher = tighter)
-    this.cameraFollowSpeed = 20.0;
+    this.cameraFollowSpeed = 18.0;
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -182,7 +183,7 @@ export class Game {
     this.projectiles.update(delta);
     const playerPos = this.player.getPosition();
     this.debris.update(delta, this.levels.getSpawnConfig(), playerPos);
-    this.asteroidField.update(delta);
+    this.asteroidField.update(delta, playerPos);
     // Check projectile collisions against asteroids (sparks)
     this._checkProjectileAsteroidCollisions();
     this._checkAsteroidPlayerCollisions();
@@ -272,6 +273,10 @@ export class Game {
     const asteroids = this.asteroidField.getColliders();
     const playerPos = this.player.mesh.position;
 
+    // Accumulate total separation so multiple overlapping asteroids
+    // don't push the player back and forth causing jitter
+    let sepX = 0, sepY = 0, sepZ = 0;
+
     for (let i = 0; i < asteroids.length; i++) {
       const sphere = asteroids[i].boundingSphere;
       const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius;
@@ -291,7 +296,10 @@ export class Game {
         _collisionNormal.multiplyScalar(1 / distance);
       }
 
-      playerPos.addScaledVector(_collisionNormal, minDistance - distance);
+      const overlap = minDistance - distance;
+      sepX += _collisionNormal.x * overlap;
+      sepY += _collisionNormal.y * overlap;
+      sepZ += _collisionNormal.z * overlap;
 
       const normalSpeed = this.player.velocity.dot(_collisionNormal);
       if (normalSpeed >= 0) continue;
@@ -299,6 +307,13 @@ export class Game {
       _velocityNormal.copy(_collisionNormal).multiplyScalar(normalSpeed);
       _velocityTangent.copy(this.player.velocity).sub(_velocityNormal).multiplyScalar(ASTEROID_SURFACE_FRICTION);
       this.player.velocity.copy(_velocityTangent).addScaledVector(_collisionNormal, -normalSpeed * ASTEROID_BOUNCE);
+    }
+
+    // Apply accumulated separation once
+    if (sepX !== 0 || sepY !== 0 || sepZ !== 0) {
+      playerPos.x += sepX;
+      playerPos.y += sepY;
+      playerPos.z += sepZ;
     }
   }
 
@@ -451,16 +466,14 @@ export class Game {
     // rotated by the ship's quaternion
     _camTarget.copy(_camOffset).applyQuaternion(shipQuat).add(shipPos);
 
-    // Smooth follow (framerate-independent exponential smoothing)
-    const lerpAlpha = 1 - Math.exp(-this.cameraFollowSpeed * (delta || (1 / 60)));
-    this.camera.position.lerp(_camTarget, lerpAlpha);
+    // Lock camera directly to target — no lerp, no jitter
+    this.camera.position.copy(_camTarget);
 
     // Set camera up to the ship's local up so lookAt never flips
     // (default world-up (0,1,0) degenerates when looking near-vertical)
     this.camera.up.set(0, 1, 0).applyQuaternion(shipQuat);
 
-    // Look exactly along the ship's forward axis so the screen center
-    // matches the firing vanishing point.
+    // Look along ship's forward from camera position
     _shipForward.set(0, 0, -1).applyQuaternion(shipQuat);
     _camLookTarget.copy(this.camera.position).addScaledVector(_shipForward, 200);
     this.camera.lookAt(_camLookTarget);

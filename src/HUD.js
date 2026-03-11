@@ -49,7 +49,7 @@ export class HUD {
     const cx = 75;
     const cy = 75;
     const radius = 75;
-    const maxRange = 600; // units
+    const maxRange = 2000; // units
     
     // Draw crosshair helper lines
     ctx.strokeStyle = 'rgba(0, 255, 255, 0.15)';
