@@ -74,8 +74,8 @@ export class Player {
       sizeBase: 0.5,
       sizeSpread: 1.5,
       opacityBase: 2,
-      particlesPerSecond: 1800,
-      particleDeathAge: 0.42,
+      particlesPerSecond: 2400,
+      particleDeathAge: 0.3,
     };
 
     // Particle pool
@@ -297,12 +297,11 @@ export class Player {
 
       if (!this.thrustActive) {
         this._spawnAccumulator = 0;
-        this._particleLives.fill(0);
-        this._particleAlphas.fill(0);
+        // let existing particles fade out naturally instead of killing them
       }
 
       const emitters = [this.thrusterOffsetLeft, this.thrusterOffsetRight];
-      const spawnPerThruster = Math.max(1, Math.ceil(spawnCount / emitters.length));
+      const spawnPerThruster = spawnCount > 0 ? Math.max(1, Math.ceil(spawnCount / emitters.length)) : 0;
 
       // Spawn in ship-local space so both boost plumes stay locked to the hull.
       for (const emitterOffset of emitters) {
