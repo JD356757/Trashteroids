@@ -40,19 +40,19 @@ export class HUD {
       }
       return;
     }
-    
+
     this.minimap.classList.remove('hidden');
-    
+
     const ctx = this.minimapCtx;
     ctx.clearRect(0, 0, 150, 150);
-    
+
     const cx = 75;
     const cy = 75;
     const radius = 75;
     const maxRange = 2000; // units
-    
+
     // Draw crosshair helper lines
-    ctx.strokeStyle = 'rgba(0, 255, 255, 0.15)';
+    ctx.strokeStyle = 'rgba(162, 207, 254, 0.2)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(cx, 0); ctx.lineTo(cx, 150);
@@ -63,22 +63,22 @@ export class HUD {
 
     // Draw Asteroids
     if (asteroids && playerPos && camInvQuat) {
-      ctx.fillStyle = 'rgba(200, 255, 255, 0.6)';
+      ctx.fillStyle = 'rgba(255, 167, 4, 0.6)';
       for (let i = 0; i < asteroids.length; i++) {
         const ast = asteroids[i];
         _v.copy(ast.boundingSphere.center).sub(playerPos);
-        
+
         if (_v.lengthSq() > maxRange * maxRange) continue;
-        
+
         _v.applyQuaternion(camInvQuat);
-        
+
         const dx = _v.x / maxRange;
         const dy = _v.z / maxRange; // +z is backward, so +dy is down on minimap
-        
-        if (dx*dx + dy*dy <= 1) {
+
+        if (dx * dx + dy * dy <= 1) {
           const px = cx + dx * radius;
           const py = cy + dy * radius;
-          
+
           let size = ast.boundingSphere.radius > 6 ? 2.5 : 1.2;
           ctx.beginPath();
           ctx.arc(px, py, size, 0, Math.PI * 2);
@@ -94,7 +94,7 @@ export class HUD {
       _v.applyQuaternion(camInvQuat);
       _v.y = 0; // Project to XZ plane
       _v.normalize(); // Boss is always shown on the edge if outside range, or clamped
-      
+
       // Calculate minimap position
       let bx, by;
       if (bossDist < maxRange) {
@@ -104,7 +104,7 @@ export class HUD {
         bx = cx + (_v.x * radius * 0.9);
         by = cy + (_v.z * radius * 0.9);
       }
-      
+
       ctx.fillStyle = '#f44';
       ctx.shadowColor = '#f44';
       ctx.shadowBlur = 8;
@@ -117,8 +117,8 @@ export class HUD {
     // Draw Player (cyan arrowhead)
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.fillStyle = '#0ff';
-    ctx.shadowColor = '#0ff';
+    ctx.fillStyle = 'rgba(109, 230, 127, 1)';
+    ctx.shadowColor = 'rgba(0, 151, 33, 1)';
     ctx.shadowBlur = 5;
     ctx.beginPath();
     ctx.moveTo(0, -6);

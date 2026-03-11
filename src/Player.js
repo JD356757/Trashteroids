@@ -42,6 +42,7 @@ export class Player {
     this.pitchRate = 0;
     this.turnInputYaw = 0;
     this.turnInputPitch = 0;
+    this.flashTimer = 0;
     // Orientation is stored in `baseQuaternion`. We no longer track
     // Euler yaw/pitch angles so the ship can rotate freely in all axes.
 
@@ -51,12 +52,39 @@ export class Player {
     this.mesh.position.set(0, 0, 10);
     scene.add(this.mesh);
 
-    // Engine glow (kept as simple sphere on the group)
-    const glowGeo = new THREE.SphereGeometry(0.3, 8, 8);
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0x00ff88 });
-    this.engineGlow = new THREE.Mesh(glowGeo, glowMat);
-    this.engineGlow.position.set(0, 0, 1.2);
-    this.mesh.add(this.engineGlow);
+    // Customizable Thruster Positions
+    this.thrusterOffsetLeft = new THREE.Vector3(-2.55, 0, 1.6);
+    this.thrusterOffsetRight = new THREE.Vector3(2.55, 0, 1.6);
+
+    this.engineGlows = [];
+
+    const createThruster = (offset) => {
+      const group = new THREE.Group();
+      group.position.copy(offset);
+
+      // Bright inner core
+      const coreGeo = new THREE.SphereGeometry(0, 8, 8);
+      const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const core = new THREE.Mesh(coreGeo, coreMat);
+
+      // Green neon halo
+      const haloGeo = new THREE.SphereGeometry(0.3, 12, 12);
+      const haloMat = new THREE.MeshBasicMaterial({
+        color: 0xFFC067,
+        transparent: true,
+        opacity: 0.3,
+        blending: THREE.AdditiveBlending
+      });
+      const halo = new THREE.Mesh(haloGeo, haloMat);
+
+      group.add(core);
+      group.add(halo);
+      this.mesh.add(group);
+      this.engineGlows.push(group);
+    };
+
+    createThruster(this.thrusterOffsetLeft);
+    createThruster(this.thrusterOffsetRight);
 
     // Load FBX model
     this._loadModel();
@@ -76,29 +104,18 @@ export class Player {
         child.castShadow = true;
         child.receiveShadow = true;
 
-        // Ensure meshes use a lighting-aware material. Some GLTFs may
-        // contain unlit/Basic materials which don't respond to scene lights.
+        // Use Basic material so the ship is not affected by world lighting.
         const mat = child.material;
         if (mat) {
-          // Replace unlit/basic materials with MeshStandardMaterial while
-          // preserving common texture maps and colors.
-          if (mat.isMeshBasicMaterial || mat.isSpriteMaterial || mat.type === 'MeshBasicMaterial') {
-            const newMat = new THREE.MeshStandardMaterial({
-              color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
-              roughness: mat.roughness !== undefined ? mat.roughness : 0.8,
-              metalness: mat.metalness !== undefined ? mat.metalness : 0.0,
-            });
-            if (mat.map) newMat.map = mat.map;
-            if (mat.normalMap) newMat.normalMap = mat.normalMap;
-            if (mat.roughnessMap) newMat.roughnessMap = mat.roughnessMap;
-            if (mat.metalnessMap) newMat.metalnessMap = mat.metalnessMap;
-            if (mat.emissive) newMat.emissive = mat.emissive.clone();
-            child.material = newMat;
-          } else {
-            // force a material update in case the loader produced a correct
-            // but stale material instance
-            child.material.needsUpdate = true;
-          }
+          const newMat = new THREE.MeshBasicMaterial({
+            color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
+          });
+          if (mat.map) newMat.map = mat.map;
+          if (mat.alphaMap) newMat.alphaMap = mat.alphaMap;
+          if (mat.transparent) newMat.transparent = true;
+
+          newMat.userData.originalColor = newMat.color.clone();
+          child.material = newMat;
         }
       });
 
@@ -130,6 +147,10 @@ export class Player {
   applyRecoil(duration) {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
     this.velocity.addScaledVector(_forward, -this.recoilAcceleration * duration);
+  }
+
+  flashWhite() {
+    this.flashTimer = 1.0;
   }
 
   update(delta) {
@@ -193,9 +214,34 @@ export class Player {
       this.yawRate += Math.sin(this.currentRoll) * this.rollYawCoupling * delta;
     }
 
-    // Engine glow pulsing
+    // Engine glow pulsing with a slight stretch for a flame effect
     const scale = 0.8 + Math.sin(Date.now() * 0.008) * 0.2;
-    this.engineGlow.scale.setScalar(scale);
+    this.engineGlows.forEach(glow => {
+      glow.scale.set(scale, scale, scale * 1.5);
+    });
+
+    if (this.flashTimer > 0) {
+      this.flashTimer -= delta;
+      const isWhite = Math.floor(this.flashTimer * 15) % 2 === 0;
+
+      this.mesh.traverse((child) => {
+        if (child.isMesh && child.material && child.material.userData.originalColor) {
+          if (isWhite) {
+            child.material.color.setHex(0xffffff);
+          } else {
+            child.material.color.copy(child.material.userData.originalColor);
+          }
+        }
+      });
+
+      if (this.flashTimer <= 0) {
+        this.mesh.traverse((child) => {
+          if (child.isMesh && child.material && child.material.userData.originalColor) {
+            child.material.color.copy(child.material.userData.originalColor);
+          }
+        });
+      }
+    }
 
     // Mouse intent only applies for the current frame.
     this.turnInputYaw = 0;

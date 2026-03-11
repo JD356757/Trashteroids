@@ -341,6 +341,8 @@ export class Game {
 
     this.lives--;
     this.playerHitCooldown = PLAYER_HIT_COOLDOWN;
+    this.player.flashWhite();
+    
     if (this.lives <= 0) {
       this._gameOver();
     }
