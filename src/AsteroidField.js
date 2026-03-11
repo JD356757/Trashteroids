@@ -74,6 +74,51 @@ const GLOW_MATERIAL = new THREE.SpriteMaterial({
   transparent: true,
   fog: false,
 });
+
+const ASTEROID_COLOR_LIT   = new THREE.Color(0xd8ced9);
+const ASTEROID_COLOR_SHADE = new THREE.Color(0xb19bb3);
+const ASTEROID_OUTLINE_COLOR = 0x211626;
+const ASTEROID_OUTLINE_SCALE = 1.035;
+
+// Normalized sun direction (matches Game.js sunLight.position)
+const SUN_DIR = new THREE.Vector3(2000, 1000, -3000).normalize();
+
+// Two-tone unlit shader: lit color on sun-facing side, shadow color on the other
+function makeTwoToneMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColorLit:   { value: ASTEROID_COLOR_LIT },
+      uColorShade: { value: ASTEROID_COLOR_SHADE },
+      uSunDir:     { value: SUN_DIR },
+      uOpacity:    { value: 0.0 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vWorldNormal;
+      void main() {
+        vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3  uColorLit;
+      uniform vec3  uColorShade;
+      uniform vec3  uSunDir;
+      uniform float uOpacity;
+      varying vec3  vWorldNormal;
+      void main() {
+        float NdotL = dot(normalize(vWorldNormal), uSunDir);
+        // Hard step for a cel / two-tone look
+        float lit = step(0.0, NdotL);
+        vec3 color = mix(uColorShade, uColorLit, lit);
+        gl_FragColor = vec4(color, uOpacity);
+      }
+    `,
+    transparent: true,
+    depthWrite: true,
+    side: THREE.FrontSide,
+    fog: false,
+  });
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -198,42 +243,37 @@ export class AsteroidField {
     model.scale.setScalar(scale);
     instance.add(model);
 
-    // Clone materials for per-instance fade control and apply AO; ensure
-    // asteroids don't cast or receive shadows (cheap and visually simpler).
+    // Clone materials for per-instance fade control, force an unlit asteroid
+    // color, and add a cheap inverted-hull outline. Asteroids do not react to
+    // scene lighting or cast shadows.
     const fadeMats = [];
     instance.traverse((child) => {
-      if (!child.isMesh || !child.material) return;
+      if (!child.isMesh || !child.material || child.userData.isOutline) return;
 
       // Disable shadowing for asteroid meshes
       child.castShadow = false;
       child.receiveShadow = false;
 
-      // Clone the material so we can tweak it per-instance
-      let mat = child.material.clone();
-
-      // Convert unlit/basic materials to MeshStandardMaterial so lighting
-      // (including AO) affects the surface.
-      if (!mat.isMeshStandardMaterial) {
-        const newMat = new THREE.MeshStandardMaterial({
-          color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
-          roughness: mat.roughness !== undefined ? mat.roughness : 0.9,
-          metalness: mat.metalness !== undefined ? mat.metalness : 0.0,
-        });
-        if (mat.map) newMat.map = mat.map;
-        if (mat.normalMap) newMat.normalMap = mat.normalMap;
-        if (mat.roughnessMap) newMat.roughnessMap = mat.roughnessMap;
-        if (mat.metalnessMap) newMat.metalnessMap = mat.metalnessMap;
-        mat = newMat;
-      }
-
-      // If geometry has UVs but no uv2, keep geometry unchanged (no AO)
-
-      mat.transparent = true;
-      mat.opacity = 0;
-      mat.depthWrite = true;
+      const mat = makeTwoToneMaterial();
 
       child.material = mat;
-      fadeMats.push(child.material);
+      fadeMats.push(mat);
+
+      const outlineMaterial = new THREE.MeshBasicMaterial({
+        color: ASTEROID_OUTLINE_COLOR,
+        side: THREE.BackSide,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        fog: false,
+      });
+      const outlineMesh = new THREE.Mesh(child.geometry, outlineMaterial);
+      outlineMesh.scale.setScalar(ASTEROID_OUTLINE_SCALE);
+      outlineMesh.castShadow = false;
+      outlineMesh.receiveShadow = false;
+      outlineMesh.userData.isOutline = true;
+      child.add(outlineMesh);
+      fadeMats.push(outlineMaterial);
     });
 
     const localCenter = new THREE.Vector3(0, 0, 0);
@@ -368,7 +408,11 @@ export class AsteroidField {
         else if (dist >= FADE_FAR) opacity = 0;
         else opacity = 1 - (dist - FADE_NEAR) / (FADE_FAR - FADE_NEAR);
         for (const mat of ast.fadeMats) {
-          mat.opacity = opacity;
+          if (mat.uniforms && mat.uniforms.uOpacity) {
+            mat.uniforms.uOpacity.value = opacity;
+          } else {
+            mat.opacity = opacity;
+          }
           mat.depthWrite = opacity > 0.5;
         }
         if (ast.glowSprite) {

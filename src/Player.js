@@ -58,12 +58,16 @@ export class Player {
 
     this.engineGlows = [];
 
+    this.shipLight = new THREE.PointLight(0xffd7a8, 1000, 4000, 0.2);
+    this.shipLight.position.set(0, 0, 0);
+    this.mesh.add(this.shipLight);
+
     const createThruster = (offset) => {
       const group = new THREE.Group();
       group.position.copy(offset);
 
       // Bright inner core
-      const coreGeo = new THREE.SphereGeometry(0, 8, 8);
+      const coreGeo = new THREE.SphereGeometry(.1, 8, 8);
       const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       const core = new THREE.Mesh(coreGeo, coreMat);
 
@@ -86,6 +90,77 @@ export class Player {
     createThruster(this.thrusterOffsetLeft);
     createThruster(this.thrusterOffsetRight);
 
+    // Particle exhaust emitter setup (replaces simple cone exhaust)
+    this.thrustLevel = 0; // 0..1
+
+    // Emitter settings (mapped from user-provided settings)
+    this._emitterSettings = {
+      positionBase: new THREE.Vector3(0, 0, 2),
+      positionSpread: new THREE.Vector3(0.1, 0.1, 0.1),
+      velocityBase: new THREE.Vector3(10, 0, 0),
+      velocitySpread: new THREE.Vector3(5, 5, 5),
+      sizeBase: 2.0,
+      sizeSpread: 1.0,
+      colorBaseHSL: new THREE.Vector3(0.05, 1.0, 0.8),
+      colorSpreadHSL: new THREE.Vector3(0.1, 0.0, 0.3),
+      opacityBase: 1,
+      particlesPerSecond: 500,
+      particleDeathAge: 4.0,
+    };
+
+    // Particle pool
+    this._particlePoolSize = 1200;
+    this._particleIndex = 0;
+    this._particlePositions = new Float32Array(this._particlePoolSize * 3);
+    this._particleVel = new Float32Array(this._particlePoolSize * 3);
+    this._particleSizes = new Float32Array(this._particlePoolSize);
+    this._particleAlphas = new Float32Array(this._particlePoolSize);
+    this._particleAges = new Float32Array(this._particlePoolSize);
+    this._particleLives = new Float32Array(this._particlePoolSize);
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(this._particlePositions, 3));
+    geom.setAttribute('size', new THREE.BufferAttribute(this._particleSizes, 1));
+    geom.setAttribute('alpha', new THREE.BufferAttribute(this._particleAlphas, 1));
+
+    const loader = new THREE.TextureLoader();
+    const sprite = loader.load('fireparticle.png');
+
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { map: { value: sprite } },
+      vertexShader: `
+        attribute float size;
+        attribute float alpha;
+        varying float vAlpha;
+        varying vec2 vUv;
+        void main() {
+          vAlpha = alpha;
+          vUv = vec2(0.0);
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * (300.0 / -mvPosition.z);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D map;
+        varying float vAlpha;
+        void main() {
+          vec4 t = texture2D(map, gl_PointCoord);
+          gl_FragColor = vec4(t.rgb, t.a * vAlpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: false,
+    });
+
+    this._particlePoints = new THREE.Points(geom, mat);
+    this._particlePoints.frustumCulled = false;
+    this.mesh.add(this._particlePoints);
+
+    this._spawnAccumulator = 0;
+
     // Load FBX model
     this._loadModel();
   }
@@ -104,9 +179,11 @@ export class Player {
         child.castShadow = true;
         child.receiveShadow = true;
 
-        // Use Basic material so the ship is not affected by world lighting.
-        const mat = child.material;
-        if (mat) {
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        const converted = materials.map((mat) => {
+          if (!mat) return mat;
+
+          // Use Basic material so the ship is not affected by world lighting.
           const newMat = new THREE.MeshBasicMaterial({
             color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
           });
@@ -115,11 +192,26 @@ export class Player {
           if (mat.transparent) newMat.transparent = true;
 
           newMat.userData.originalColor = newMat.color.clone();
-          child.material = newMat;
-        }
+          newMat.userData.originalMap = newMat.map ?? null;
+          return newMat;
+        });
+
+        child.material = Array.isArray(child.material) ? converted : converted[0];
       });
 
       this.mesh.add(model);
+    });
+  }
+
+  _forEachFlashableMaterial(callback) {
+    this.mesh.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material || !material.color) continue;
+        callback(material);
+      }
     });
   }
 
@@ -142,6 +234,8 @@ export class Player {
   thrust(delta) {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
     this.velocity.addScaledVector(_forward, this.thrustPower * delta);
+    // mark thrust active for exhaust visuals
+    this.thrustLevel = 1.0;
   }
 
   applyRecoil(duration) {
@@ -150,7 +244,8 @@ export class Player {
   }
 
   flashWhite() {
-    this.flashTimer = 1.0;
+    // Single pulse (longer) instead of repeated strobing
+    this.flashTimer = 0.3;
   }
 
   update(delta) {
@@ -219,26 +314,116 @@ export class Player {
     this.engineGlows.forEach(glow => {
       glow.scale.set(scale, scale, scale * 1.5);
     });
+    this.shipLight.intensity = 28 + Math.sin(Date.now() * 0.008) * 3;
+
+    // Particle emitter update
+    if (this._particlePoints) {
+      // decay thrust level when not actively thrusting
+      this.thrustLevel = Math.max(0, this.thrustLevel - delta * 2.5);
+
+      const s = this._emitterSettings;
+      const spawnRate = s.particlesPerSecond * this.thrustLevel;
+      this._spawnAccumulator += spawnRate * delta;
+      const spawnCount = Math.floor(this._spawnAccumulator);
+      this._spawnAccumulator -= spawnCount;
+
+      // spawn from both thruster offsets
+      for (let i = 0; i < spawnCount; i++) {
+        const emitterOffset = (i % 2 === 0) ? this.thrusterOffsetLeft : this.thrusterOffsetRight;
+        const basePos = emitterOffset.clone().add(s.positionBase);
+        // random spread
+        basePos.x += (Math.random() * 2 - 1) * s.positionSpread.x;
+        basePos.y += (Math.random() * 2 - 1) * s.positionSpread.y;
+        basePos.z += (Math.random() * 2 - 1) * s.positionSpread.z;
+        // transform to world
+        const worldPos = this.mesh.localToWorld(basePos.clone());
+
+        const velLocal = new THREE.Vector3(
+          s.velocityBase.x + (Math.random() * 2 - 1) * s.velocitySpread.x,
+          s.velocityBase.y + (Math.random() * 2 - 1) * s.velocitySpread.y,
+          s.velocityBase.z + (Math.random() * 2 - 1) * s.velocitySpread.z
+        );
+        // rotate velocity by ship orientation
+        const worldVel = velLocal.applyQuaternion(this.mesh.quaternion);
+        // Add ship's current velocity so particles inherit ship motion
+        worldVel.x += this.velocity.x;
+        worldVel.y += this.velocity.y;
+        worldVel.z += this.velocity.z;
+
+        const idx = this._particleIndex % this._particlePoolSize;
+        this._particleIndex++;
+
+        // set position
+        this._particlePositions[idx * 3 + 0] = worldPos.x;
+        this._particlePositions[idx * 3 + 1] = worldPos.y;
+        this._particlePositions[idx * 3 + 2] = worldPos.z;
+        // set velocity
+        this._particleVel[idx * 3 + 0] = worldVel.x;
+        this._particleVel[idx * 3 + 1] = worldVel.y;
+        this._particleVel[idx * 3 + 2] = worldVel.z;
+
+        // size
+        this._particleSizes[idx] = s.sizeBase + (Math.random() * 2 - 1) * s.sizeSpread;
+        // age/life
+        this._particleAges[idx] = 0;
+        this._particleLives[idx] = s.particleDeathAge;
+        // alpha initial
+        this._particleAlphas[idx] = s.opacityBase;
+      }
+
+      // update all particles
+      for (let p = 0; p < this._particlePoolSize; p++) {
+        const life = this._particleLives[p];
+        if (life <= 0) continue;
+        this._particleAges[p] += delta;
+        const age = this._particleAges[p];
+        if (age >= life) {
+          // kill
+          this._particleLives[p] = 0;
+          this._particleAlphas[p] = 0;
+          continue;
+        }
+        // integrate
+        this._particlePositions[p * 3 + 0] += this._particleVel[p * 3 + 0] * delta;
+        this._particlePositions[p * 3 + 1] += this._particleVel[p * 3 + 1] * delta;
+        this._particlePositions[p * 3 + 2] += this._particleVel[p * 3 + 2] * delta;
+
+        // fade alpha over life
+        const a = 1.0 - age / life;
+        this._particleAlphas[p] = a * s.opacityBase;
+      }
+
+      // push buffers to GPU
+      const posAttr = this._particlePoints.geometry.attributes.position;
+      posAttr.needsUpdate = true;
+      const sizeAttr = this._particlePoints.geometry.attributes.size;
+      sizeAttr.array.set(this._particleSizes);
+      sizeAttr.needsUpdate = true;
+      const alphaAttr = this._particlePoints.geometry.attributes.alpha;
+      alphaAttr.array.set(this._particleAlphas);
+      alphaAttr.needsUpdate = true;
+    }
 
     if (this.flashTimer > 0) {
       this.flashTimer -= delta;
-      const isWhite = Math.floor(this.flashTimer * 15) % 2 === 0;
 
-      this.mesh.traverse((child) => {
-        if (child.isMesh && child.material && child.material.userData.originalColor) {
-          if (isWhite) {
-            child.material.color.setHex(0xffffff);
-          } else {
-            child.material.color.copy(child.material.userData.originalColor);
-          }
-        }
+      this._forEachFlashableMaterial((material) => {
+        const originalColor = material.userData.originalColor;
+        if (!originalColor) return;
+
+        material.color.setHex(0xffffff);
+        material.map = null;
+        material.needsUpdate = true;
       });
 
       if (this.flashTimer <= 0) {
-        this.mesh.traverse((child) => {
-          if (child.isMesh && child.material && child.material.userData.originalColor) {
-            child.material.color.copy(child.material.userData.originalColor);
-          }
+        this._forEachFlashableMaterial((material) => {
+          const originalColor = material.userData.originalColor;
+          if (!originalColor) return;
+
+          material.color.copy(originalColor);
+          material.map = material.userData.originalMap ?? null;
+          material.needsUpdate = true;
         });
       }
     }

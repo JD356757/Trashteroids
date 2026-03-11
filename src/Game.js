@@ -34,7 +34,7 @@ export class Game {
     this.running = false;
     this._elapsed = 0;
     this.score = 0;
-    this.lives = 3;
+    this.lives = 100;
     this.playerHitCooldown = 0;
     this.clock = new THREE.Clock();
 
@@ -82,7 +82,7 @@ export class Game {
     this.sunLight.shadow.camera.top = d;
     this.sunLight.shadow.camera.bottom = -d;
     this.sunLight.shadow.bias = -0.0001;
-    this.scene.add(this.sunLight);
+    // this.scene.add(this.sunLight);
 
     // Small visible sun sphere (emissive, no shadows needed)
     const sunGeo = new THREE.SphereGeometry(300, 32, 32);
