@@ -15,7 +15,7 @@ const _localUp = new THREE.Vector3();
 export class Player {
   constructor(scene) {
     // Flight parameters
-    this.thrustPower = 400;
+    this.thrustPower = 600;
     this.recoilAcceleration = 70;
     this.mouseSensitivity = 0.024;
     this.turnAcceleration = 16.0;
@@ -75,6 +75,31 @@ export class Player {
         if (!child.isMesh) return;
         child.castShadow = true;
         child.receiveShadow = true;
+
+        // Ensure meshes use a lighting-aware material. Some GLTFs may
+        // contain unlit/Basic materials which don't respond to scene lights.
+        const mat = child.material;
+        if (mat) {
+          // Replace unlit/basic materials with MeshStandardMaterial while
+          // preserving common texture maps and colors.
+          if (mat.isMeshBasicMaterial || mat.isSpriteMaterial || mat.type === 'MeshBasicMaterial') {
+            const newMat = new THREE.MeshStandardMaterial({
+              color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
+              roughness: mat.roughness !== undefined ? mat.roughness : 0.8,
+              metalness: mat.metalness !== undefined ? mat.metalness : 0.0,
+            });
+            if (mat.map) newMat.map = mat.map;
+            if (mat.normalMap) newMat.normalMap = mat.normalMap;
+            if (mat.roughnessMap) newMat.roughnessMap = mat.roughnessMap;
+            if (mat.metalnessMap) newMat.metalnessMap = mat.metalnessMap;
+            if (mat.emissive) newMat.emissive = mat.emissive.clone();
+            child.material = newMat;
+          } else {
+            // force a material update in case the loader produced a correct
+            // but stale material instance
+            child.material.needsUpdate = true;
+          }
+        }
       });
 
       this.mesh.add(model);

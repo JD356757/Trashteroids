@@ -1,8 +1,6 @@
 import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-const _bounds = new THREE.Box3();
-const _boundingSphere = new THREE.Sphere();
 const _worldCenter = new THREE.Vector3();
 const _collisionNormal = new THREE.Vector3();
 const _relativeVelocity = new THREE.Vector3();
@@ -19,27 +17,18 @@ const BOUNDING_SPHERE_MATERIAL = new THREE.MeshBasicMaterial({
 
 // ─── Tunable parameters ──────────────────────────────────────────────────────
 
-// 0.0 = all small, 1.0 = all big
-const BIG_RATIO = 0.9;
+// Fixed scale multiplier (size variation is already in the models)
+const SCALE = 100;
 
-// Scale ranges per size class
-const BIG_SCALE_MIN = 1;
-const BIG_SCALE_MAX = 4;
-const SMALL_SCALE_MIN = 0.2;
-const SMALL_SCALE_MAX = 0.7;
-const BOUNDING_SPHERE_SCALE = 0.45;
-const MIN_DRIFT_SPEED = 0.6;
-const MAX_DRIFT_SPEED = 2.4;
+const MIN_DRIFT_SPEED = 0.0;
+const MAX_DRIFT_SPEED = 2.0;
 const ASTEROID_BOUNCE = 0.9;
-const ASTEROID_DRAG = 0.995;
+const ASTEROID_DRAG = 1;
 const COLLISION_PASSES = 2;
 
 // ─── Distance fade ───────────────────────────────────────────────────────────
-// Asteroids closer than FADE_NEAR are fully opaque.
-// Asteroids beyond FADE_FAR are fully transparent.
 const FADE_NEAR = 2500;
 const FADE_FAR  = 3000;
-// Minimum distance from the player for a new asteroid to spawn (skipped at game start)
 const MIN_SPAWN_DISTANCE = 2600;
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -56,13 +45,9 @@ const MAX_INSTANCES = 1000;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Glow sprite ─────────────────────────────────────────────────────────────
-// How much larger than the asteroid's bounding sphere the glow halo is
 const GLOW_RADIUS_MULTIPLIER = 1.2;
-// Pulsing speed (radians/second) – set to 0 to disable pulse
 const GLOW_PULSE_SPEED = 1.2;
-// Pulse amplitude as a fraction of base scale (0 = no pulse, 0.15 = ±15%)
 const GLOW_PULSE_AMPLITUDE = 0.15;
-// Glow brightness: 0.0 = invisible, 1.0 = full intensity
 const GLOW_BRIGHTNESS = 0;
 
 function makeGlowTexture(size = 256) {
@@ -72,7 +57,6 @@ function makeGlowTexture(size = 256) {
   const half = size / 2;
   const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
   const b = GLOW_BRIGHTNESS;
-  // Warm amber-white core fading to transparent orange edge
   grad.addColorStop(0,    `rgba(255, 220, 140, ${0.55 * b})`);
   grad.addColorStop(0.35, `rgba(220, 150,  60, ${0.22 * b})`);
   grad.addColorStop(0.7,  `rgba(180, 100,  30, ${0.07 * b})`);
@@ -92,49 +76,6 @@ const GLOW_MATERIAL = new THREE.SpriteMaterial({
 });
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BIG_FILES = [
-  'big1.fbx', 'big2.fbx', 'big3.fbx', 'big4.fbx', 'big5.fbx', 'big6.fbx', 'big7.fbx',
-];
-
-const SMALL_FILES = [
-  'rock.002.fbx', 'rock.003.fbx', 'rock.004.fbx', 'rock.005.fbx', 'rock.006.fbx',
-  'rock.013.fbx', 'rock.014.fbx', 'rock.015.fbx', 'rock.016.fbx', 'rock.017.fbx',
-  'rock.018.fbx', 'rock.019.fbx', 'rock.020.fbx', 'rock.021.fbx', 'rock.022.fbx',
-  'rock.023.fbx',
-];
-
-const ROCKY_MAT = new THREE.MeshStandardMaterial({
-  color: 0x8a8070,
-  roughness: 0.95,
-  metalness: 0.05,
-  emissive: new THREE.Color(0.06, 0.05, 0.04),
-});
-
-function applyMaterial(obj) {
-  obj.traverse((child) => {
-    if (!child.isMesh) return;
-    child.material = ROCKY_MAT;
-    child.castShadow = true;
-    child.receiveShadow = true;
-  });
-}
-
-// Create a unique transparent material clone for a single asteroid instance.
-// All child meshes in the group share this one clone.
-function makeInstanceMaterial() {
-  const mat = ROCKY_MAT.clone();
-  mat.transparent = true;
-  mat.opacity = 0;
-  mat.depthWrite = true;
-  return mat;
-}
-
-function applyInstanceMaterial(group, mat) {
-  group.traverse((child) => {
-    if (!child.isMesh) return;
-    child.material = mat;
-  });
-}
 
 function randomUnitVector() {
   const theta = Math.random() * Math.PI * 2;
@@ -154,14 +95,12 @@ function randomPointInShell(center, minRadius, maxRadius) {
 export class AsteroidField {
   constructor(scene) {
     this.scene = scene;
-    this.instances = [];          // flat array of all active asteroid instances
+    this.instances = [];
     this._elapsed = 0;
 
-    // ── Model pools (filled async by _loadModels) ──────────────────────────
-    this._modelsBig = [];            // array of loaded/cloneable FBX roots
-    this._modelsSmall = [];
+    // ── Model pool (filled async by _loadModels) ───────────────────────────
+    this._modelPool = [];     // { mesh: THREE.Mesh, colliderRadius: number }
     this._modelsReady = false;
-    this._pendingLoads = 0;
     this._lastPlayerPos = null;
     this._isInitialLoad = true;
 
@@ -169,32 +108,42 @@ export class AsteroidField {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Model loading — load each FBX once; cloning happens in _generateChunk
+  // Model loading — load asteroids.glb and extract mesh templates
   // ═══════════════════════════════════════════════════════════════════════════
   _loadModels() {
-    const loader = new FBXLoader();
-    const allFiles = [
-      ...BIG_FILES.map((f) => ({ path: '/models/asteroid/big/' + f, big: true })),
-      ...SMALL_FILES.map((f) => ({ path: '/models/asteroid/small/' + f, big: false })),
-    ];
-    this._pendingLoads = allFiles.length;
+    const loader = new GLTFLoader();
 
-    for (const entry of allFiles) {
-      loader.load(entry.path, (fbx) => {
-        applyMaterial(fbx);
-        if (entry.big) this._modelsBig.push(fbx);
-        else this._modelsSmall.push(fbx);
+    loader.load('/models/asteroid/asteroids_baked_new.glb', (gltf) => {
+      gltf.scene.traverse((obj) => {
+        if (!obj.isMesh) return;
 
-        this._pendingLoads--;
-        if (this._pendingLoads === 0) {
-          this._modelsReady = true;
-          if (this._lastPlayerPos) {
-            this._maintainPopulation(this._lastPlayerPos, true);
-            this._isInitialLoad = false;
-          }
+        // Try pre-computed collider radius from custom property, fall back to geometry bounds
+        let radius = obj.userData.colliderRadius;
+        if (radius == null && obj.geometry) {
+          obj.geometry.computeBoundingSphere();
+          radius = obj.geometry.boundingSphere.radius;
         }
+        if (!radius) return;
+
+        // Normalise transform so it works as a clonable template
+        obj.position.set(0, 0, 0);
+        obj.rotation.set(0, 0, 0);
+        obj.scale.set(1, 1, 1);
+
+        // Ensure templates do not cast/receive shadows by default
+        obj.castShadow = false;
+        obj.receiveShadow = false;
+
+        this._modelPool.push({ mesh: obj, colliderRadius: radius });
       });
-    }
+
+      console.log(`[AsteroidField] Loaded ${this._modelPool.length} asteroid templates`);
+      this._modelsReady = true;
+      if (this._lastPlayerPos) {
+        this._maintainPopulation(this._lastPlayerPos, true);
+        this._isInitialLoad = false;
+      }
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -202,7 +151,9 @@ export class AsteroidField {
   // ═══════════════════════════════════════════════════════════════════════════
   _disposeAsteroid(ast) {
     this.scene.remove(ast.mesh);
-    if (ast.fadeMat) ast.fadeMat.dispose();
+    if (ast.fadeMats) {
+      for (const m of ast.fadeMats) m.dispose();
+    }
     if (ast.glowSprite) {
       ast.glowSprite.material.dispose();
     }
@@ -234,29 +185,58 @@ export class AsteroidField {
   // ═══════════════════════════════════════════════════════════════════════════
   _spawnAsteroid(playerPosition, initialLoad = false) {
     if (this.instances.length >= MAX_INSTANCES) return false;
+    if (this._modelPool.length === 0) return false;
 
-    const isBig = Math.random() < BIG_RATIO;
-    const pool = isBig ? this._modelsBig : this._modelsSmall;
-    if (pool.length === 0) return false;
+    const templateIdx = Math.floor(Math.random() * this._modelPool.length);
+    const template = this._modelPool[templateIdx];
 
-    const modelIndex = Math.floor(Math.random() * pool.length);
-    const scaleMin = isBig ? BIG_SCALE_MIN : SMALL_SCALE_MIN;
-    const scaleMax = isBig ? BIG_SCALE_MAX : SMALL_SCALE_MAX;
+    const scale = SCALE;
+    const colliderRadius = template.colliderRadius * scale;
 
     const instance = new THREE.Group();
-    const model = pool[modelIndex].clone();
-    const scale = scaleMin + Math.random() * (scaleMax - scaleMin);
+    const model = template.mesh.clone();
     model.scale.setScalar(scale);
     instance.add(model);
 
-    const fadeMat = makeInstanceMaterial();
-    applyInstanceMaterial(instance, fadeMat);
+    // Clone materials for per-instance fade control and apply AO; ensure
+    // asteroids don't cast or receive shadows (cheap and visually simpler).
+    const fadeMats = [];
+    instance.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
 
-    _bounds.setFromObject(model);
-    _bounds.getBoundingSphere(_boundingSphere);
+      // Disable shadowing for asteroid meshes
+      child.castShadow = false;
+      child.receiveShadow = false;
 
-    const localCenter = _boundingSphere.center.clone();
-    const colliderRadius = _boundingSphere.radius * BOUNDING_SPHERE_SCALE;
+      // Clone the material so we can tweak it per-instance
+      let mat = child.material.clone();
+
+      // Convert unlit/basic materials to MeshStandardMaterial so lighting
+      // (including AO) affects the surface.
+      if (!mat.isMeshStandardMaterial) {
+        const newMat = new THREE.MeshStandardMaterial({
+          color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
+          roughness: mat.roughness !== undefined ? mat.roughness : 0.9,
+          metalness: mat.metalness !== undefined ? mat.metalness : 0.0,
+        });
+        if (mat.map) newMat.map = mat.map;
+        if (mat.normalMap) newMat.normalMap = mat.normalMap;
+        if (mat.roughnessMap) newMat.roughnessMap = mat.roughnessMap;
+        if (mat.metalnessMap) newMat.metalnessMap = mat.metalnessMap;
+        mat = newMat;
+      }
+
+      // If geometry has UVs but no uv2, keep geometry unchanged (no AO)
+
+      mat.transparent = true;
+      mat.opacity = 0;
+      mat.depthWrite = true;
+
+      child.material = mat;
+      fadeMats.push(child.material);
+    });
+
+    const localCenter = new THREE.Vector3(0, 0, 0);
     const collider = new THREE.Sphere(new THREE.Vector3(), colliderRadius);
 
     instance.rotation.set(
@@ -271,7 +251,7 @@ export class AsteroidField {
     collider.center.copy(instance.localToWorld(_worldCenter.copy(localCenter)));
 
     if (!this._canSpawnAt(collider.center, colliderRadius, playerPosition, initialLoad)) {
-      fadeMat.dispose();
+      for (const m of fadeMats) m.dispose();
       return false;
     }
 
@@ -282,11 +262,11 @@ export class AsteroidField {
     };
 
     const velocity = randomUnitVector().multiplyScalar(
-      MIN_DRIFT_SPEED + Math.random() * (MAX_DRIFT_SPEED - MIN_DRIFT_SPEED)
+      (MIN_DRIFT_SPEED + Math.random() * (MAX_DRIFT_SPEED - MIN_DRIFT_SPEED)) * scale
     );
 
     let glowSprite = null;
-    if (isBig) {
+    if (GLOW_BRIGHTNESS > 0) {
       glowSprite = new THREE.Sprite(GLOW_MATERIAL.clone());
       const glowSize = colliderRadius * 2 * GLOW_RADIUS_MULTIPLIER;
       glowSprite.scale.setScalar(glowSize);
@@ -313,7 +293,7 @@ export class AsteroidField {
       velocity,
       mass: Math.max(colliderRadius * colliderRadius * colliderRadius, 0.001),
       glowSprite,
-      fadeMat,
+      fadeMats,
     });
 
     return true;
@@ -381,15 +361,16 @@ export class AsteroidField {
       ast.boundingSphere.center.copy(ast.mesh.localToWorld(_worldCenter.copy(ast.localCenter)));
 
       // ── Distance fade ────────────────────────────────────────────────────
-      if (playerPosition && ast.fadeMat) {
+      if (playerPosition && ast.fadeMats) {
         const dist = ast.boundingSphere.center.distanceTo(playerPosition);
         let opacity;
         if (dist <= FADE_NEAR) opacity = 1;
         else if (dist >= FADE_FAR) opacity = 0;
         else opacity = 1 - (dist - FADE_NEAR) / (FADE_FAR - FADE_NEAR);
-        ast.fadeMat.opacity = opacity;
-        ast.fadeMat.depthWrite = opacity > 0.5;
-        // Fade glow sprite in sync
+        for (const mat of ast.fadeMats) {
+          mat.opacity = opacity;
+          mat.depthWrite = opacity > 0.5;
+        }
         if (ast.glowSprite) {
           ast.glowSprite.material.opacity = opacity;
         }
