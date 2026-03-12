@@ -1,6 +1,8 @@
 # Node.js
 node_modules/
 
+# Vite / build output
+dist/
 
 # Logs
 npm-debug.log*
