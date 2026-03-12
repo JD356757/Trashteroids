@@ -75,7 +75,7 @@ export class Player {
       sizeSpread: 1.5,
       opacityBase: 2,
       particlesPerSecond: 2400,
-      particleDeathAge: 0.8,
+      particleDeathAge: 0.1,
     };
 
     // Particle pool

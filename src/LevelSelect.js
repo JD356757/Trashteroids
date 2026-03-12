@@ -9,11 +9,19 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
  * the user clicks. Once the ship arrives a confirmation popup appears.
  */
 
+const EARTH_POS = new THREE.Vector3(-12, 0, 0);
+const SHIP_START = new THREE.Vector3(EARTH_POS.x, EARTH_POS.y + 2, EARTH_POS.z + 0);
+
 const LEVEL_DATA = [
-  { id: 1, label: 'LEVEL 1', sub: '15,000 mi — Debris Field', color: 0x00ff88, pos: new THREE.Vector3(-10, 0, 0) },
-  { id: 2, label: 'LEVEL 2', sub: '5,000 mi — Junk Belt',    color: 0xffaa00, pos: new THREE.Vector3(  0, 3, -8) },
-  { id: 3, label: 'LEVEL 3', sub: '1 mi — BOSS',             color: 0xff2244, pos: new THREE.Vector3( 10, 0, 0) },
+  { id: 1, label: 'LEVEL 1', sub: '15,000 mi — Debris Field', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
+  { id: 2, label: 'LEVEL 2', sub: '5,000 mi — Junk Belt',    color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
+  { id: 3, label: 'LEVEL 3', sub: '1 mi — BOSS',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
 ];
+
+// Smooth ease-in-out (cubic)
+function easeInOut(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
 
 export class LevelSelect {
   /**
@@ -40,10 +48,11 @@ export class LevelSelect {
     this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 500);
     this.camera.position.set(0, 8, 22);
     this.camera.lookAt(0, 0, -2);
+    this._orbitAngle = 0; // radians, slowly incremented
 
     /* ── lights ── */
     this.scene.add(new THREE.AmbientLight(0x334466, 1.2));
-    const sun = new THREE.DirectionalLight(0xffffff, 2);
+    const sun = new THREE.DirectionalLight(0xffffff, 2);4
     sun.position.set(10, 15, 10);
     this.scene.add(sun);
 
@@ -54,12 +63,20 @@ export class LevelSelect {
     this.nodes = [];              // { mesh, ring, label3d, data }
     this._buildLevelNodes();
 
+    /* ── mini Earth (home node, same size as level planets) ── */
+    this._buildEarth();
+
     /* ── mini ship ── */
     this.ship = new THREE.Group();
-    this.shipTarget = new THREE.Vector3(0, -2, 6);   // idle position
-    this.ship.position.copy(this.shipTarget);
+    this.ship.position.copy(SHIP_START);
     this.scene.add(this.ship);
     this._loadShipModel();
+
+    // Flight state for ease-in-out movement
+    this._flightFrom = new THREE.Vector3().copy(SHIP_START);
+    this._flightTo = new THREE.Vector3().copy(SHIP_START);
+    this._flightProgress = 1; // 1 = arrived / idle
+    this._flightDuration = 1.5; // seconds for a full trip
 
     /* ── raycaster for click detection ── */
     this.raycaster = new THREE.Raycaster();
@@ -90,8 +107,11 @@ export class LevelSelect {
     this.active = true;
     this._selectedLevel = null;
     this._shipArrived = false;
-    this.ship.position.set(0, -2, 6);
-    this.shipTarget.set(0, -2, 6);
+    this.ship.position.copy(SHIP_START);
+    this._flightFrom.copy(SHIP_START);
+    this._flightTo.copy(SHIP_START);
+    this._flightProgress = 1;
+    this._orbitAngle = 0;
     this._hidePopup();
 
     window.addEventListener('click', this._onClick);
@@ -124,6 +144,7 @@ export class LevelSelect {
     this._animateShip(delta);
     this._animateNodes(delta);
     this._animateStars(delta);
+    this._animateCamera(delta);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -149,30 +170,30 @@ export class LevelSelect {
   }
 
   _animateShip(delta) {
-    // Smooth fly toward target
-    const speed = 6;
-    this.ship.position.lerp(this.shipTarget, 1 - Math.exp(-speed * delta));
+    if (this._flightProgress < 1) {
+      // Advance flight progress
+      this._flightProgress = Math.min(1, this._flightProgress + delta / this._flightDuration);
+      const t = easeInOut(this._flightProgress);
 
-    // Rotate ship to face travel direction
-    const dir = new THREE.Vector3().subVectors(this.shipTarget, this.ship.position);
-    if (dir.lengthSq() > 0.001) {
-      const lookTarget = new THREE.Vector3().copy(this.ship.position).add(dir.normalize());
-      const m = new THREE.Matrix4().lookAt(this.ship.position, lookTarget, new THREE.Vector3(0, 1, 0));
-      const q = new THREE.Quaternion().setFromRotationMatrix(m);
-      this.ship.quaternion.slerp(q, 1 - Math.exp(-4 * delta));
-    }
+      // Interpolate position along straight line with easing
+      this.ship.position.lerpVectors(this._flightFrom, this._flightTo, t);
 
-    // Check arrival
-    if (this._selectedLevel && !this._shipArrived) {
-      const dist = this.ship.position.distanceTo(this.shipTarget);
-      if (dist < 0.3) {
+      // Rotate ship to face travel direction
+      const dir = new THREE.Vector3().subVectors(this._flightTo, this._flightFrom);
+      if (dir.lengthSq() > 0.001) {
+        const lookTarget = new THREE.Vector3().copy(this.ship.position).add(dir.normalize());
+        const m = new THREE.Matrix4().lookAt(this.ship.position, lookTarget, new THREE.Vector3(0, 1, 0));
+        const q = new THREE.Quaternion().setFromRotationMatrix(m);
+        this.ship.quaternion.slerp(q, 1 - Math.exp(-8 * delta));
+      }
+
+      // Check arrival
+      if (this._flightProgress >= 1 && this._selectedLevel && !this._shipArrived) {
         this._shipArrived = true;
         this._showPopup();
       }
-    }
-
-    // Gentle hover bob when idle
-    if (!this._selectedLevel) {
+    } else {
+      // Gentle hover bob when idle
       this.ship.position.y += Math.sin(Date.now() * 0.002) * 0.003;
     }
   }
@@ -203,9 +224,9 @@ export class LevelSelect {
       ring.rotation.x = Math.PI / 2;
       this.scene.add(ring);
 
-      // 3D text sprite label
+      // 3D text sprite label (placed below the node so ship can sit above)
       const label = this._makeTextSprite(data.label, data.color);
-      label.position.copy(data.pos).add(new THREE.Vector3(0, 2, 0));
+      label.position.copy(data.pos).add(new THREE.Vector3(0, -2, 0));
       this.scene.add(label);
 
       this.nodes.push({ mesh, ring, label, data });
@@ -214,11 +235,22 @@ export class LevelSelect {
 
   _animateNodes(delta) {
     const t = Date.now() * 0.001;
+
+    // Animate Earth the same way
+    if (this._earthMesh) {
+      this._earthMesh.position.y = EARTH_POS.y + Math.sin(t) * 0.3;
+      this._earthRing.position.y = this._earthMesh.position.y;
+      this._earthLabel.position.y = this._earthMesh.position.y - 2;
+      this._earthRing.rotation.z += delta * 0.5;
+      const ep = 1 + Math.sin(t * 2) * 0.08;
+      this._earthMesh.scale.setScalar(ep);
+    }
+
     for (const node of this.nodes) {
       // Gentle float
       node.mesh.position.y = node.data.pos.y + Math.sin(t + node.data.id * 2) * 0.3;
       node.ring.position.y = node.mesh.position.y;
-      node.label.position.y = node.mesh.position.y + 2;
+      node.label.position.y = node.mesh.position.y - 2;
 
       // Rotate ring
       node.ring.rotation.z += delta * 0.5;
@@ -271,18 +303,41 @@ export class LevelSelect {
     this._mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
     this.raycaster.setFromCamera(this._mouse, this.camera);
-    const meshes = this.nodes.map(n => n.mesh);
+    // include node meshes + rings + earth meshes so clicks on any of them count
+    const meshes = [];
+    for (const n of this.nodes) {
+      meshes.push(n.mesh, n.ring, n.label);
+    }
+    if (this._earthMesh) meshes.push(this._earthMesh, this._earthRing, this._earthLabel);
+
     const hits = this.raycaster.intersectObjects(meshes);
 
     if (hits.length > 0) {
-      const id = hits[0].object.userData.levelId;
-      const levelData = LEVEL_DATA.find(l => l.id === id);
-      if (levelData) {
-        this._selectedLevel = levelData;
+      const obj = hits[0].object;
+      // Earth clicked -> fly back home (no popup)
+      if (this._earthMesh && (obj === this._earthMesh || obj === this._earthRing || obj === this._earthLabel)) {
+        this._selectedLevel = null;
         this._shipArrived = false;
         this._hidePopup();
-        // Fly ship to that node (offset slightly in front)
-        this.shipTarget.copy(levelData.pos).add(new THREE.Vector3(0, -1.2, 2.5));
+        this._flightFrom.copy(this.ship.position);
+        this._flightTo.copy(SHIP_START);
+        this._flightProgress = 0;
+        return;
+      }
+
+      // Otherwise attempt to resolve a level id
+      const id = obj.userData && obj.userData.levelId;
+      if (id) {
+        const levelData = LEVEL_DATA.find(l => l.id === id);
+        if (levelData) {
+          this._selectedLevel = levelData;
+          this._shipArrived = false;
+          this._hidePopup();
+          // Start eased flight from current position to just above the level icon
+          this._flightFrom.copy(this.ship.position);
+          this._flightTo.copy(levelData.pos).add(new THREE.Vector3(0, 2, 0));
+          this._flightProgress = 0;
+        }
       }
     }
   }
@@ -311,10 +366,60 @@ export class LevelSelect {
   _cancelPopup() {
     this._hidePopup();
     this._selectedLevel = null;
-    this.shipTarget.set(0, -2, 6); // fly back to idle position
+    // Fly back to above Earth
+    this._flightFrom.copy(this.ship.position);
+    this._flightTo.copy(SHIP_START);
+    this._flightProgress = 0;
   }
 
   /* ── helpers ── */
+
+  _animateCamera(delta) {
+    // Slowly orbit around the center of the level layout
+    this._orbitAngle += delta * 0.08;
+    const radius = 28;
+    const height = 10;
+    const cx = 0, cz = -4; // center of the layout
+    this.camera.position.set(
+      cx + Math.sin(this._orbitAngle) * radius,
+      height + Math.sin(this._orbitAngle * 0.5) * 2,
+      cz + Math.cos(this._orbitAngle) * radius
+    );
+    this.camera.lookAt(cx, 1, cz);
+  }
+
+  _buildEarth() {
+    const geo = new THREE.SphereGeometry(1.0, 64, 64);
+    const loader = new THREE.TextureLoader();
+    const diffuse = loader.load('/textures/planet/Earth_Diffuse_6K.jpg');
+    const normal = loader.load('/textures/planet/Earth_NormalNRM_6K.jpg');
+
+    const mat = new THREE.MeshStandardMaterial({
+      map: diffuse,
+      normalMap: normal,
+      roughness: 1.0,
+      metalness: 0.0,
+    });
+    this._earthMesh = new THREE.Mesh(geo, mat);
+    this._earthMesh.position.copy(EARTH_POS);
+    this.scene.add(this._earthMesh);
+
+    // (cloud layer removed per user request)
+
+    // Ring around Earth
+    const ringGeo = new THREE.TorusGeometry(1.5, 0.04, 16, 64);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.4 });
+    this._earthRing = new THREE.Mesh(ringGeo, ringMat);
+    this._earthRing.position.copy(EARTH_POS);
+    this._earthRing.rotation.x = Math.PI / 2;
+    this.scene.add(this._earthRing);
+
+    // Label
+    const label = this._makeTextSprite('EARTH', 0x4488ff);
+    label.position.copy(EARTH_POS).add(new THREE.Vector3(0, -2, 0));
+    this._earthLabel = label;
+    this.scene.add(label);
+  }
 
   _makeTextSprite(text, color) {
     const canvas = document.createElement('canvas');

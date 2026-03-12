@@ -137,9 +137,9 @@ body {
 /* ── Level Select Popup ── */
 #level-popup {
   position: fixed;
-  top: 50%;
+  bottom: 32px;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   z-index: 30;
   background: rgba(0, 0, 20, 0.92);
   border: 2px solid #0ff;
@@ -150,8 +150,8 @@ body {
   animation: popIn 0.25s ease-out;
 }
 @keyframes popIn {
-  from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
-  to   { transform: translate(-50%, -50%) scale(1);   opacity: 1; }
+  from { transform: translateX(-50%) scale(0.7); opacity: 0; }
+  to   { transform: translateX(-50%) scale(1);   opacity: 1; }
 }
 #level-popup-label {
   font-size: 24px;
