@@ -3,81 +3,67 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const _dir = new THREE.Vector3();
 const _drift = new THREE.Vector3();
+const _spawnPos = new THREE.Vector3();
 const _defaultScale = new THREE.Vector3(1, 1, 1);
+const _closestPoint = new THREE.Vector3();
+const _collisionDelta = new THREE.Vector3();
+const _collisionNormal = new THREE.Vector3();
+const _separation = new THREE.Vector3();
+const TRASH_HITBOX_SCALE = 0.7;
+const TRASH_COLLISION_PADDING = 0.28;
+const DEBRIS_FADE_NEAR = 2500;
+const DEBRIS_FADE_FAR = 3000;
+const DEBRIS_DESPAWN_DISTANCE = 3200;
+const MAX_SPAWN_ATTEMPTS = 24;
 
-// Debris type definitions
 const DEBRIS_TYPES = {
-  bluePlasticBag: {
-    modelPath: '/models/blue_plastic_bag.glb',
-    modelScale: 0.35,
+  b1: {
+    modelPath: '/models/b1.glb',
+    modelScale: 0.03,
     color: 0x7cc7ff,
-    emissive: 0x0d2d55,
+    emissive: 0x17374e,
     geometry: 'dodecahedron',
+    size: [2, 2, 2],
     points: 100,
-    size: [0.8, 0.8, 0.8],
-    hitRadius: 0.5,
-    speedMultiplier: 0.9,
-    drift: 1.8,
+    hitRadius: 0.9,
+    speedMultiplier: 1.0,
+    drift: 0.18,
   },
-  bottle: {
-    modelPath: '/models/bottle.glb',
-    modelScale: 0.025,
+  b2: {
+    modelPath: '/models/b2.glb',
+    modelScale: 0.03,
     color: 0x65d98d,
-    emissive: 0x14331f,
-    size: [0.4, 1.0, 0.4],
-    geometry: 'capsule',
-    points: 150,
-    hitRadius: 0.4,
+    emissive: 0x173d28,
+    geometry: 'dodecahedron',
+    size: [2, 2, 2],
+    points: 120,
+    hitRadius: 0.9,
     speedMultiplier: 1.05,
-    drift: 1.4,
+    drift: 0.2,
+  },
+  b3: {
+    modelPath: '/models/b3.glb',
+    modelScale: 0.03,
+    color: 0xf48c1b,
+    emissive: 0x4a2203,
+    geometry: 'dodecahedron',
+    size: [2, 2, 2],
+    points: 140,
+    hitRadius: 0.9,
+    speedMultiplier: 1.1,
+    drift: 0.22,
   },
   laptop: {
     modelPath: '/models/laptop.glb',
-    modelScale: 0.025,
-    color: 0x808080,
-    emissive: 0x151515,
-    size: [1.1, 0.25, 0.9],
-    geometry: 'box',
-    points: 200,
-    hitRadius: 0.6,
-    speedMultiplier: 0.8,
-    drift: 0.9,
-  },
-  soda1: {
-    modelPath: '/models/soda1.glb',
-    modelScale: 0.025,
-    color: 0xdf4037,
-    emissive: 0x40100f,
-    size: [0.3, 0.7, 0.3],
-    geometry: 'cylinder',
-    points: 140,
-    hitRadius: 0.35,
-    speedMultiplier: 1.25,
-    drift: 2.8,
-  },
-  soda2: {
-    modelPath: '/models/soda2.glb',
-    modelScale: 0.025,
-    color: 0xf48c1b,
-    emissive: 0x4a2203,
-    size: [0.3, 0.7, 0.3],
-    geometry: 'cylinder',
-    points: 140,
-    hitRadius: 0.35,
-    speedMultiplier: 1.15,
-    drift: 3.1,
-  },
-  soda3: {
-    modelPath: '/models/soda3.glb',
-    modelScale: 0.025,
-    color: 0xb93be1,
-    emissive: 0x2f103b,
-    size: [0.3, 0.7, 0.3],
-    geometry: 'cylinder',
-    points: 140,
-    hitRadius: 0.35,
-    speedMultiplier: 1.35,
-    drift: 2.5,
+    modelScale: 0.03,
+    color: 0x8a8a95,
+    emissive: 0x1f1f28,
+    geometry: 'dodecahedron',
+    size: [2, 2, 2],
+    points: 180,
+    hitRadius: 1.0,
+    speedMultiplier: 0.9,
+    drift: 0.14,
   },
 };
 
@@ -89,74 +75,60 @@ function createDebrisMesh(type) {
     return instance;
   }
 
-  let geo;
-  switch (def.geometry) {
-    case 'box':
-      geo = new THREE.BoxGeometry(def.size[0], def.size[1], def.size[2]);
-      break;
-    case 'capsule':
-      geo = new THREE.CapsuleGeometry(def.size[0] * 0.35, def.size[1] * 0.4, 4, 8);
-      break;
-    case 'cylinder':
-      geo = new THREE.CylinderGeometry(def.size[0], def.size[0], def.size[1], 8);
-      break;
-    case 'icosahedron':
-      geo = new THREE.IcosahedronGeometry(def.size[0] * 0.6, 0);
-      break;
-    case 'dodecahedron':
-    default:
-      geo = new THREE.DodecahedronGeometry(def.size[0] * 0.6, 0);
-      break;
-  }
-
+  const geo = new THREE.DodecahedronGeometry(def.size[0] * 0.6, 0);
   const mat = new THREE.MeshStandardMaterial({
     color: def.color,
     emissive: def.emissive,
     metalness: 0.3,
     roughness: 0.7,
-    wireframe: false,
+    transparent: true,
   });
 
   const mesh = new THREE.Mesh(geo, mat);
-
-  // Neon outline — slightly larger wireframe shell
-  const outlineGeo = geo.clone();
-  const outlineMat = new THREE.MeshBasicMaterial({
-    color: def.color,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.3,
-  });
-  const outline = new THREE.Mesh(outlineGeo, outlineMat);
+  const outline = new THREE.Mesh(
+    geo.clone(),
+    new THREE.MeshBasicMaterial({
+      color: def.color,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.3,
+    })
+  );
   outline.scale.setScalar(1.15);
   mesh.add(outline);
-
   return mesh;
 }
 
 export class DebrisManager {
   constructor(scene) {
     this.scene = scene;
-    this.active = [];       // { mesh, velocity, rotSpeed, points, hitRadius, position (ref) }
+    this.active = [];
     this.spawnTimer = 0;
-    this.despawnDist = 120; // remove when this far from player
+    this.despawnDist = DEBRIS_DESPAWN_DISTANCE;
+    this.maxSpawnPerFrame = 28;
+    this.sectionOccupancy = new Map();
     this._loadModelTemplates();
   }
 
-  /**
-   * @param {number} delta
-   * @param {object} spawnConfig
-   * @param {THREE.Vector3} playerPos - current player world position
-   */
   update(delta, spawnConfig, playerPos) {
-    // Spawn new debris
     this.spawnTimer -= delta;
+    const desiredCount = spawnConfig.minActive ?? 4;
+    const missingCount = Math.max(0, desiredCount - this.active.length);
+    let spawnCount = Math.min(this.maxSpawnPerFrame, missingCount);
+
     if (this.spawnTimer <= 0) {
-      this._spawn(spawnConfig, playerPos);
-      this.spawnTimer = spawnConfig.interval;
+      spawnCount = Math.max(spawnCount, 1);
+      this.spawnTimer += spawnConfig.interval;
     }
 
-    // Move & rotate existing debris
+    for (let i = 0; i < spawnCount; i++) {
+      this._spawn(spawnConfig, playerPos);
+    }
+
+    if (spawnCount > 0 && this.active.length < desiredCount) {
+      this.spawnTimer = Math.min(this.spawnTimer, spawnConfig.interval * 0.7);
+    }
+
     for (let i = this.active.length - 1; i >= 0; i--) {
       const d = this.active[i];
       d.mesh.position.addScaledVector(d.velocity, delta);
@@ -164,80 +136,266 @@ export class DebrisManager {
       d.mesh.rotation.y += d.rotSpeed.y * delta;
       d.mesh.rotation.z += d.rotSpeed.z * delta;
 
-      // Despawn if too far from player
-      if (d.mesh.position.distanceTo(playerPos) > this.despawnDist) {
+      const distance = d.mesh.position.distanceTo(playerPos);
+      this._applyFade(d, distance);
+
+      if (distance > this.despawnDist) {
+        this._releaseSectionSlot(d.sectionKey);
         this.scene.remove(d.mesh);
         this.active.splice(i, 1);
       }
     }
+
+    this._resolveTrashCollisions();
   }
 
   _spawn(config, playerPos) {
-    const types = config.types || ['bluePlasticBag'];
+    const types = config.types || ['b1'];
     const type = types[Math.floor(Math.random() * types.length)];
     const def = DEBRIS_TYPES[type];
+    const spawnData = this._findSpawnPosition(config, playerPos);
+    if (!spawnData) return false;
 
     const mesh = createDebrisMesh(type);
-
-    // Spawn on a spherical shell around the player
-    const spawnRadius = config.spawnRadius || 70;
-    const theta = Math.random() * Math.PI * 2;       // azimuth
-    const phi = Math.acos(2 * Math.random() - 1);    // polar — full sphere
-    const sx = Math.sin(phi) * Math.cos(theta) * spawnRadius;
-    const sy = Math.sin(phi) * Math.sin(theta) * spawnRadius;
-    const sz = Math.cos(phi) * spawnRadius;
-    mesh.position.set(
-      playerPos.x + sx,
-      playerPos.y + sy,
-      playerPos.z + sz
-    );
+    mesh.position.copy(spawnData.position);
     mesh.rotation.set(
       Math.random() * Math.PI * 2,
       Math.random() * Math.PI * 2,
       Math.random() * Math.PI * 2
     );
 
-    // Velocity: roughly toward player with some spread
     _dir.copy(playerPos).sub(mesh.position).normalize();
-    // Add random spread
-    _dir.x += (Math.random() - 0.5) * 0.4;
-    _dir.y += (Math.random() - 0.5) * 0.4;
-    _dir.z += (Math.random() - 0.5) * 0.4;
+    _dir.x += (Math.random() - 0.5) * 0.14;
+    _dir.y += (Math.random() - 0.5) * 0.14;
+    _dir.z += (Math.random() - 0.5) * 0.14;
     _dir.normalize();
 
     _drift.set(
       Math.random() - 0.5,
       Math.random() - 0.5,
       Math.random() - 0.5
-    ).normalize().multiplyScalar(def.drift || 1.2);
-    _dir.addScaledVector(_drift, 0.08).normalize();
+    ).normalize().multiplyScalar(def.drift || 0.18);
+    _dir.addScaledVector(_drift, 0.03).normalize();
 
-    const speedMul = def.speedMultiplier || 1;
-    const speed = (config.speed + Math.random() * config.speedVariance) * speedMul;
+    const speed = (config.speed + Math.random() * config.speedVariance) * (def.speedMultiplier || 1);
     const velocity = _dir.clone().multiplyScalar(speed).add(_drift);
 
     this.scene.add(mesh);
+    const hitHalfSize = new THREE.Vector3(
+      def.size[0] * TRASH_HITBOX_SCALE,
+      def.size[1] * TRASH_HITBOX_SCALE,
+      def.size[2] * TRASH_HITBOX_SCALE
+    );
+    const collisionHalfSize = hitHalfSize.clone().addScalar(TRASH_COLLISION_PADDING);
+    const fadeMaterials = this._prepareFadeMaterials(mesh);
 
     this.active.push({
       mesh,
       velocity,
       rotSpeed: {
-        x: (Math.random() - 0.5) * 3,
-        y: (Math.random() - 0.5) * 3,
-        z: (Math.random() - 0.5) * 3,
+        x: (Math.random() - 0.5) * 1.2,
+        y: (Math.random() - 0.5) * 1.2,
+        z: (Math.random() - 0.5) * 1.2,
       },
       points: def.points,
       hitRadius: def.hitRadius,
+      hitHalfSize,
+      collisionHalfSize,
+      fadeMaterials,
+      sectionKey: spawnData.sectionKey,
       position: mesh.position,
     });
+
+    return true;
+  }
+
+  _findSpawnPosition(config, playerPos) {
+    const sectionSize = config.sectionSize || 800;
+    const minDistance = config.spawnMinDistance ?? config.spawnRadius ?? 1800;
+    const maxDistance = config.spawnMaxDistance ?? (minDistance + (config.spawnJitter || 200));
+    const verticalSpread = config.verticalSpread || 0.35;
+    const sectionTrashAmount = Math.max(1, config.sectionTrashAmount ?? 3);
+    const sectionDensity = THREE.MathUtils.clamp(config.sectionDensity ?? 0.5, 0.05, 1);
+    const sectionLimit = Math.max(1, Math.round(sectionTrashAmount * sectionDensity));
+
+    for (let attempt = 0; attempt < MAX_SPAWN_ATTEMPTS; attempt++) {
+      const spawnDistance = minDistance + Math.random() * Math.max(1, maxDistance - minDistance);
+      const theta = Math.random() * Math.PI * 2;
+      const sy = (Math.random() * 2 - 1) * spawnDistance * verticalSpread;
+      const horizontalRadius = Math.sqrt(Math.max(0, spawnDistance * spawnDistance - sy * sy));
+      const sx = Math.cos(theta) * horizontalRadius;
+      const sz = Math.sin(theta) * horizontalRadius;
+
+      _spawnPos.set(playerPos.x + sx, playerPos.y + sy, playerPos.z + sz);
+
+      const sectionKey = this._getSpawnCellKey(_spawnPos, sectionSize);
+      const usedInSection = this.sectionOccupancy.get(sectionKey) || 0;
+      if (usedInSection >= sectionLimit) continue;
+
+      this.sectionOccupancy.set(sectionKey, usedInSection + 1);
+      return {
+        position: _spawnPos.clone(),
+        sectionKey,
+      };
+    }
+
+    return null;
+  }
+
+  _getSpawnCellKey(position, cellSize) {
+    const x = Math.floor(position.x / cellSize);
+    const y = Math.floor(position.y / cellSize);
+    const z = Math.floor(position.z / cellSize);
+    return `${x}:${y}:${z}`;
+  }
+
+  _releaseSectionSlot(sectionKey) {
+    if (!sectionKey) return;
+    const used = this.sectionOccupancy.get(sectionKey);
+    if (!used) return;
+    if (used <= 1) {
+      this.sectionOccupancy.delete(sectionKey);
+      return;
+    }
+    this.sectionOccupancy.set(sectionKey, used - 1);
+  }
+
+  _prepareFadeMaterials(mesh) {
+    const fadeMaterials = [];
+
+    mesh.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      const cloned = materials.map((material) => {
+        const next = material.clone();
+        next.transparent = true;
+        fadeMaterials.push(next);
+        return next;
+      });
+      child.material = Array.isArray(child.material) ? cloned : cloned[0];
+    });
+
+    return fadeMaterials;
+  }
+
+  _applyFade(debris, distance) {
+    let opacity = 1;
+    if (distance > DEBRIS_FADE_NEAR) {
+      opacity = distance >= DEBRIS_FADE_FAR
+        ? 0
+        : 1 - (distance - DEBRIS_FADE_NEAR) / (DEBRIS_FADE_FAR - DEBRIS_FADE_NEAR);
+    }
+
+    if (!debris.fadeMaterials) return;
+    for (let i = 0; i < debris.fadeMaterials.length; i++) {
+      const material = debris.fadeMaterials[i];
+      material.opacity = opacity;
+      material.depthWrite = opacity > 0.45;
+    }
+  }
+
+  resolveAsteroidCollisions(asteroids) {
+    if (!asteroids || asteroids.length === 0) return;
+
+    for (let i = 0; i < this.active.length; i++) {
+      const debris = this.active[i];
+      const halfSize = debris.collisionHalfSize || debris.hitHalfSize;
+      if (!halfSize) continue;
+
+      for (let j = 0; j < asteroids.length; j++) {
+        const sphere = asteroids[j].boundingSphere;
+        const minX = debris.position.x - halfSize.x;
+        const maxX = debris.position.x + halfSize.x;
+        const minY = debris.position.y - halfSize.y;
+        const maxY = debris.position.y + halfSize.y;
+        const minZ = debris.position.z - halfSize.z;
+        const maxZ = debris.position.z + halfSize.z;
+
+        _closestPoint.set(
+          THREE.MathUtils.clamp(sphere.center.x, minX, maxX),
+          THREE.MathUtils.clamp(sphere.center.y, minY, maxY),
+          THREE.MathUtils.clamp(sphere.center.z, minZ, maxZ)
+        );
+
+        _collisionDelta.copy(debris.position).sub(sphere.center);
+        _collisionNormal.copy(sphere.center).sub(_closestPoint);
+        let overlap = sphere.radius;
+
+        if (_collisionNormal.lengthSq() > 1e-8) {
+          const distance = _collisionNormal.length();
+          overlap -= distance;
+          if (overlap <= 0) continue;
+          _collisionNormal.multiplyScalar(1 / distance);
+        } else {
+          const ax = Math.abs(_collisionDelta.x / Math.max(halfSize.x, 1e-6));
+          const ay = Math.abs(_collisionDelta.y / Math.max(halfSize.y, 1e-6));
+          const az = Math.abs(_collisionDelta.z / Math.max(halfSize.z, 1e-6));
+
+          if (ax >= ay && ax >= az) {
+            _collisionNormal.set(Math.sign(_collisionDelta.x) || 1, 0, 0);
+            overlap += halfSize.x - Math.abs(_collisionDelta.x);
+          } else if (ay >= az) {
+            _collisionNormal.set(0, Math.sign(_collisionDelta.y) || 1, 0);
+            overlap += halfSize.y - Math.abs(_collisionDelta.y);
+          } else {
+            _collisionNormal.set(0, 0, Math.sign(_collisionDelta.z) || 1);
+            overlap += halfSize.z - Math.abs(_collisionDelta.z);
+          }
+        }
+
+        debris.position.addScaledVector(_collisionNormal, overlap + 0.02);
+        const inwardSpeed = debris.velocity.dot(_collisionNormal);
+        if (inwardSpeed < 0) {
+          debris.velocity.addScaledVector(_collisionNormal, -inwardSpeed * 1.35);
+        }
+      }
+    }
+  }
+
+  _resolveTrashCollisions() {
+    for (let i = 0; i < this.active.length; i++) {
+      const a = this.active[i];
+      const halfA = a.collisionHalfSize || a.hitHalfSize;
+      if (!halfA) continue;
+
+      for (let j = i + 1; j < this.active.length; j++) {
+        const b = this.active[j];
+        const halfB = b.collisionHalfSize || b.hitHalfSize;
+        if (!halfB) continue;
+
+        const overlapX = halfA.x + halfB.x - Math.abs(a.position.x - b.position.x);
+        if (overlapX <= 0) continue;
+        const overlapY = halfA.y + halfB.y - Math.abs(a.position.y - b.position.y);
+        if (overlapY <= 0) continue;
+        const overlapZ = halfA.z + halfB.z - Math.abs(a.position.z - b.position.z);
+        if (overlapZ <= 0) continue;
+
+        if (overlapX <= overlapY && overlapX <= overlapZ) {
+          _separation.set(Math.sign(a.position.x - b.position.x) || 1, 0, 0).multiplyScalar(overlapX * 0.5 + 0.01);
+        } else if (overlapY <= overlapZ) {
+          _separation.set(0, Math.sign(a.position.y - b.position.y) || 1, 0).multiplyScalar(overlapY * 0.5 + 0.01);
+        } else {
+          _separation.set(0, 0, Math.sign(a.position.z - b.position.z) || 1).multiplyScalar(overlapZ * 0.5 + 0.01);
+        }
+
+        a.position.add(_separation);
+        b.position.sub(_separation);
+
+        _separation.normalize();
+        const aSpeed = a.velocity.dot(_separation);
+        const bSpeed = b.velocity.dot(_separation);
+        if (aSpeed < bSpeed) {
+          a.velocity.addScaledVector(_separation, bSpeed - aSpeed);
+          b.velocity.addScaledVector(_separation, aSpeed - bSpeed);
+        }
+      }
+    }
   }
 
   _loadModelTemplates() {
     const loader = new GLTFLoader();
 
     for (const def of Object.values(DEBRIS_TYPES)) {
-      if (!def.modelPath) continue;
-
       loader.load(def.modelPath, (gltf) => {
         const template = gltf.scene;
         template.traverse((child) => {
@@ -259,6 +417,7 @@ export class DebrisManager {
   remove(index) {
     const d = this.active[index];
     if (d) {
+      this._releaseSectionSlot(d.sectionKey);
       this.scene.remove(d.mesh);
       this.active.splice(index, 1);
     }

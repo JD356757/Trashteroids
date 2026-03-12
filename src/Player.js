@@ -16,8 +16,9 @@ const _particleColor = new THREE.Color();
 export class Player {
   constructor(scene) {
     // Flight parameters
-    this.thrustPower = 1000;
-    this.recoilAcceleration = 70;
+    this.thrustPower = 500;
+    this.boostMultiplier = 2.0;
+    this.recoilAcceleration = 42;
     this.mouseSensitivity = 0.024;
     this.turnAcceleration = 16.0;
     this.maxTurnRate = 2.9;
@@ -75,7 +76,7 @@ export class Player {
       sizeSpread: 1.5,
       opacityBase: 2,
       particlesPerSecond: 2400,
-      particleDeathAge: 0.1,
+      particleDeathAge: 0.07,
     };
 
     // Particle pool
@@ -205,12 +206,12 @@ export class Player {
   /**
    * Apply forward thrust along the ship's facing direction.
    */
-  thrust(delta) {
+  thrust(delta, boostMultiplier = 1) {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
-    this.velocity.addScaledVector(_forward, this.thrustPower * delta);
+    this.velocity.addScaledVector(_forward, this.thrustPower * boostMultiplier * delta);
     // mark thrust active for exhaust visuals
     this.thrustActive = true;
-    this.thrustLevel = 1.0;
+    this.thrustLevel = Math.min(1.35, boostMultiplier);
   }
 
   applyRecoil(duration) {

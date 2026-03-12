@@ -13,6 +13,9 @@ export class HUD {
     this.bossIndicatorDist = document.getElementById('boss-indicator-dist');
     this.minimap = document.getElementById('minimap');
     this.minimapCanvas = document.getElementById('minimap-canvas');
+    this.boostBarContainer = document.getElementById('boost-bar-container');
+    this.boostBarFill = document.getElementById('boost-bar-fill');
+    this.boostBarLabel = document.getElementById('boost-bar-label');
     if (this.minimapCanvas) {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
@@ -33,7 +36,7 @@ export class HUD {
     this.bossIndicatorDist.textContent = `${distance} mi`;
   }
 
-  updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids) {
+  updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids, debrisList) {
     if (!visible || !this.minimapCanvas) {
       if (!this.minimap.classList.contains('hidden')) {
         this.minimap.classList.add('hidden');
@@ -85,6 +88,33 @@ export class HUD {
           ctx.fill();
         }
       }
+    }
+
+    if (debrisList && playerPos && camInvQuat) {
+      ctx.fillStyle = '#ff4d4d';
+      ctx.shadowColor = '#ff4d4d';
+      ctx.shadowBlur = 6;
+
+      for (let i = 0; i < debrisList.length; i += 10) {
+        const debris = debrisList[i];
+        _v.copy(debris.position).sub(playerPos);
+
+        if (_v.lengthSq() > maxRange * maxRange) continue;
+
+        _v.applyQuaternion(camInvQuat);
+        const dx = _v.x / maxRange;
+        const dy = _v.z / maxRange;
+
+        if (dx * dx + dy * dy <= 1) {
+          const px = cx + dx * radius;
+          const py = cy + dy * radius;
+          ctx.beginPath();
+          ctx.arc(px, py, 2.1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.shadowBlur = 0;
     }
 
     // Draw Boss
@@ -145,6 +175,17 @@ export class HUD {
     this.bossContainer.classList.remove('hidden');
     const pct = Math.max(0, (health / maxHealth) * 100);
     this.bossFill.style.width = `${pct}%`;
+  }
+
+  updateBoostBar(charge, active) {
+    if (!this.boostBarFill || !this.boostBarContainer) return;
+    this.boostBarContainer.classList.remove('hidden');
+    const pct = Math.max(0, Math.min(1, charge)) * 100;
+    this.boostBarFill.style.width = `${pct}%`;
+    this.boostBarFill.classList.toggle('boosting', !!active);
+    if (this.boostBarLabel) {
+      this.boostBarLabel.textContent = active ? 'BOOST' : 'RECHARGE';
+    }
   }
 
   showMessage(text) {

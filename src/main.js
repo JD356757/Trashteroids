@@ -1,4 +1,5 @@
 import { Game } from './Game.js';
+import { IntroScene } from './IntroScene.js';
 import { LevelSelect } from './LevelSelect.js';
 
 const overlay = document.getElementById('overlay');
@@ -7,6 +8,8 @@ const canvas = document.getElementById('game-canvas');
 const crosshair = document.getElementById('crosshair');
 
 let game = null;
+const introScene = new IntroScene(canvas);
+introScene.show();
 
 /* ── Level Select Screen ── */
 const levelSelect = new LevelSelect(canvas, (levelId) => {
@@ -19,6 +22,7 @@ const levelSelect = new LevelSelect(canvas, (levelId) => {
 
 function showLevelSelect() {
   if (overlay.classList.contains('hidden')) return;
+  introScene.hide();
   overlay.classList.add('hidden');
   levelSelect.show();
 }

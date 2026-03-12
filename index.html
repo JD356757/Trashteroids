@@ -7,35 +7,37 @@
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
-  <!-- HUD overlay -->
   <div id="hud">
     <div id="hud-score">SCORE: 0</div>
-    <div id="hud-level">LEVEL 1 — 15,000 mi</div>
+    <div id="hud-level">LEVEL 1 - 15,000 mi</div>
     <div id="hud-lives">LIVES: ♥♥♥</div>
   </div>
 
-  <!-- Boss Indicator -->
   <div id="boss-indicator" class="hidden">
     <div id="boss-indicator-arrow">▲</div>
     <div id="boss-indicator-dist">0 mi</div>
   </div>
 
-  <!-- Title / cutscene overlay -->
   <div id="overlay">
-    <h1>TRASHTEROID</h1>
-    <p class="subtitle">YEAR 2167 — A colossal trash asteroid is on a collision course with Earth.</p>
-    <p class="subtitle">Pilot your spacecraft. Vaporize the waste. Save the planet.</p>
-    <button id="start-btn">START MISSION</button>
-    <p class="hint">Press <kbd>9</kbd> to skip cutscenes</p>
+    <div class="overlay-backdrop"></div>
+    <div class="overlay-panel">
+      <h1>TRASHTEROID</h1>
+    </div>
+    <div class="overlay-actions">
+      <button id="start-btn">START MISSION</button>
+    </div>
   </div>
 
-  <!-- Boss health bar (hidden until Level 3) -->
   <div id="boss-bar-container" class="hidden">
     <div id="boss-bar-label">TRASHTEROID</div>
     <div id="boss-bar-track"><div id="boss-bar-fill"></div></div>
   </div>
 
-  <!-- Crosshair reticle (visible during gameplay) -->
+  <div id="boost-bar-container" class="hidden">
+    <div id="boost-bar-label">RECHARGE</div>
+    <div id="boost-bar-track"><div id="boost-bar-fill"></div></div>
+  </div>
+
   <div id="crosshair" class="hidden">
     <div class="crosshair-ring"></div>
     <div class="crosshair-line crosshair-left"></div>
@@ -44,17 +46,15 @@
     <div class="crosshair-dot"></div>
   </div>
 
-  <!-- Level-select confirmation popup -->
   <div id="level-popup" class="hidden">
     <div id="level-popup-label">LEVEL 1</div>
-    <div id="level-popup-sub">15,000 mi — Debris Field</div>
+    <div id="level-popup-sub">15,000 mi - Debris Field</div>
     <div id="level-popup-buttons">
       <button id="level-popup-yes">START LEVEL</button>
       <button id="level-popup-no">BACK</button>
     </div>
   </div>
 
-  <!-- Minimap -->
   <div id="minimap" class="hidden">
     <canvas id="minimap-canvas" width="150" height="150"></canvas>
   </div>

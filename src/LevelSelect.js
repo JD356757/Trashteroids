@@ -222,11 +222,13 @@ export class LevelSelect {
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.position.copy(data.pos);
       ring.rotation.x = Math.PI / 2;
+      ring.userData.levelId = data.id;
       this.scene.add(ring);
 
       // 3D text sprite label (placed below the node so ship can sit above)
       const label = this._makeTextSprite(data.label, data.color);
       label.position.copy(data.pos).add(new THREE.Vector3(0, -2, 0));
+      label.userData.levelId = data.id;
       this.scene.add(label);
 
       this.nodes.push({ mesh, ring, label, data });
