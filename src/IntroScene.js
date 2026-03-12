@@ -11,7 +11,7 @@ export class IntroScene {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x040816, 0.016);
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(0x040816);
@@ -19,7 +19,8 @@ export class IntroScene {
     this.camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 300);
     this.camera.position.set(0, 1.5, 16);
 
-    this.clock = new THREE.Clock();
+    this.timer = new THREE.Timer();
+    this.timer.connect(document);
     this._rafId = null;
     this._elapsed = 0;
     this.overlay = document.getElementById('overlay');
@@ -40,7 +41,7 @@ export class IntroScene {
   show() {
     if (this.active) return;
     this.active = true;
-    this.clock.start();
+    this.timer.reset();
     window.addEventListener('resize', this._onResize);
     this._frame();
   }
@@ -61,6 +62,7 @@ export class IntroScene {
 
   dispose() {
     this.hide();
+    this.timer.dispose();
     this.renderer.dispose();
   }
 
@@ -272,10 +274,11 @@ export class IntroScene {
     });
   }
 
-  _frame() {
+  _frame(timestamp) {
     if (!this.active) return;
     this._rafId = requestAnimationFrame(this._frame);
-    const delta = this.clock.getDelta();
+    this.timer.update(timestamp);
+    const delta = this.timer.getDelta();
     this._elapsed += delta;
 
     const t = this._elapsed;
