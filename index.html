@@ -6,27 +6,35 @@
   <title>Trashteroid</title>
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
-<body>
-  <div id="hud">
-    <div id="hud-score">SCORE: 0</div>
-    <div id="hud-level">LEVEL 1 - 15,000 mi</div>
-    <div id="hud-lives">LIVES: ♥♥♥</div>
+<body data-screen="intro">
+  <div id="hud" class="hidden">
+    <div class="hud-chip hud-chip-score">
+      <div id="hud-score">SCORE: 0</div>
+    </div>
+    <div class="hud-chip hud-chip-level">
+      <div id="hud-level">LEVEL 1 - 15,000 mi</div>
+    </div>
+    <div class="hud-chip hud-chip-lives">
+      <div id="hud-lives">LIVES: &#9829;&#9829;&#9829;</div>
+    </div>
   </div>
 
-  <div id="fps-counter">FPS: --</div>
+  <div id="fps-counter" class="hidden">FPS: --</div>
 
   <div id="boss-indicator" class="hidden">
-    <div id="boss-indicator-arrow">▲</div>
+    <div id="boss-indicator-arrow">&#9650;</div>
     <div id="boss-indicator-dist">0 mi</div>
   </div>
 
   <div id="overlay">
     <div class="overlay-backdrop"></div>
     <div class="overlay-panel">
+      <div class="overlay-kicker">Arcade Flight Briefing</div>
       <h1>TRASHTEROID</h1>
-    </div>
-    <div class="overlay-actions">
-      <button id="start-btn">START MISSION</button>
+      <p class="subtitle">Plot the route, burn through the debris lanes, and keep Earth intact one run at a time.</p>
+      <div class="overlay-actions">
+        <button id="start-btn">START MISSION</button>
+      </div>
     </div>
   </div>
 
