@@ -161,6 +161,7 @@ export class Game {
     this.running = true;
     this.clock.start();
     this.levels.setLevel(this._startLevel);
+    this._setBossVisible(this.levels.isBossUnlocked());
     this.hud.update(this.score, this.levels.current, this.lives);
     this._loop();
   }
@@ -227,6 +228,7 @@ export class Game {
 
     // Level progression
     this.levels.update(this.score, playerPos);
+    this._setBossVisible(this.levels.isBossUnlocked() && (!this.levels.boss || this.levels.boss.health > 0));
     
     // Boss Indicator
     this._updateBossIndicator(delta);
@@ -251,6 +253,7 @@ export class Game {
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
           const points = debrisList[j].points || 100;
           this.score += points;
+          this.levels.registerTrashDestroyed();
           this._spawnSparks(_closestPoint.clone(), { count: 80, ttl: 0.9 });
           this._spawnScorePopup(_closestPoint.clone(), points);
           this.projectiles.remove(i);
@@ -352,7 +355,7 @@ export class Game {
   }
 
   _updateBoss(delta) {
-    if (!this.levels.boss) return;
+    if (!this.levels.isBossUnlocked() || !this.levels.boss) return;
     // Boss health bar shown in HUD
     this.hud.updateBossBar(this.levels.boss.health, this.levels.boss.maxHealth);
 
@@ -388,6 +391,7 @@ export class Game {
     });
     this.bossMesh = new THREE.Mesh(bossGeo, bossMat);
     this.bossMesh.position.copy(this.levels.bossWorldPosition);
+    this.bossMesh.visible = false;
     this.scene.add(this.bossMesh);
     
     const bossLight = new THREE.PointLight(0xff4400, 2, 800);
@@ -395,7 +399,11 @@ export class Game {
   }
 
   _updateBossIndicator(delta) {
-    if (!this.levels.bossWorldPosition) return;
+    if (!this.levels.bossWorldPosition || !this.levels.isBossUnlocked()) {
+      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+      this.hud.updateMinimap(false, 0, 0, 0);
+      return;
+    }
 
     if (this.levels.current === 3) {
       this.hud.updateBossIndicator(false, 0, 0, 0, 0);
@@ -462,6 +470,12 @@ export class Game {
     const sy = halfH + dy * t;
     
     this.hud.updateBossIndicator(true, sx, sy, angle, Math.floor(dist));
+  }
+
+  _setBossVisible(visible) {
+    if (this.bossMesh) {
+      this.bossMesh.visible = visible;
+    }
   }
 
   _gameOver() {
