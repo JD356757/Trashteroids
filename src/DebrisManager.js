@@ -1,307 +1,170 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
-const _dir = new THREE.Vector3();
-const _drift = new THREE.Vector3();
+const _playerForward = new THREE.Vector3();
+const _playerRight = new THREE.Vector3();
+const _playerUp = new THREE.Vector3();
+const _travelDelta = new THREE.Vector3();
 const _spawnPos = new THREE.Vector3();
-const _defaultScale = new THREE.Vector3(1, 1, 1);
+const _candidateOffset = new THREE.Vector3();
 const _collisionOffset = new THREE.Vector3();
 const _collisionNormal = new THREE.Vector3();
-const _separation = new THREE.Vector3();
-const _relativeVelocity = new THREE.Vector3();
-const DEBRIS_FADE_NEAR = 2500;
-const DEBRIS_FADE_FAR = 3000;
-const DEBRIS_FADE_NEAR_SQ = DEBRIS_FADE_NEAR * DEBRIS_FADE_NEAR;
-const DEBRIS_FADE_FAR_SQ = DEBRIS_FADE_FAR * DEBRIS_FADE_FAR;
-const DEBRIS_DESPAWN_DISTANCE = 3200;
-const DEBRIS_DESPAWN_DISTANCE_SQ = DEBRIS_DESPAWN_DISTANCE * DEBRIS_DESPAWN_DISTANCE;
-const MAX_SPAWN_ATTEMPTS = 24;
-const MAX_DEBRIS_SPEED = 4.5;
-const DEBRIS_HIT_RADIUS = 2.4;
-const DEBRIS_COLLISION_RADIUS = 2.9;
-const DEBRIS_ASTEROID_BOUNCE = 0.42;
-const MAX_DEBRIS_POOL_SIZE = 384;
+const _boundsCenter = new THREE.Vector3();
+const _boundsSize = new THREE.Vector3();
+const _matrixDummy = new THREE.Object3D();
+const _defaultForward = new THREE.Vector3(0, 0, -1);
+const _defaultRight = new THREE.Vector3(1, 0, 0);
+const _defaultUp = new THREE.Vector3(0, 1, 0);
 
-const DEBRIS_TYPES = {
-  b1: {
-    modelPath: '/models/elroid.glb',
-    modelScale: 1,
-    color: 0x7cc7ff,
-    emissive: 0x17374e,
-    geometry: 'dodecahedron',
-    size: [1, 1, 1],
-    points: 300,
-    hitRadius: DEBRIS_HIT_RADIUS,
-    speedMultiplier: 1.0,
-    drift: 0.18,
-  },
-  b2: {
-    modelPath: '/models/elroid.glb',
-    modelScale: 1,
-    color: 0x65d98d,
-    emissive: 0x173d28,
-    geometry: 'dodecahedron',
-    size: [1, 1, 1],
-    points: 300,
-    hitRadius: DEBRIS_HIT_RADIUS,
-    speedMultiplier: 1.05,
-    drift: 0.2,
-  },
-  b3: {
-    modelPath: '/models/elroid.glb',
-    modelScale: 1,
-    color: 0xf48c1b,
-    emissive: 0x4a2203,
-    geometry: 'dodecahedron',
-    size: [1, 1, 1],
-    points: 300,
-    hitRadius: DEBRIS_HIT_RADIUS,
-    speedMultiplier: 1.1,
-    drift: 0.22,
-  },
-  laptop: {
-    modelPath: '/models/elroid.glb',
-    modelScale: 1,
-    color: 0x8a8a95,
-    emissive: 0x1f1f28,
-    geometry: 'dodecahedron',
-    size: [1, 1, 1],
-    points: 300,
-    hitRadius: DEBRIS_HIT_RADIUS,
-    speedMultiplier: 0.9,
-    drift: 0.14,
-  },
-};
+const TRASH_MODEL_PATH = '/models/trashbag.fbx';
+const MAX_TRASH = 96;
+const MAX_SPAWN_PER_FRAME = 6;
+const MAX_SPAWN_ATTEMPTS = 14;
+const DEFAULT_POINTS = 500;
+const DEFAULT_MODEL_SCALE = 14.4;
+const DEFAULT_SCALE_MIN = 2.5;
+const DEFAULT_SCALE_MAX = 3.2;
+const TRASH_HIT_RADIUS = 6.4;
+const TRASH_COLLISION_RADIUS = 7.6;
+const DEFAULT_FORWARD_SPAWN_MIN = 1450;
+const DEFAULT_FORWARD_SPAWN_MAX = 2100;
+const DEFAULT_LATERAL_SPREAD = 360;
+const DEFAULT_VERTICAL_SPREAD = 160;
+const DEFAULT_MIN_GAP = 90;
+const DEFAULT_BACKWARD_DRIFT = 14;
+const DEFAULT_LATERAL_DRIFT = 9;
+const DEFAULT_ROTATION_SPEED = 0.65;
+const DEFAULT_DESPAWN_DISTANCE = 3000;
+const DEFAULT_RECYCLE_BEHIND_DISTANCE = 260;
+const DEFAULT_PROGRESS_PER_SPAWN = 140;
+const DEFAULT_BOOTSTRAP_ACTIVE = 16;
+const ASTEROID_BOUNCE = 0.24;
 
-function createDebrisMesh(type) {
-  const def = DEBRIS_TYPES[type];
-  if (def.template) {
-    const instance = def.template.clone(true);
-    instance.scale.copy(def.modelScaleVector || _defaultScale);
-    return instance;
+function createTexturedMaterial(material) {
+  const map = material?.map ?? null;
+  const alphaMap = material?.alphaMap ?? null;
+  const normalMap = material?.normalMap ?? null;
+  const roughnessMap = material?.roughnessMap ?? null;
+  const metalnessMap = material?.metalnessMap ?? null;
+
+  const textured = new THREE.MeshStandardMaterial({
+    color: material?.color ? material.color.clone() : new THREE.Color(0xffffff),
+    emissive: material?.emissive ? material.emissive.clone() : new THREE.Color(0x000000),
+    emissiveIntensity: material?.emissiveIntensity ?? 1,
+    map,
+    alphaMap,
+    normalMap,
+    roughnessMap,
+    metalnessMap,
+    transparent: Boolean(material?.transparent || alphaMap),
+    opacity: material?.opacity ?? 1,
+    side: material?.side ?? THREE.FrontSide,
+    roughness: material?.roughness ?? 0.95,
+    metalness: material?.metalness ?? 0.04,
+    fog: true,
+  });
+
+  if ('alphaTest' in textured) {
+    textured.alphaTest = Math.max(material?.alphaTest ?? 0, 0.18);
   }
 
-  const geo = new THREE.DodecahedronGeometry(def.size[0] * 0.6, 0);
-  const mat = new THREE.MeshBasicMaterial({
-    color: def.color,
-    transparent: true,
-  });
-
-  const mesh = new THREE.Mesh(geo, mat);
-  const outline = new THREE.Mesh(
-    geo.clone(),
-    new THREE.MeshBasicMaterial({
-      color: def.color,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.3,
-    })
-  );
-  outline.scale.setScalar(1.15);
-  mesh.add(outline);
-  return mesh;
+  return textured;
 }
 
-function cloneUnlitMaterial(material, fallbackColor) {
-  const color = material.color ? material.color.clone() : new THREE.Color(fallbackColor);
-  const next = new THREE.MeshBasicMaterial({
-    color,
-    map: material.map || null,
-    alphaMap: material.alphaMap || null,
-    transparent: material.transparent || !!material.alphaMap || material.opacity < 1,
-    opacity: material.opacity ?? 1,
-    side: material.side,
-    fog: material.fog,
-    wireframe: material.wireframe,
-    vertexColors: material.vertexColors,
-  });
-  next.depthWrite = material.depthWrite;
-  return next;
+function randomRange(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function clampConfig(spawnConfig = {}) {
+  const targetActive = Math.min(
+    MAX_TRASH,
+    Math.max(0, Math.round(spawnConfig.maxActive ?? spawnConfig.minActive ?? 40))
+  );
+
+  const forwardSpawnMin = spawnConfig.forwardSpawnMin ?? spawnConfig.spawnMinDistance ?? DEFAULT_FORWARD_SPAWN_MIN;
+  const forwardSpawnMax = Math.max(
+    forwardSpawnMin + 1,
+    spawnConfig.forwardSpawnMax ?? spawnConfig.spawnMaxDistance ?? DEFAULT_FORWARD_SPAWN_MAX
+  );
+
+  return {
+    targetActive,
+    bootstrapActive: Math.min(
+      targetActive,
+      Math.max(0, Math.round(spawnConfig.bootstrapActive ?? DEFAULT_BOOTSTRAP_ACTIVE))
+    ),
+    forwardSpawnMin,
+    forwardSpawnMax,
+    lateralSpread: Math.max(40, spawnConfig.lateralSpread ?? DEFAULT_LATERAL_SPREAD),
+    verticalSpread: Math.max(20, spawnConfig.verticalRange ?? spawnConfig.verticalSpreadRange ?? DEFAULT_VERTICAL_SPREAD),
+    minGap: Math.max(24, spawnConfig.minGap ?? DEFAULT_MIN_GAP),
+    modelScale: Math.max(0.1, spawnConfig.modelScale ?? DEFAULT_MODEL_SCALE),
+    scaleMin: Math.max(0.1, spawnConfig.scaleMin ?? DEFAULT_SCALE_MIN),
+    scaleMax: Math.max(
+      spawnConfig.scaleMin ?? DEFAULT_SCALE_MIN,
+      spawnConfig.scaleMax ?? DEFAULT_SCALE_MAX
+    ),
+    backwardDrift: Math.max(0, spawnConfig.backwardDrift ?? DEFAULT_BACKWARD_DRIFT),
+    lateralDrift: Math.max(0, spawnConfig.lateralDrift ?? DEFAULT_LATERAL_DRIFT),
+    rotationSpeed: Math.max(0, spawnConfig.rotationSpeed ?? DEFAULT_ROTATION_SPEED),
+    points: Math.max(1, Math.round(spawnConfig.points ?? DEFAULT_POINTS)),
+    progressPerSpawn: Math.max(10, spawnConfig.progressPerSpawn ?? DEFAULT_PROGRESS_PER_SPAWN),
+    despawnDistance: Math.max(200, spawnConfig.despawnDistance ?? DEFAULT_DESPAWN_DISTANCE),
+    recycleBehindDistance: Math.max(
+      20,
+      spawnConfig.recycleBehindDistance ?? DEFAULT_RECYCLE_BEHIND_DISTANCE
+    ),
+  };
 }
 
 export class DebrisManager {
   constructor(scene) {
     this.scene = scene;
     this.active = [];
-    this.pool = [];
-    this.spawnTimer = 0;
-    this.despawnDist = DEBRIS_DESPAWN_DISTANCE;
-    this.despawnDistSq = DEBRIS_DESPAWN_DISTANCE_SQ;
-    this.maxSpawnPerFrame = 28;
-    this.maxPoolSize = MAX_DEBRIS_POOL_SIZE;
-    this.sectionOccupancy = new Map();
-    this._loadModelTemplates();
-  }
+    this._freeSlots = [];
+    this._slots = new Array(MAX_TRASH);
+    this._layers = [];
+    this._ready = false;
+    this._renderDirty = false;
+    this._lastPlayerPos = new THREE.Vector3();
+    this._hasLastPlayerPos = false;
+    this._forwardProgress = 0;
+    this._renderRoot = new THREE.Group();
+    this._renderRoot.name = 'TrashStream';
+    this.scene.add(this._renderRoot);
 
-  update(delta, spawnConfig, playerPos) {
-    this.spawnTimer -= delta;
-    const desiredCount = spawnConfig.minActive ?? 4;
-    const missingCount = Math.max(0, desiredCount - this.active.length);
-    let spawnCount = Math.min(this.maxSpawnPerFrame, missingCount);
-
-    if (this.spawnTimer <= 0) {
-      spawnCount = Math.max(spawnCount, 1);
-      this.spawnTimer += spawnConfig.interval;
-    }
-
-    for (let i = 0; i < spawnCount; i++) {
-      this._spawn(spawnConfig, playerPos);
-    }
-
-    if (spawnCount > 0 && this.active.length < desiredCount) {
-      this.spawnTimer = Math.min(this.spawnTimer, spawnConfig.interval * 0.7);
-    }
-
-    for (let i = this.active.length - 1; i >= 0; i--) {
-      const d = this.active[i];
-      d.mesh.position.addScaledVector(d.velocity, delta);
-      d.mesh.rotation.x += d.rotSpeed.x * delta;
-      d.mesh.rotation.y += d.rotSpeed.y * delta;
-      d.mesh.rotation.z += d.rotSpeed.z * delta;
-
-      const distanceSq = d.mesh.position.distanceToSquared(playerPos);
-      this._applyFade(d, distanceSq);
-
-      if (distanceSq > this.despawnDistSq) {
-        this.remove(i);
-      }
-    }
-
-    this._resolveTrashCollisions();
-  }
-
-  _spawn(config, playerPos) {
-    const types = config.types || ['b1'];
-    const type = types[Math.floor(Math.random() * types.length)];
-    const def = DEBRIS_TYPES[type];
-    const spawnData = this._findSpawnPosition(config, playerPos);
-    if (!spawnData) return false;
-
-    const entry = this._acquireEntry(type);
-    const mesh = entry.mesh;
-    mesh.position.copy(spawnData.position);
-    mesh.rotation.set(
-      Math.random() * Math.PI * 2,
-      Math.random() * Math.PI * 2,
-      Math.random() * Math.PI * 2
-    );
-
-    _dir.copy(playerPos).sub(mesh.position).normalize();
-    _dir.x += (Math.random() - 0.5) * 0.14;
-    _dir.y += (Math.random() - 0.5) * 0.14;
-    _dir.z += (Math.random() - 0.5) * 0.14;
-    _dir.normalize();
-
-    _drift.set(
-      Math.random() - 0.5,
-      Math.random() - 0.5,
-      Math.random() - 0.5
-    ).normalize().multiplyScalar(def.drift || 0.18);
-    _dir.addScaledVector(_drift, 0.03).normalize();
-
-    const speed = (config.speed + Math.random() * config.speedVariance) * (def.speedMultiplier || 1);
-    const velocity = _dir.clone().multiplyScalar(speed).add(_drift);
-    this._clampVelocity(velocity);
-
-    entry.velocity.copy(velocity);
-    entry.rotSpeed.set(
-      (Math.random() - 0.5) * 1.2,
-      (Math.random() - 0.5) * 1.2,
-      (Math.random() - 0.5) * 1.2
-    );
-    entry.points = def.points;
-    entry.hitRadius = def.hitRadius;
-    entry.collisionRadius = DEBRIS_COLLISION_RADIUS;
-    entry.sectionKey = spawnData.sectionKey;
-    mesh.visible = true;
-    this.scene.add(mesh);
-    this.active.push(entry);
-
-    return true;
-  }
-
-  _findSpawnPosition(config, playerPos) {
-    const sectionSize = config.sectionSize || 800;
-    const minDistance = config.spawnMinDistance ?? config.spawnRadius ?? 1800;
-    const maxDistance = config.spawnMaxDistance ?? (minDistance + (config.spawnJitter || 200));
-    const verticalSpread = config.verticalSpread || 0.35;
-    const sectionTrashAmount = Math.max(1, config.sectionTrashAmount ?? 3);
-    const sectionDensity = THREE.MathUtils.clamp(config.sectionDensity ?? 0.5, 0.05, 1);
-    const sectionLimit = Math.max(1, Math.round(sectionTrashAmount * sectionDensity));
-
-    for (let attempt = 0; attempt < MAX_SPAWN_ATTEMPTS; attempt++) {
-      const spawnDistance = minDistance + Math.random() * Math.max(1, maxDistance - minDistance);
-      const theta = Math.random() * Math.PI * 2;
-      const sy = (Math.random() * 2 - 1) * spawnDistance * verticalSpread;
-      const horizontalRadius = Math.sqrt(Math.max(0, spawnDistance * spawnDistance - sy * sy));
-      const sx = Math.cos(theta) * horizontalRadius;
-      const sz = Math.sin(theta) * horizontalRadius;
-
-      _spawnPos.set(playerPos.x + sx, playerPos.y + sy, playerPos.z + sz);
-
-      const sectionKey = this._getSpawnCellKey(_spawnPos, sectionSize);
-      const usedInSection = this.sectionOccupancy.get(sectionKey) || 0;
-      if (usedInSection >= sectionLimit) continue;
-
-      this.sectionOccupancy.set(sectionKey, usedInSection + 1);
-      return {
-        position: _spawnPos.clone(),
-        sectionKey,
+    for (let i = 0; i < MAX_TRASH; i++) {
+      this._slots[i] = {
+        slotId: i,
+        active: false,
+        renderIndex: -1,
+        position: new THREE.Vector3(),
+        velocity: new THREE.Vector3(),
+        rotation: new THREE.Vector3(),
+        rotSpeed: new THREE.Vector3(),
+        scale: DEFAULT_MODEL_SCALE,
+        hitRadius: TRASH_HIT_RADIUS,
+        collisionRadius: TRASH_COLLISION_RADIUS,
+        points: DEFAULT_POINTS,
       };
+      this._freeSlots.push(i);
     }
 
-    return null;
+    this._loadTrashTemplate();
   }
 
-  _getSpawnCellKey(position, cellSize) {
-    const x = Math.floor(position.x / cellSize);
-    const y = Math.floor(position.y / cellSize);
-    const z = Math.floor(position.z / cellSize);
-    return `${x}:${y}:${z}`;
-  }
+  update(delta, spawnConfig, playerPos, playerQuaternion = null) {
+    if (!playerPos) return;
 
-  _releaseSectionSlot(sectionKey) {
-    if (!sectionKey) return;
-    const used = this.sectionOccupancy.get(sectionKey);
-    if (!used) return;
-    if (used <= 1) {
-      this.sectionOccupancy.delete(sectionKey);
-      return;
-    }
-    this.sectionOccupancy.set(sectionKey, used - 1);
-  }
+    this._buildPlayerBasis(playerQuaternion);
+    this._accumulateForwardProgress(playerPos);
 
-  _prepareFadeMaterials(mesh) {
-    const fadeMaterials = [];
+    const config = clampConfig(spawnConfig);
+    this._spawnAhead(config, playerPos);
+    this._updateActiveTrash(delta, config, playerPos);
 
-    mesh.traverse((child) => {
-      if (!child.isMesh || !child.material) return;
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      const cloned = materials.map((material) => {
-        const next = cloneUnlitMaterial(material, 0xffffff);
-        next.transparent = true;
-        fadeMaterials.push(next);
-        return next;
-      });
-      child.material = Array.isArray(child.material) ? cloned : cloned[0];
-    });
-
-    return fadeMaterials;
-  }
-
-  _applyFade(debris, distanceSq) {
-    let opacity = 1;
-    if (distanceSq > DEBRIS_FADE_NEAR_SQ) {
-      opacity = distanceSq >= DEBRIS_FADE_FAR_SQ
-        ? 0
-        : 1 - (Math.sqrt(distanceSq) - DEBRIS_FADE_NEAR) / (DEBRIS_FADE_FAR - DEBRIS_FADE_NEAR);
-    }
-
-    if (!debris.fadeMaterials) return;
-    for (let i = 0; i < debris.fadeMaterials.length; i++) {
-      const material = debris.fadeMaterials[i];
-      material.opacity = opacity;
-      material.depthWrite = opacity > 0.45;
+    if (this._renderDirty) {
+      this._syncInstances();
     }
   }
 
@@ -309,24 +172,22 @@ export class DebrisManager {
     if (!asteroids || asteroids.length === 0) return;
 
     for (let i = 0; i < this.active.length; i++) {
-      const debris = this.active[i];
-      const debrisRadius = debris.collisionRadius || debris.hitRadius;
-      if (!debrisRadius) continue;
+      const trash = this.active[i];
+      const minRadius = trash.collisionRadius;
 
       for (let j = 0; j < asteroids.length; j++) {
         const sphere = asteroids[j].boundingSphere;
-        const minDistance = sphere.radius + debrisRadius;
-        _collisionOffset.copy(debris.position).sub(sphere.center);
+        const minDistance = minRadius + sphere.radius;
+
+        _collisionOffset.copy(trash.position).sub(sphere.center);
         const distanceSq = _collisionOffset.lengthSq();
         if (distanceSq >= minDistance * minDistance) continue;
 
         let distance = Math.sqrt(distanceSq);
         if (distance <= 1e-6) {
-          _collisionNormal.copy(debris.velocity);
-          if (_collisionNormal.lengthSq() <= 1e-6) {
-            _collisionNormal.set(0, 1, 0);
-          } else {
-            _collisionNormal.normalize();
+          _collisionNormal.copy(_playerForward);
+          if (_collisionNormal.lengthSq() === 0) {
+            _collisionNormal.copy(_defaultForward);
           }
           distance = 0;
         } else {
@@ -334,132 +195,19 @@ export class DebrisManager {
         }
 
         const overlap = minDistance - distance;
-        debris.position.addScaledVector(_collisionNormal, overlap + 0.02);
+        trash.position.addScaledVector(_collisionNormal, overlap + 0.05);
 
-        const inwardSpeed = debris.velocity.dot(_collisionNormal);
+        const inwardSpeed = trash.velocity.dot(_collisionNormal);
         if (inwardSpeed < 0) {
-          debris.velocity.addScaledVector(_collisionNormal, -inwardSpeed * (1 + DEBRIS_ASTEROID_BOUNCE));
-          this._clampVelocity(debris.velocity);
+          trash.velocity.addScaledVector(_collisionNormal, -inwardSpeed * (1 + ASTEROID_BOUNCE));
         }
+
+        this._renderDirty = true;
       }
     }
-  }
 
-  _resolveTrashCollisions() {
-    for (let i = 0; i < this.active.length; i++) {
-      const a = this.active[i];
-      const radiusA = a.collisionRadius || a.hitRadius;
-      if (!radiusA) continue;
-
-      for (let j = i + 1; j < this.active.length; j++) {
-        const b = this.active[j];
-        const radiusB = b.collisionRadius || b.hitRadius;
-        if (!radiusB) continue;
-
-        _separation.copy(a.position).sub(b.position);
-        const minDistance = radiusA + radiusB;
-        const distanceSq = _separation.lengthSq();
-        if (distanceSq >= minDistance * minDistance) continue;
-
-        let distance = Math.sqrt(distanceSq);
-        if (distance <= 1e-6) {
-          _separation.set(1, 0, 0);
-          distance = 0;
-        } else {
-          _separation.multiplyScalar(1 / distance);
-        }
-        const overlap = minDistance - distance;
-        _separation.multiplyScalar(overlap * 0.5 + 0.01);
-
-        a.position.add(_separation);
-        b.position.sub(_separation);
-
-        _separation.normalize();
-        _relativeVelocity.copy(a.velocity).sub(b.velocity);
-        const closingSpeed = _relativeVelocity.dot(_separation);
-        if (closingSpeed < 0) {
-          const correction = Math.min(-closingSpeed * 0.35, 0.75);
-          a.velocity.addScaledVector(_separation, correction);
-          b.velocity.addScaledVector(_separation, -correction);
-          a.velocity.multiplyScalar(0.985);
-          b.velocity.multiplyScalar(0.985);
-          this._clampVelocity(a.velocity);
-          this._clampVelocity(b.velocity);
-        }
-      }
-    }
-  }
-
-  _clampVelocity(velocity) {
-    if (velocity.lengthSq() > MAX_DEBRIS_SPEED * MAX_DEBRIS_SPEED) {
-      velocity.setLength(MAX_DEBRIS_SPEED);
-    }
-  }
-
-  _acquireEntry(type) {
-    const def = DEBRIS_TYPES[type];
-    const entry = this.pool.pop();
-    if (entry) {
-      entry.mesh.visible = true;
-      entry.points = def.points;
-      entry.hitRadius = def.hitRadius;
-      entry.collisionRadius = DEBRIS_COLLISION_RADIUS;
-      return entry;
-    }
-
-    const mesh = createDebrisMesh(type);
-    const fadeMaterials = this._prepareFadeMaterials(mesh);
-    return {
-      mesh,
-      velocity: new THREE.Vector3(),
-      rotSpeed: new THREE.Vector3(),
-      points: def.points,
-      hitRadius: def.hitRadius,
-      collisionRadius: DEBRIS_COLLISION_RADIUS,
-      fadeMaterials,
-      sectionKey: null,
-      position: mesh.position,
-    };
-  }
-
-  _releaseEntry(entry) {
-    this._releaseSectionSlot(entry.sectionKey);
-    entry.sectionKey = null;
-    entry.mesh.visible = false;
-    this.scene.remove(entry.mesh);
-    entry.velocity.set(0, 0, 0);
-    entry.rotSpeed.set(0, 0, 0);
-    this._applyFade(entry, 0);
-    if (this.pool.length < this.maxPoolSize) {
-      this.pool.push(entry);
-    }
-  }
-
-  _loadModelTemplates() {
-    const loader = new GLTFLoader();
-
-    const defsByPath = new Map();
-    for (const def of Object.values(DEBRIS_TYPES)) {
-      const defs = defsByPath.get(def.modelPath) || [];
-      defs.push(def);
-      defsByPath.set(def.modelPath, defs);
-    }
-
-    for (const [modelPath, defs] of defsByPath) {
-      loader.load(modelPath, (gltf) => {
-        const template = gltf.scene;
-        template.traverse((child) => {
-          if (!child.isMesh) return;
-          child.castShadow = false;
-          child.receiveShadow = false;
-        });
-
-        for (let i = 0; i < defs.length; i++) {
-          const def = defs[i];
-          def.template = template;
-          def.modelScaleVector = new THREE.Vector3(def.modelScale, def.modelScale, def.modelScale);
-        }
-      });
+    if (this._renderDirty) {
+      this._syncInstances();
     }
   }
 
@@ -468,14 +216,258 @@ export class DebrisManager {
   }
 
   remove(index) {
-    const lastIndex = this.active.length - 1;
-    if (index < 0 || index > lastIndex) return;
+    if (index < 0 || index >= this.active.length) return;
+    this._deactivateByActiveIndex(index);
+    this._syncInstances();
+  }
 
-    const entry = this.active[index];
-    if (index !== lastIndex) {
-      this.active[index] = this.active[lastIndex];
+  _buildPlayerBasis(playerQuaternion) {
+    _playerForward.copy(_defaultForward);
+    _playerRight.copy(_defaultRight);
+    _playerUp.copy(_defaultUp);
+
+    if (!playerQuaternion) return;
+
+    _playerForward.applyQuaternion(playerQuaternion).normalize();
+    _playerRight.applyQuaternion(playerQuaternion).normalize();
+    _playerUp.applyQuaternion(playerQuaternion).normalize();
+  }
+
+  _accumulateForwardProgress(playerPos) {
+    if (!this._hasLastPlayerPos) {
+      this._lastPlayerPos.copy(playerPos);
+      this._hasLastPlayerPos = true;
+      return;
     }
+
+    _travelDelta.copy(playerPos).sub(this._lastPlayerPos);
+    this._forwardProgress += Math.max(0, _travelDelta.dot(_playerForward));
+    this._lastPlayerPos.copy(playerPos);
+  }
+
+  _spawnAhead(config, playerPos) {
+    if (!this._ready || this._freeSlots.length === 0 || config.targetActive <= 0) {
+      return;
+    }
+
+    const missingCount = config.targetActive - this.active.length;
+    if (missingCount <= 0) return;
+
+    let spawnBudget = Math.min(MAX_SPAWN_PER_FRAME, missingCount);
+
+    if (this.active.length >= config.bootstrapActive) {
+      const progressBudget = Math.floor(this._forwardProgress / config.progressPerSpawn);
+      spawnBudget = Math.min(spawnBudget, progressBudget);
+      if (spawnBudget <= 0) return;
+      this._forwardProgress -= spawnBudget * config.progressPerSpawn;
+    }
+
+    let spawned = 0;
+    let attempts = 0;
+    while (spawned < spawnBudget && attempts < spawnBudget * MAX_SPAWN_ATTEMPTS) {
+      if (this._spawnSingle(config, playerPos)) {
+        spawned++;
+      }
+      attempts++;
+    }
+  }
+
+  _spawnSingle(config, playerPos) {
+    for (let attempt = 0; attempt < MAX_SPAWN_ATTEMPTS; attempt++) {
+      const forwardDistance = randomRange(config.forwardSpawnMin, config.forwardSpawnMax);
+      const lateralOffset = randomRange(-config.lateralSpread, config.lateralSpread);
+      const verticalOffset = randomRange(-config.verticalSpread, config.verticalSpread);
+
+      _spawnPos.copy(playerPos)
+        .addScaledVector(_playerForward, forwardDistance)
+        .addScaledVector(_playerRight, lateralOffset)
+        .addScaledVector(_playerUp, verticalOffset);
+
+      if (!this._isSpawnClear(_spawnPos, config.minGap)) {
+        continue;
+      }
+
+      const slotId = this._freeSlots.pop();
+      const slot = this._slots[slotId];
+
+      slot.active = true;
+      slot.position.copy(_spawnPos);
+      slot.rotation.set(
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2
+      );
+      slot.rotSpeed.set(
+        randomRange(-config.rotationSpeed, config.rotationSpeed),
+        randomRange(-config.rotationSpeed, config.rotationSpeed),
+        randomRange(-config.rotationSpeed, config.rotationSpeed)
+      );
+
+      const driftRight = randomRange(-config.lateralDrift, config.lateralDrift);
+      const driftUp = randomRange(-config.lateralDrift * 0.55, config.lateralDrift * 0.55);
+      slot.velocity.copy(_playerForward).multiplyScalar(-config.backwardDrift);
+      slot.velocity.addScaledVector(_playerRight, driftRight);
+      slot.velocity.addScaledVector(_playerUp, driftUp);
+
+      slot.scale = config.modelScale * randomRange(config.scaleMin, config.scaleMax);
+      slot.points = config.points;
+      slot.hitRadius = TRASH_HIT_RADIUS;
+      slot.collisionRadius = TRASH_COLLISION_RADIUS;
+      slot.renderIndex = this.active.length;
+
+      this.active.push(slot);
+      this._renderDirty = true;
+      return true;
+    }
+
+    return false;
+  }
+
+  _isSpawnClear(position, minGap) {
+    const minGapSq = minGap * minGap;
+
+    for (let i = 0; i < this.active.length; i++) {
+      if (this.active[i].position.distanceToSquared(position) < minGapSq) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  _updateActiveTrash(delta, config, playerPos) {
+    const despawnDistSq = config.despawnDistance * config.despawnDistance;
+
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const trash = this.active[i];
+      trash.position.addScaledVector(trash.velocity, delta);
+      trash.rotation.x += trash.rotSpeed.x * delta;
+      trash.rotation.y += trash.rotSpeed.y * delta;
+      trash.rotation.z += trash.rotSpeed.z * delta;
+
+      const distanceSq = trash.position.distanceToSquared(playerPos);
+      if (distanceSq > despawnDistSq) {
+        this._deactivateByActiveIndex(i);
+        continue;
+      }
+
+      _candidateOffset.copy(trash.position).sub(playerPos);
+      const forwardDot = _candidateOffset.dot(_playerForward);
+      if (forwardDot < -config.recycleBehindDistance) {
+        this._deactivateByActiveIndex(i);
+        continue;
+      }
+
+      this._renderDirty = true;
+    }
+  }
+
+  _deactivateByActiveIndex(activeIndex) {
+    const lastIndex = this.active.length - 1;
+    const slot = this.active[activeIndex];
+
+    if (activeIndex !== lastIndex) {
+      const lastSlot = this.active[lastIndex];
+      this.active[activeIndex] = lastSlot;
+      lastSlot.renderIndex = activeIndex;
+    }
+
     this.active.pop();
-    this._releaseEntry(entry);
+
+    slot.active = false;
+    slot.renderIndex = -1;
+    slot.velocity.set(0, 0, 0);
+    slot.rotSpeed.set(0, 0, 0);
+    this._freeSlots.push(slot.slotId);
+    this._renderDirty = true;
+  }
+
+  _loadTrashTemplate() {
+    const loader = new FBXLoader();
+
+    loader.load(
+      TRASH_MODEL_PATH,
+      (fbx) => {
+        const bakedParts = [];
+        const aggregateBounds = new THREE.Box3();
+
+        fbx.updateMatrixWorld(true);
+
+        fbx.traverse((child) => {
+          if (!child.isMesh || !child.geometry) return;
+
+          const bakedGeometry = child.geometry.clone();
+          bakedGeometry.applyMatrix4(child.matrixWorld);
+          bakedGeometry.computeBoundingBox();
+          aggregateBounds.union(bakedGeometry.boundingBox);
+
+          const material = Array.isArray(child.material)
+            ? child.material.map((entry) => createTexturedMaterial(entry))
+            : createTexturedMaterial(child.material);
+
+          bakedParts.push({ geometry: bakedGeometry, material });
+        });
+
+        if (bakedParts.length === 0) {
+          console.warn('[DebrisManager] trashbag.fbx loaded with no renderable meshes');
+          return;
+        }
+
+        aggregateBounds.getCenter(_boundsCenter);
+        aggregateBounds.getSize(_boundsSize);
+        const maxDimension = Math.max(_boundsSize.x, _boundsSize.y, _boundsSize.z, 0.001);
+        const normalizeScale = 1 / maxDimension;
+
+        for (let i = 0; i < bakedParts.length; i++) {
+          const part = bakedParts[i];
+          part.geometry.translate(-_boundsCenter.x, -_boundsCenter.y, -_boundsCenter.z);
+          part.geometry.scale(normalizeScale, normalizeScale, normalizeScale);
+          part.geometry.computeBoundingSphere();
+
+          const instanced = new THREE.InstancedMesh(part.geometry, part.material, MAX_TRASH);
+          instanced.count = 0;
+          instanced.castShadow = false;
+          instanced.receiveShadow = false;
+          instanced.frustumCulled = false;
+          instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          this._renderRoot.add(instanced);
+          this._layers.push(instanced);
+        }
+
+        this._ready = true;
+        this._renderDirty = true;
+        this._syncInstances();
+      },
+      undefined,
+      (error) => {
+        console.error('[DebrisManager] Failed to load trashbag.fbx', error);
+      }
+    );
+  }
+
+  _syncInstances() {
+    if (!this._ready) return;
+
+    const activeCount = this.active.length;
+    for (let i = 0; i < activeCount; i++) {
+      const trash = this.active[i];
+      trash.renderIndex = i;
+
+      _matrixDummy.position.copy(trash.position);
+      _matrixDummy.rotation.set(trash.rotation.x, trash.rotation.y, trash.rotation.z);
+      _matrixDummy.scale.setScalar(trash.scale);
+      _matrixDummy.updateMatrix();
+
+      for (let j = 0; j < this._layers.length; j++) {
+        this._layers[j].setMatrixAt(i, _matrixDummy.matrix);
+      }
+    }
+
+    for (let i = 0; i < this._layers.length; i++) {
+      this._layers[i].count = activeCount;
+      this._layers[i].instanceMatrix.needsUpdate = true;
+    }
+
+    this._renderDirty = false;
   }
 }

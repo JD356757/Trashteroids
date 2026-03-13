@@ -29,6 +29,7 @@ const _aimRay = new THREE.Ray();
 const _aimDirection = new THREE.Vector3();
 const _aimPoint = new THREE.Vector3();
 const _aimOffset = new THREE.Vector3();
+const _toDebris = new THREE.Vector3();
 // Debug flag: when true the camera will not follow the ship (helps observe movement)
 const DEBUG_FREEZE_CAMERA = false;
 const PLAYER_COLLISION_RADIUS = 1.1;
@@ -218,7 +219,7 @@ export class Game {
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
     if (this.input.isDown(' ') || this.input.isDown('mouseleft')) {
       const fireDirection = this._getAssistedFireDirection();
-      const fired = this.projectiles.fire(this.player.getPosition(), fireDirection, this.player.velocity, this.player.mesh.quaternion);
+      const fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
         this.player.applyRecoil(this.projectiles.cooldownTime);
       }
@@ -227,9 +228,10 @@ export class Game {
     // Update subsystems
     this.player.update(delta);
     this.projectiles.update(delta);
-    const playerPos = this.player.getPosition();
+    const playerPos = this.player.mesh.position;
+    const playerQuat = this.player.baseQuaternion;
     this.asteroidField.update(delta, playerPos);
-    this.debris.update(delta, this.levels.getSpawnConfig(), playerPos);
+    this.debris.update(delta, this.levels.getSpawnConfig(), playerPos, playerQuat);
     this.debris.resolveAsteroidCollisions(this.asteroidField.getColliders());
     // Check projectile collisions against asteroids (sparks)
     this._checkProjectileAsteroidCollisions();
@@ -251,8 +253,8 @@ export class Game {
     // Collision: projectiles vs debris
     this._checkProjectileDebrisCollisions();
 
-    // Collision: debris vs player (misses / hits)
-    this._checkDebrisPlayerCollisions();
+    // Collision: trash vs player (hits / misses)
+    this._checkDebrisPlayerCollisions(playerPos, playerQuat);
 
     // Level progression
     this.levels.update(this.score, playerPos);
@@ -294,26 +296,28 @@ export class Game {
     }
   }
 
-  _checkDebrisPlayerCollisions() {
+  _checkDebrisPlayerCollisions(playerPos = this.player.mesh.position, playerQuat = this.player.baseQuaternion) {
     const debrisList = this.debris.getActive();
-    const playerPos = this.player.getPosition();
-    // Ship forward for "passed behind" dot-product test
-    _shipForward.set(0, 0, -1).applyQuaternion(this.player.getQuaternion());
+    _shipForward.set(0, 0, -1).applyQuaternion(playerQuat);
 
     for (let i = debrisList.length - 1; i >= 0; i--) {
       const d = debrisList[i];
-      const toDebris = d.position.clone().sub(playerPos);
-      const dist = toDebris.length();
+      const hitRadius = d.hitRadius || 1;
+      const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 0.55;
+      const passDistance = hitRadius + 10;
+      _toDebris.copy(d.position).sub(playerPos);
+      const distSq = _toDebris.lengthSq();
+      const forwardOffset = _toDebris.dot(_shipForward);
 
       // Direct hit
-      if (dist < 1.5) {
+      if (distSq < hitDistance * hitDistance) {
         this._damagePlayer();
         this.debris.remove(i);
         continue;
       }
 
-      // Debris passed behind the player (dot < 0 means behind, and close-ish)
-      if (dist < 8 && toDebris.dot(_shipForward) < -2) {
+      // Trash that slips behind the player counts as a miss.
+      if (distSq < passDistance * passDistance && forwardOffset < -hitRadius) {
         this.score = Math.max(0, this.score - 50);
         this.debris.remove(i);
       }
@@ -440,7 +444,7 @@ export class Game {
     }
 
     const bossPos = this.levels.bossWorldPosition;
-    const playerPos = this.player.getPosition();
+    const playerPos = this.player.mesh.position;
     const dist = playerPos.distanceTo(bossPos);
 
     // Vector from camera to boss
@@ -497,7 +501,7 @@ export class Game {
   }
 
   _updateMinimap() {
-    const playerPos = this.player.getPosition();
+    const playerPos = this.player.mesh.position;
     const camInvQuat = this.camera.quaternion.clone().invert();
     const bossPos = this.levels.isBossUnlocked() ? this.levels.bossWorldPosition : null;
     this.hud.updateMinimap(true, bossPos, playerPos, camInvQuat, this.asteroidField.getColliders());
@@ -572,7 +576,7 @@ export class Game {
   }
 
   _getAssistedFireDirection() {
-    const playerPos = this.player.getPosition();
+    const playerPos = this.player.mesh.position;
     _cameraForward.set(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
     _cameraDown.set(0, -1, 0).applyQuaternion(this.camera.quaternion).normalize();
     _cameraForward.addScaledVector(_cameraDown, AIM_LOWERING).normalize();
@@ -614,7 +618,7 @@ export class Game {
 
     _aimDirection.copy(_aimPoint).sub(playerPos);
     if (_aimDirection.lengthSq() === 0) {
-      return _shipForward.set(0, 0, -1).applyQuaternion(this.player.getQuaternion()).normalize().clone();
+      return _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize().clone();
     }
 
     return _aimDirection.normalize().clone();
