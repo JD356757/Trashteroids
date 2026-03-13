@@ -1,8 +1,35 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
 const _lookTarget = new THREE.Vector3();
 const _orbitCenter = new THREE.Vector3();
+const _trashBoundsCenter = new THREE.Vector3();
+const _trashBoundsSize = new THREE.Vector3();
+const _trashDummy = new THREE.Object3D();
+const INTRO_TRASH_MODEL_PATH = '/models/trashbag.fbx';
+const INTRO_TRASH_COUNT = 30;
+
+function createIntroTrashMaterial(material) {
+  const textured = new THREE.MeshStandardMaterial({
+    color: material?.color ? material.color.clone() : new THREE.Color(0xffffff),
+    emissive: material?.emissive ? material.emissive.clone() : new THREE.Color(0x000000),
+    emissiveIntensity: material?.emissiveIntensity ?? 1,
+    map: material?.map ?? null,
+    alphaMap: material?.alphaMap ?? null,
+    normalMap: material?.normalMap ?? null,
+    roughnessMap: material?.roughnessMap ?? null,
+    metalnessMap: material?.metalnessMap ?? null,
+    transparent: Boolean(material?.transparent || material?.alphaMap),
+    opacity: material?.opacity ?? 1,
+    side: material?.side ?? THREE.FrontSide,
+    roughness: material?.roughness ?? 0.92,
+    metalness: material?.metalness ?? 0.06,
+  });
+
+  textured.alphaTest = Math.max(material?.alphaTest ?? 0, 0.18);
+  return textured;
+}
 
 export class IntroScene {
   constructor(canvas) {
@@ -173,33 +200,103 @@ export class IntroScene {
 
   _buildTrashHalo() {
     this.trashField = new THREE.Group();
-    for (let i = 0; i < 42; i++) {
-      const size = 0.08 + Math.random() * 0.18;
-      const piece = new THREE.Mesh(
-        new THREE.BoxGeometry(size, size * (0.9 + Math.random() * 0.6), size),
-        new THREE.MeshStandardMaterial({
-          color: i % 3 === 0 ? 0xff8347 : i % 3 === 1 ? 0x65d98d : 0x7cc7ff,
-          emissive: 0x111111,
-          roughness: 0.7,
-          metalness: 0.15,
-        })
-      );
+    this._trashOrbiters = [];
+    this._trashLayers = [];
+    for (let i = 0; i < INTRO_TRASH_COUNT; i++) {
       const radius = 4.6 + Math.random() * 3.6;
       const angle = Math.random() * Math.PI * 2;
       const height = (Math.random() - 0.5) * 2.2;
-      piece.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius - 10);
-      piece.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      piece.userData.spin = new THREE.Vector3(
-        (Math.random() - 0.5) * 0.7,
-        (Math.random() - 0.5) * 0.7,
-        (Math.random() - 0.5) * 0.7
-      );
-      piece.userData.orbitRadius = radius;
-      piece.userData.orbitAngle = angle;
-      piece.userData.orbitHeight = height;
-      this.trashField.add(piece);
+      this._trashOrbiters.push({
+        orbitRadius: radius,
+        orbitAngle: angle,
+        orbitHeight: height,
+        bobPhase: Math.random() * Math.PI * 2,
+        scale: 0.68 + Math.random() * 0.44,
+        position: new THREE.Vector3(Math.cos(angle) * radius, height, Math.sin(angle) * radius - 10),
+        rotation: new THREE.Vector3(
+          Math.random() * Math.PI,
+          Math.random() * Math.PI,
+          Math.random() * Math.PI
+        ),
+        spin: new THREE.Vector3(
+          (Math.random() - 0.5) * 0.7,
+          (Math.random() - 0.5) * 0.7,
+          (Math.random() - 0.5) * 0.7
+        ),
+      });
     }
     this.scene.add(this.trashField);
+
+    const loader = new FBXLoader();
+    loader.load(
+      INTRO_TRASH_MODEL_PATH,
+      (fbx) => {
+        const bakedParts = [];
+        const aggregateBounds = new THREE.Box3();
+
+        fbx.updateMatrixWorld(true);
+        fbx.traverse((child) => {
+          if (!child.isMesh || !child.geometry) return;
+
+          const geometry = child.geometry.clone();
+          geometry.applyMatrix4(child.matrixWorld);
+          geometry.computeBoundingBox();
+          aggregateBounds.union(geometry.boundingBox);
+
+          const material = Array.isArray(child.material)
+            ? child.material.map((entry) => createIntroTrashMaterial(entry))
+            : createIntroTrashMaterial(child.material);
+
+          bakedParts.push({ geometry, material });
+        });
+
+        if (bakedParts.length === 0) return;
+
+        aggregateBounds.getCenter(_trashBoundsCenter);
+        aggregateBounds.getSize(_trashBoundsSize);
+        const normalizeScale = 1 / Math.max(_trashBoundsSize.x, _trashBoundsSize.y, _trashBoundsSize.z, 0.001);
+
+        for (let i = 0; i < bakedParts.length; i++) {
+          const part = bakedParts[i];
+          part.geometry.translate(-_trashBoundsCenter.x, -_trashBoundsCenter.y, -_trashBoundsCenter.z);
+          part.geometry.scale(normalizeScale, normalizeScale, normalizeScale);
+          part.geometry.computeBoundingSphere();
+
+          const layer = new THREE.InstancedMesh(part.geometry, part.material, INTRO_TRASH_COUNT);
+          layer.count = this._trashOrbiters.length;
+          layer.frustumCulled = false;
+          layer.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          this.trashField.add(layer);
+          this._trashLayers.push(layer);
+        }
+
+        this._syncTrashHaloInstances();
+      },
+      undefined,
+      (error) => {
+        console.error('[IntroScene] Failed to load trashbag.fbx', error);
+      }
+    );
+  }
+
+  _syncTrashHaloInstances() {
+    if (!this._trashLayers?.length || !this._trashOrbiters?.length) return;
+
+    for (let i = 0; i < this._trashOrbiters.length; i++) {
+      const piece = this._trashOrbiters[i];
+      _trashDummy.position.copy(piece.position);
+      _trashDummy.rotation.set(piece.rotation.x, piece.rotation.y, piece.rotation.z);
+      _trashDummy.scale.setScalar(piece.scale);
+      _trashDummy.updateMatrix();
+
+      for (let j = 0; j < this._trashLayers.length; j++) {
+        this._trashLayers[j].setMatrixAt(i, _trashDummy.matrix);
+      }
+    }
+
+    for (let i = 0; i < this._trashLayers.length; i++) {
+      this._trashLayers[i].instanceMatrix.needsUpdate = true;
+    }
   }
 
   _buildShip() {
@@ -324,17 +421,17 @@ export class IntroScene {
     }
 
     if (this.trashField) {
-      this.trashField.rotation.y += delta * 0.06;
-      for (let i = 0; i < this.trashField.children.length; i++) {
-        const piece = this.trashField.children[i];
-        piece.rotation.x += piece.userData.spin.x * delta;
-        piece.rotation.y += piece.userData.spin.y * delta;
-        piece.rotation.z += piece.userData.spin.z * delta;
-        piece.userData.orbitAngle += delta * (0.08 + i * 0.0008);
-        piece.position.x = Math.cos(piece.userData.orbitAngle) * piece.userData.orbitRadius;
-        piece.position.z = Math.sin(piece.userData.orbitAngle) * piece.userData.orbitRadius - 10;
-        piece.position.y = piece.userData.orbitHeight + Math.sin(t * 0.7 + i) * 0.16;
+      for (let i = 0; i < this._trashOrbiters.length; i++) {
+        const piece = this._trashOrbiters[i];
+        piece.rotation.x += piece.spin.x * delta;
+        piece.rotation.y += piece.spin.y * delta;
+        piece.rotation.z += piece.spin.z * delta;
+        piece.orbitAngle += delta * (0.08 + i * 0.0008);
+        piece.position.x = Math.cos(piece.orbitAngle) * piece.orbitRadius;
+        piece.position.z = Math.sin(piece.orbitAngle) * piece.orbitRadius - 10;
+        piece.position.y = piece.orbitHeight + Math.sin(t * 0.7 + piece.bobPhase) * 0.16;
       }
+      this._syncTrashHaloInstances();
     }
 
     if (this.starfield) {
