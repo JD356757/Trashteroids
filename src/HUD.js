@@ -168,7 +168,7 @@ export class HUD {
     this.boostBarFill.style.width = `${pct}%`;
     this.boostBarFill.classList.toggle('boosting', !!active);
     if (this.boostBarLabel) {
-      this.boostBarLabel.textContent = active ? 'BOOST' : 'RECHARGE';
+      this.boostBarLabel.textContent = 'BOOST';
     }
   }
 

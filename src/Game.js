@@ -158,6 +158,7 @@ export class Game {
     this.input = new InputHandler();
     this.input.requestPointerLock(canvas);
     this.player = new Player(this.scene);
+    this._prevPlayerPos = this.player.mesh.position.clone();
     this.debris = new DebrisManager(this.scene);
     this.projectiles = new ProjectileManager(this.scene);
     this.levels = new LevelManager();
@@ -170,6 +171,8 @@ export class Game {
     // Effects: transient particle systems and screen-space popups
     this._effectGroup = new THREE.Group();
     this.scene.add(this._effectGroup);
+    // Shared particle texture for explosions/muzzles
+    this._particleTexture = new THREE.TextureLoader().load('fireparticle.png');
     this._sparks = [];
     this._popups = [];
     this._muzzles = [];
@@ -322,12 +325,15 @@ export class Game {
 
     this.playerHitCooldown = Math.max(0, this.playerHitCooldown - delta);
 
+    // store player position before this frame's movement for continuous collisions
+    this._prevPlayerPos.copy(this.player.mesh.position);
+
     // Mouse → pitch / yaw
     const { dx, dy } = this.input.consumeMouseDelta();
     this.player.rotate(dx, dy, delta);
 
     // W → forward thrust
-    const wantsBoost = this.input.isDown('w') && this.input.isDown('e') && this.boostCharge > 0;
+    const wantsBoost = this.input.isDown('w') && this.input.isDown(' ') && this.boostCharge > 0;
     this.boostActive = wantsBoost;
     if (this.input.isDown('w')) {
       const boostMultiplier = wantsBoost ? this.player.boostMultiplier : 1;
@@ -350,7 +356,7 @@ export class Game {
     this.player.manualRollInput = rollInput;
 
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
-    if (this.input.isDown(' ') || this.input.isDown('mouseleft')) {
+    if (this.input.isDown('mouseleft')) {
       const fireDirection = this._getAssistedFireDirection();
       const fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
@@ -414,6 +420,24 @@ export class Game {
     this.renderer.render(this.scene, this.camera);
   }
 
+  _segmentIntersectsSphere(start, end, center, radius) {
+    const seg = new THREE.Vector3().copy(end).sub(start);
+    const segLenSq = seg.lengthSq();
+
+    if (segLenSq === 0) {
+      const inside = end.distanceTo(center) <= radius;
+      return inside ? { hit: true, t: 1, point: end.clone() } : { hit: false };
+    }
+
+    const toCenter = new THREE.Vector3().copy(center).sub(start);
+    const t = THREE.MathUtils.clamp(toCenter.dot(seg) / segLenSq, 0, 1);
+    const closest = new THREE.Vector3().copy(start).addScaledVector(seg, t);
+    if (closest.distanceTo(center) <= radius) {
+      return { hit: true, t, point: closest };
+    }
+    return { hit: false };
+  }
+
   _checkProjectileDebrisCollisions() {
     const projectiles = this.projectiles.getActive();
     const debrisList = this.debris.getActive();
@@ -427,7 +451,7 @@ export class Game {
           this.trashHits++;
           this._refreshPauseMenu();
           this.levels.registerTrashDestroyed();
-          this._spawnSparks(_closestPoint.clone(), { count: 80, ttl: 0.9 });
+          this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
           this._spawnScorePopup(_closestPoint.clone(), points);
           this.projectiles.remove(i);
           this.debris.remove(j);
@@ -444,17 +468,58 @@ export class Game {
     for (let i = debrisList.length - 1; i >= 0; i--) {
       const d = debrisList[i];
       const hitRadius = d.hitRadius || 1;
-      const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 0.55;
-      const passDistance = hitRadius + 10;
+      // Increase the effective collision radius so trash reacts earlier
+      const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 1.0;
+      // Increase pass distance so misses are detected from farther out
+      const passDistance = hitRadius + 20;
+      // Reaction radius (nearby but not colliding): debris will be pushed away
+      const reactDistance = Math.max(hitRadius * 3, 6);
+
+      // continuous collision check: sweep player from previous to current position
+      const segStart = this._prevPlayerPos;
+      const segEnd = playerPos;
+      const swept = this._segmentIntersectsSphere(segStart, segEnd, d.position, hitDistance);
+
+      if (swept.hit) {
+        // collision at swept.point — move only the debris, not the player
+        const collisionPoint = swept.point;
+        const collisionNormal = new THREE.Vector3().copy(collisionPoint).sub(d.position).normalize();
+
+        // compute overlap but do NOT move or reflect the player; only affect debris
+        const distNow = playerPos.distanceTo(d.position);
+        const overlap = Math.max(0, hitDistance - distNow);
+
+        // apply reduced damage based on player speed
+        const playerSpeed = this.player.velocity.length();
+        const damage = THREE.MathUtils.clamp(Math.round(6 + (playerSpeed / 120) * 12), 5, 20);
+        this._damagePlayer(damage);
+
+        // robust separation: place debris fully outside player's collision sphere and give impulse
+        const away = d.position.clone().sub(playerPos).normalize();
+        if (d.position) d.position.copy(playerPos).addScaledVector(away, hitDistance + 0.06);
+        if (d.velocity) d.velocity.copy(away).multiplyScalar(Math.max(4, d.velocity.length() + 2));
+        else d.velocity = away.clone().multiplyScalar(3 + Math.random() * 2);
+
+        continue;
+      }
+
+      // compute distance for passive reactions
       _toDebris.copy(d.position).sub(playerPos);
       const distSq = _toDebris.lengthSq();
       const forwardOffset = _toDebris.dot(_shipForward);
 
-      // Direct hit
-      if (distSq < hitDistance * hitDistance) {
-        this._damagePlayer();
-        this.debris.remove(i);
-        continue;
+      // Nearby reaction: if within reactDistance but not colliding, push debris away
+      if (distSq < reactDistance * reactDistance && distSq > hitDistance * hitDistance) {
+        const dist = Math.sqrt(distSq) || 0.0001;
+        const away = _toDebris.clone().multiplyScalar(1 / dist); // from player to debris
+        // robust passive reaction: push debris to just outside reaction radius and give small impulse
+        const pushAway = d.position.clone().sub(playerPos).normalize();
+        if (d.position) d.position.copy(playerPos).addScaledVector(pushAway, Math.max(reactDistance, hitRadius + PLAYER_COLLISION_RADIUS) + 0.1);
+        if (d.velocity) {
+          d.velocity.addScaledVector(pushAway, 1.5 + Math.random() * 1.5);
+        } else {
+          d.velocity = pushAway.multiplyScalar(1.5 + Math.random() * 1.5);
+        }
       }
 
       // Trash that slips behind the player counts as a miss.
@@ -480,10 +545,7 @@ export class Game {
       _collisionNormal.copy(playerPos).sub(sphere.center);
       const distanceSq = _collisionNormal.lengthSq();
       if (distanceSq >= minDistance * minDistance) continue;
-
-      this._damagePlayer();
-      if (!this.running) return;
-
+      // Compute collision geometry and response
       let distance = Math.sqrt(distanceSq);
       if (distance === 0) {
         _collisionNormal.set(0, 0, 1).applyQuaternion(this.player.mesh.quaternion);
@@ -498,11 +560,24 @@ export class Game {
       sepZ += _collisionNormal.z * overlap;
 
       const normalSpeed = this.player.velocity.dot(_collisionNormal);
-      if (normalSpeed >= 0) continue;
 
-      _velocityNormal.copy(_collisionNormal).multiplyScalar(normalSpeed);
-      _velocityTangent.copy(this.player.velocity).sub(_velocityNormal).multiplyScalar(ASTEROID_SURFACE_FRICTION);
-      this.player.velocity.copy(_velocityTangent).addScaledVector(_collisionNormal, -normalSpeed * ASTEROID_BOUNCE);
+      // If approaching the asteroid (negative dot), reflect velocity and compute damage
+      if (normalSpeed < 0) {
+        _velocityNormal.copy(_collisionNormal).multiplyScalar(normalSpeed);
+        _velocityTangent.copy(this.player.velocity).sub(_velocityNormal).multiplyScalar(ASTEROID_SURFACE_FRICTION);
+        this.player.velocity.copy(_velocityTangent).addScaledVector(_collisionNormal, -normalSpeed * ASTEROID_BOUNCE);
+
+        const impactSpeed = Math.max(0, -normalSpeed);
+        // Map impactSpeed to damage — reduced sensitivity so 20 is only at very high speed
+        const damage = THREE.MathUtils.clamp(Math.round(8 + (impactSpeed / 300) * 12), 5, 20);
+        this._damagePlayer(damage);
+        if (!this.running) return;
+      } else {
+        // grazing contact with no inward velocity: apply small fixed damage
+        const damage = 6;
+        this._damagePlayer(damage);
+        if (!this.running) return;
+      }
     }
 
     // Apply accumulated separation once
@@ -514,14 +589,19 @@ export class Game {
   }
 
   _damagePlayer() {
+    // legacy: no-arg call reduces by 1; new signature accepts damage amount
+    let damage = 1;
+    if (arguments.length > 0) damage = arguments[0] || 0;
+    damage = Math.max(0, Math.round(damage));
+
     if (this.playerHitCooldown > 0 || this.lives <= 0) {
       return false;
     }
 
-    this.lives--;
+    this.lives = Math.max(0, this.lives - damage);
     this.playerHitCooldown = PLAYER_HIT_COOLDOWN;
     this.player.flashWhite();
-    
+
     if (this.lives <= 0) {
       this._gameOver();
     }
@@ -895,9 +975,9 @@ export class Game {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       for (let j = 0; j < asteroids.length; j++) {
         const sphere = asteroids[j].boundingSphere;
-        if (this._projectileHitsSphere(projectiles[i], sphere.center, sphere.radius)) {
-          // _closestPoint was computed by _projectileHitsSphere
-          this._spawnSparks(_closestPoint.clone());
+        // Use the smaller collision radius (same scale used for player collisions)
+        const hitRadius = sphere.radius * 0.8;
+        if (this._projectileHitsSphere(projectiles[i], sphere.center, hitRadius)) {
           // NOTE: do NOT modify asteroid velocity from projectile hits;
           // bullets are cosmetic and should not push asteroids.
           this.projectiles.remove(i);
@@ -909,24 +989,56 @@ export class Game {
 
   // Spawn a short-lived spark particle burst at world `pos`.
   _spawnSparks(pos, options = {}) {
-    const count = options.count || 12;
+    // Lightweight textured sparks; supports size/color interpolation.
+    const count = options.count || 24;
     const positions = new Float32Array(count * 3);
     const velocities = new Array(count);
     for (let k = 0; k < count; k++) {
-      positions[k * 3] = pos.x;
-      positions[k * 3 + 1] = pos.y;
-      positions[k * 3 + 2] = pos.z;
-      const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).normalize();
-      velocities[k] = dir.multiplyScalar(18 * (0.5 + Math.random()));
+      positions[k * 3] = pos.x + (Math.random() - 0.5) * 0.2;
+      positions[k * 3 + 1] = pos.y + (Math.random() - 0.5) * 0.2;
+      positions[k * 3 + 2] = pos.z + (Math.random() - 0.5) * 0.2;
+      const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.2), (Math.random() - 0.5)).normalize();
+      velocities[k] = dir.multiplyScalar((options.speed || 12) * (0.6 + Math.random() * 0.9));
     }
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xffcc66, size: 0.6, sizeAttenuation: true, depthWrite: false });
+    const mat = new THREE.PointsMaterial({ map: this._particleTexture, color: options.color || 0xffcc66, size: options.size || 0.9, sizeAttenuation: true, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending });
     const points = new THREE.Points(geom, mat);
     this._effectGroup.add(points);
 
-    this._sparks.push({ mesh: points, velocities, life: 0, ttl: options.ttl || 0.75 });
+    this._sparks.push({ mesh: points, velocities, life: 0, ttl: options.ttl || 0.9, sizeStart: options.size || 0.9, sizeEnd: options.sizeEnd || 0.1, colorStart: new THREE.Color(options.color || 0xffcc66), colorEnd: new THREE.Color(options.colorEnd || 0x222222), type: 'spark' });
+  }
+
+  // Larger explosion effect for debris destruction
+  _spawnExplosion(pos, options = {}) {
+    const baseCount = options.count || 220;
+    const ttl = options.ttl || 1.6;
+
+    // Core flash — bright, short-lived
+    this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.12), speed: 25, size: 8, ttl: Math.max(0.2, ttl * 0.12), color: 0xffffff, colorEnd: 0xffcc88 });
+
+    // Embers — orange, additive, mid-lived
+    this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.6), speed: 75, size: 6, ttl: Math.max(0.8, ttl * 0.7), color: 0xffbb66, colorEnd: 0x442200 });
+
+    // Smoke — larger, darker, rises slowly
+    const smokeCount = Math.floor(baseCount * 0.28);
+    const positions = new Float32Array(smokeCount * 3);
+    const velocities = new Array(smokeCount);
+    for (let k = 0; k < smokeCount; k++) {
+      positions[k * 3] = pos.x + (Math.random() - 0.5) * 2.0;
+      positions[k * 3 + 1] = pos.y + (Math.random() - 0.5) * 1.0;
+      positions[k * 3 + 2] = pos.z + (Math.random() - 0.5) * 2.0;
+      // omnidirectional smoke: emit in all directions (slower than embers)
+      const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).normalize();
+      velocities[k] = dir.multiplyScalar(45 * (0.6 + Math.random() * 0.8));
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({ map: this._particleTexture, color: 0x333333, size: 6.0, sizeAttenuation: true, depthWrite: false, transparent: true, opacity: 0.1, blending: THREE.NormalBlending });
+    const points = new THREE.Points(geom, mat);
+    this._effectGroup.add(points);
+    this._sparks.push({ mesh: points, velocities, life: 0, ttl: Math.max(1.6, ttl * 1.3), sizeStart: 6.0, sizeEnd: 12.0, colorStart: new THREE.Color(0x333333), colorEnd: new THREE.Color(0x111111), type: 'smoke' });
   }
 
   // Spawn a very short-lived muzzle particle burst in player-local space.
@@ -998,19 +1110,32 @@ export class Game {
         posAttr.array[k * 3] += vx;
         posAttr.array[k * 3 + 1] += vy;
         posAttr.array[k * 3 + 2] += vz;
-        // apply damping
-        p.velocities[k].multiplyScalar(Math.pow(0.2, delta * 60));
+        // different damping for smoke vs sparks
+        if (p.type === 'smoke') {
+          p.velocities[k].multiplyScalar(Math.pow(0.92, delta * 60));
+        } else {
+          p.velocities[k].multiplyScalar(Math.pow(0.85, delta * 60));
+        }
       }
       posAttr.needsUpdate = true;
 
-      // fade out material
-      p.mesh.material.opacity = Math.max(0, 1 - p.life / p.ttl);
-      p.mesh.material.transparent = true;
+      // interpolate size & color over life
+      const t = Math.min(1, p.life / p.ttl);
+      if (p.sizeStart !== undefined && p.sizeEnd !== undefined) {
+        const size = THREE.MathUtils.lerp(p.sizeStart, p.sizeEnd, t);
+        if (p.mesh && p.mesh.material) p.mesh.material.size = size;
+      }
+      if (p.colorStart && p.colorEnd && p.mesh && p.mesh.material) {
+        p.mesh.material.color.copy(p.colorStart).lerp(p.colorEnd, t);
+      }
+
+      // fade out
+      if (p.mesh && p.mesh.material) p.mesh.material.opacity = Math.max(0, 1 - t);
 
       if (p.life >= p.ttl) {
         this._effectGroup.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        p.mesh.material.dispose();
+        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        if (p.mesh.material) p.mesh.material.dispose();
         this._sparks.splice(i, 1);
       }
     }
