@@ -180,7 +180,7 @@ export class HUD {
 
   updatePauseStats(shotsFired, trashHits, averageSpeed) {
     if (!this.pauseAccuracyValue || !this.pauseAccuracyDetail) return;
-    const percent = shotsFired > 0 ? (trashHits / shotsFired) * 100 : 0;
+    const percent = shotsFired > 0 ? Math.round(((trashHits / shotsFired) * 100) * 4) : 0;
     this.pauseAccuracyValue.textContent = `${percent.toFixed(shotsFired > 0 ? 1 : 0)}%`;
     this.pauseAccuracyDetail.textContent = `${trashHits} trash hits / ${shotsFired} shots`;
     if (this.pauseSpeedValue && this.pauseSpeedDetail) {
