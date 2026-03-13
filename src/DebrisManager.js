@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const _playerForward = new THREE.Vector3();
 const _playerRight = new THREE.Vector3();
@@ -16,7 +16,7 @@ const _defaultForward = new THREE.Vector3(0, 0, -1);
 const _defaultRight = new THREE.Vector3(1, 0, 0);
 const _defaultUp = new THREE.Vector3(0, 1, 0);
 
-const TRASH_MODEL_PATH = '/models/trashbag.fbx';
+const TRASH_MODEL_PATH = '/models/trashnew.glb';
 const MAX_TRASH = 96;
 const MAX_SPAWN_PER_FRAME = 6;
 const MAX_SPAWN_ATTEMPTS = 14;
@@ -39,6 +39,8 @@ const DEFAULT_RECYCLE_BEHIND_DISTANCE = 260;
 const DEFAULT_PROGRESS_PER_SPAWN = 140;
 const DEFAULT_BOOTSTRAP_ACTIVE = 16;
 const ASTEROID_BOUNCE = 0.24;
+const TRASH_OUTLINE_COLOR = 0x39ff88;
+const TRASH_OUTLINE_SCALE = 1.05;
 
 function createTexturedMaterial(material) {
   const map = material?.map ?? null;
@@ -46,6 +48,8 @@ function createTexturedMaterial(material) {
   const normalMap = material?.normalMap ?? null;
   const roughnessMap = material?.roughnessMap ?? null;
   const metalnessMap = material?.metalnessMap ?? null;
+  const emissiveMap = material?.emissiveMap ?? null;
+  const aoMap = material?.aoMap ?? null;
 
   const textured = new THREE.MeshStandardMaterial({
     color: material?.color ? material.color.clone() : new THREE.Color(0xffffff),
@@ -56,6 +60,8 @@ function createTexturedMaterial(material) {
     normalMap,
     roughnessMap,
     metalnessMap,
+    emissiveMap,
+    aoMap,
     transparent: Boolean(material?.transparent || alphaMap),
     opacity: material?.opacity ?? 1,
     side: material?.side ?? THREE.FrontSide,
@@ -124,6 +130,7 @@ export class DebrisManager {
     this._freeSlots = [];
     this._slots = new Array(MAX_TRASH);
     this._layers = [];
+    this._outlineLayers = [];
     this._ready = false;
     this._renderDirty = false;
     this._lastPlayerPos = new THREE.Vector3();
@@ -383,17 +390,17 @@ export class DebrisManager {
   }
 
   _loadTrashTemplate() {
-    const loader = new FBXLoader();
+    const loader = new GLTFLoader();
 
     loader.load(
       TRASH_MODEL_PATH,
-      (fbx) => {
+      (gltf) => {
         const bakedParts = [];
         const aggregateBounds = new THREE.Box3();
 
-        fbx.updateMatrixWorld(true);
+        gltf.scene.updateMatrixWorld(true);
 
-        fbx.traverse((child) => {
+        gltf.scene.traverse((child) => {
           if (!child.isMesh || !child.geometry) return;
 
           const bakedGeometry = child.geometry.clone();
@@ -409,7 +416,7 @@ export class DebrisManager {
         });
 
         if (bakedParts.length === 0) {
-          console.warn('[DebrisManager] trashbag.fbx loaded with no renderable meshes');
+          console.warn('[DebrisManager] trashnew.glb loaded with no renderable meshes');
           return;
         }
 
@@ -432,6 +439,23 @@ export class DebrisManager {
           instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
           this._renderRoot.add(instanced);
           this._layers.push(instanced);
+
+          const outlineMaterial = new THREE.MeshBasicMaterial({
+            color: TRASH_OUTLINE_COLOR,
+            side: THREE.BackSide,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+            fog: true,
+          });
+          const outlineLayer = new THREE.InstancedMesh(part.geometry, outlineMaterial, MAX_TRASH);
+          outlineLayer.count = 0;
+          outlineLayer.castShadow = false;
+          outlineLayer.receiveShadow = false;
+          outlineLayer.frustumCulled = false;
+          outlineLayer.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          this._renderRoot.add(outlineLayer);
+          this._outlineLayers.push(outlineLayer);
         }
 
         this._ready = true;
@@ -440,7 +464,7 @@ export class DebrisManager {
       },
       undefined,
       (error) => {
-        console.error('[DebrisManager] Failed to load trashbag.fbx', error);
+        console.error('[DebrisManager] Failed to load trashnew.glb', error);
       }
     );
   }
@@ -461,11 +485,23 @@ export class DebrisManager {
       for (let j = 0; j < this._layers.length; j++) {
         this._layers[j].setMatrixAt(i, _matrixDummy.matrix);
       }
+
+      _matrixDummy.scale.setScalar(trash.scale * TRASH_OUTLINE_SCALE);
+      _matrixDummy.updateMatrix();
+
+      for (let j = 0; j < this._outlineLayers.length; j++) {
+        this._outlineLayers[j].setMatrixAt(i, _matrixDummy.matrix);
+      }
     }
 
     for (let i = 0; i < this._layers.length; i++) {
       this._layers[i].count = activeCount;
       this._layers[i].instanceMatrix.needsUpdate = true;
+    }
+
+    for (let i = 0; i < this._outlineLayers.length; i++) {
+      this._outlineLayers[i].count = activeCount;
+      this._outlineLayers[i].instanceMatrix.needsUpdate = true;
     }
 
     this._renderDirty = false;

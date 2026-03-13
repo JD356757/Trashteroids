@@ -41,6 +41,8 @@ const AIM_FALLBACK_DISTANCE = 800;
 const AIM_LOWERING = 0.035;
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
+const PLAYER_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
+const DISPLAY_SPEED_MAX = 100;
 
 export class Game {
   constructor(canvas, startLevel = 1) {
@@ -52,8 +54,15 @@ export class Game {
     this.playerHitCooldown = 0;
     this.boostCharge = 1;
     this.boostActive = false;
+    this.paused = false;
+    this.shotsFired = 0;
+    this.trashHits = 0;
+    this._averageSpeedSum = 0;
+    this._averageSpeedTime = 0;
+    this._pauseUnlockArmed = false;
     this._startLevel = startLevel;
     this.clock = new THREE.Clock();
+    this.crosshair = document.getElementById('crosshair');
 
     // Camera follow smoothing: use a framerate-independent follow speed (higher = tighter)
     this.cameraFollowSpeed = 18.0;
@@ -99,7 +108,9 @@ export class Game {
     this.sunLight.shadow.camera.top = d;
     this.sunLight.shadow.camera.bottom = -d;
     this.sunLight.shadow.bias = -0.0001;
-    // this.scene.add(this.sunLight);
+    this.sunLight.target.position.set(0, 0, 0);
+    this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
     // Small visible sun sphere (emissive, no shadows needed)
     const sunGeo = new THREE.SphereGeometry(300, 32, 32);
@@ -152,6 +163,9 @@ export class Game {
     this.levels = new LevelManager();
     this.hud = new HUD();
     this.starfield = new Starfield(this.scene);
+    this._applySavedSensitivity();
+    this._bindPauseControls();
+    this._refreshPauseMenu();
 
     // Effects: transient particle systems and screen-space popups
     this._effectGroup = new THREE.Group();
@@ -183,11 +197,129 @@ export class Game {
     this._loop();
   }
 
+  _applySavedSensitivity() {
+    let savedSensitivity = this.player.mouseSensitivity;
+
+    try {
+      const rawValue = window.localStorage.getItem(PLAYER_SENSITIVITY_STORAGE_KEY);
+      const parsed = rawValue == null ? NaN : Number(rawValue);
+      if (Number.isFinite(parsed)) {
+        savedSensitivity = THREE.MathUtils.clamp(parsed, 0.008, 0.06);
+      }
+    } catch (error) {
+      // Ignore storage failures and keep the in-memory default.
+    }
+
+    this.player.mouseSensitivity = savedSensitivity;
+  }
+
+  _bindPauseControls() {
+    if (this.hud.pauseResumeBtn) {
+      this.hud.pauseResumeBtn.addEventListener('click', () => {
+        this._resumeGame();
+      });
+    }
+
+    if (this.hud.pauseRestartBtn) {
+      this.hud.pauseRestartBtn.addEventListener('click', () => window.location.reload());
+    }
+
+    if (this.hud.pauseSensitivityInput) {
+      this.hud.pauseSensitivityInput.addEventListener('input', (event) => {
+        const displayValue = Number(event.currentTarget.value);
+        this._setMouseSensitivity(displayValue / 1000, true);
+      });
+    }
+  }
+
+  _setMouseSensitivity(value, persist = false) {
+    const clamped = THREE.MathUtils.clamp(value, 0.008, 0.06);
+    this.player.mouseSensitivity = clamped;
+    this.hud.setPauseSensitivity(clamped);
+
+    if (!persist) return;
+
+    try {
+      window.localStorage.setItem(PLAYER_SENSITIVITY_STORAGE_KEY, `${clamped}`);
+    } catch (error) {
+      // Ignore storage failures and keep the updated runtime value.
+    }
+  }
+
+  _refreshPauseMenu() {
+    this.hud.setPauseSensitivity(this.player.mouseSensitivity);
+    this.hud.updatePauseStats(this.shotsFired, this.trashHits, this._getAverageSpeed());
+  }
+
+  _getAverageSpeed() {
+    if (this._averageSpeedTime <= 0) return 0;
+    const averageWorldSpeed = this._averageSpeedSum / this._averageSpeedTime;
+    const boostSpeedReference = this.player.thrustPower * this.player.boostMultiplier / (1 - this.player.dampening);
+    if (boostSpeedReference <= 0) return 0;
+    return THREE.MathUtils.clamp((averageWorldSpeed / boostSpeedReference) * DISPLAY_SPEED_MAX, 0, DISPLAY_SPEED_MAX);
+  }
+
+  _pauseGame() {
+    if (!this.running || this.paused) return;
+
+    this.paused = true;
+    this.boostActive = false;
+    this._pauseUnlockArmed = false;
+    this._refreshPauseMenu();
+    this.hud.setPauseVisible(true);
+    if (this.crosshair) {
+      this.crosshair.classList.add('hidden');
+    }
+    this.input.releaseAll();
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+  }
+
+  _resumeGame() {
+    if (!this.running || !this.paused) return;
+
+    this.paused = false;
+    this._pauseUnlockArmed = false;
+    this.hud.setPauseVisible(false);
+    if (this.crosshair) {
+      this.crosshair.classList.remove('hidden');
+    }
+    this.input.releaseAll();
+    this.canvas.requestPointerLock();
+  }
+
   _loop() {
     if (!this.running) return;
     requestAnimationFrame(() => this._loop());
 
     const delta = this.clock.getDelta();
+    const hadPointerLock = this._pauseUnlockArmed;
+    const hasPointerLock = this.input.pointerLocked;
+
+    if (this.input.wasPressed('Escape')) {
+      if (this.paused) {
+        this._resumeGame();
+      } else {
+        this._pauseGame();
+      }
+    }
+
+    if (!this.paused && hadPointerLock && !hasPointerLock) {
+      this._pauseGame();
+    }
+
+    if (!this.paused && hasPointerLock) {
+      this._pauseUnlockArmed = true;
+    }
+
+    if (this.paused) {
+      this.hud.updateBoostBar(this.boostCharge, false);
+      this.input.resetPressed();
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+
     this.playerHitCooldown = Math.max(0, this.playerHitCooldown - delta);
 
     // Mouse → pitch / yaw
@@ -222,6 +354,8 @@ export class Game {
       const fireDirection = this._getAssistedFireDirection();
       const fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
+        this.shotsFired += fired;
+        this._refreshPauseMenu();
         this.player.applyRecoil(this.projectiles.cooldownTime);
         // spawn a very short muzzle particle burst attached to the player
         this._spawnMuzzleParticles(new THREE.Vector3(0, 0.2, -1.5), { count: 18, ttl: 0.08 });
@@ -231,6 +365,8 @@ export class Game {
     // Update subsystems
     this.player.update(delta);
     this.projectiles.update(delta);
+    this._averageSpeedSum += this.player.velocity.length() * delta;
+    this._averageSpeedTime += delta;
     const playerPos = this.player.mesh.position;
     const playerQuat = this.player.baseQuaternion;
     this.asteroidField.update(delta, playerPos);
@@ -288,6 +424,8 @@ export class Game {
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
           const points = debrisList[j].points || 100;
           this.score += points;
+          this.trashHits++;
+          this._refreshPauseMenu();
           this.levels.registerTrashDestroyed();
           this._spawnSparks(_closestPoint.clone(), { count: 80, ttl: 0.9 });
           this._spawnScorePopup(_closestPoint.clone(), points);
@@ -518,11 +656,19 @@ export class Game {
 
   _gameOver() {
     this.running = false;
+    this.hud.setPauseVisible(false);
+    if (this.crosshair) {
+      this.crosshair.classList.add('hidden');
+    }
     this.hud.showMessage('GAME OVER');
   }
 
   _victory() {
     this.running = false;
+    this.hud.setPauseVisible(false);
+    if (this.crosshair) {
+      this.crosshair.classList.add('hidden');
+    }
     this.hud.showMessage('EARTH IS SAVED!');
   }
 
@@ -929,6 +1075,8 @@ export class Game {
       camPos.y + 1000,
       camPos.z - 3000
     );
+    this.sunLight.target.position.copy(camPos);
+    this.sunLight.target.updateMatrixWorld();
     this.sunMesh.position.copy(this.sunLight.position);
 
     // Animate sun glow sprite — gentle pulse like asteroid glows

@@ -70,6 +70,13 @@ export class InputHandler {
     return { dx, dy };
   }
 
+  releaseAll() {
+    this._held = {};
+    this._pressed = {};
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+  }
+
   /** Call once per frame after processing input */
   resetPressed() {
     this._pressed = {};

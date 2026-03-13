@@ -46,6 +46,42 @@
     <div class="crosshair-dot"></div>
   </div>
 
+  <div id="pause-screen" class="hidden" aria-hidden="true">
+    <div class="pause-backdrop"></div>
+    <div class="pause-panel">
+      <div class="pause-kicker">Flight Systems Holding Pattern</div>
+      <h2>Mission Paused</h2>
+      <p class="pause-subtitle">Retune your aim, check your accuracy, and jump back in when you're ready.</p>
+
+      <div class="pause-grid">
+        <section class="pause-card pause-card-emphasis">
+          <div class="pause-label">Trash Accuracy</div>
+          <div id="pause-accuracy-value" class="pause-stat-value">0%</div>
+          <div id="pause-accuracy-detail" class="pause-stat-detail">0 trash hits / 0 shots</div>
+        </section>
+
+        <section class="pause-card">
+          <div class="pause-label">Average Speed</div>
+          <div id="pause-speed-value" class="pause-stat-value pause-stat-value-speed">0</div>
+          <div id="pause-speed-detail" class="pause-stat-detail">0 / 100 boost-scale average</div>
+        </section>
+
+        <section class="pause-card">
+          <label class="pause-label" for="pause-sensitivity">Mouse Sensitivity</label>
+          <input id="pause-sensitivity" type="range" min="8" max="60" step="1" value="24" />
+          <div id="pause-sensitivity-value" class="pause-sensitivity-value">24</div>
+        </section>
+      </div>
+
+      <div class="pause-actions">
+        <button id="pause-resume-btn" class="pause-btn">Resume Mission</button>
+        <button id="pause-restart-btn" class="pause-btn pause-btn-secondary">Restart Run</button>
+      </div>
+
+      <div class="pause-hint">Press Esc to resume</div>
+    </div>
+  </div>
+
   <div id="level-popup" class="hidden">
     <div id="level-popup-label">LEVEL 1</div>
     <div id="level-popup-sub">15,000 mi - Debris Field</div>
