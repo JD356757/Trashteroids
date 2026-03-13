@@ -18,9 +18,9 @@ export class Player {
     this.boostMultiplier = 2.0;
     this.recoilAcceleration = 42;
     this.mouseSensitivity = 0.024;
-    this.turnAcceleration = 16.0;
+    this.turnAcceleration = 5.0;
     this.maxTurnRate = 2.9;
-    this.turnDamping = 7.5;
+    this.turnDamping = 4;
     this.rollOnYaw = -0.4;           // cosmetic roll from turning (subtle)
     this.rollReturnSpeed = 3.0;
     this.pitchOnPitch = 0.3;       // cosmetic pitch from pitch input (subtle)
