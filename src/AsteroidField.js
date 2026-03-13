@@ -75,10 +75,9 @@ const GLOW_MATERIAL = new THREE.SpriteMaterial({
   fog: false,
 });
 
-const ASTEROID_COLOR_LIT = new THREE.Color(0xf6decf);
-const ASTEROID_COLOR_SHADE = new THREE.Color(0xc8c9f1);
-const ASTEROID_PASTEL_WASH = new THREE.Color(0xf3e9ff);
-const ASTEROID_OUTLINE_COLOR = 0x544a69;
+const ASTEROID_COLOR_LIT = new THREE.Color(0xd8ced9);
+const ASTEROID_COLOR_SHADE = new THREE.Color(0xb19bb3);
+const ASTEROID_OUTLINE_COLOR = 0x211626;
 const ASTEROID_OUTLINE_SCALE = 1.035;
 
 // Normalized sun direction (matches Game.js sunLight.position)
@@ -90,7 +89,6 @@ function makeTwoToneMaterial() {
     uniforms: {
       uColorLit: { value: ASTEROID_COLOR_LIT },
       uColorShade: { value: ASTEROID_COLOR_SHADE },
-      uPastelWash: { value: ASTEROID_PASTEL_WASH },
       uSunDir: { value: SUN_DIR },
       uOpacity: { value: 0.0 },
     },
@@ -104,15 +102,13 @@ function makeTwoToneMaterial() {
     fragmentShader: /* glsl */ `
       uniform vec3  uColorLit;
       uniform vec3  uColorShade;
-      uniform vec3  uPastelWash;
       uniform vec3  uSunDir;
       uniform float uOpacity;
       varying vec3  vWorldNormal;
       void main() {
         float NdotL = dot(normalize(vWorldNormal), uSunDir);
-        float lit = smoothstep(-0.18, 0.42, NdotL);
+        float lit = step(0.0, NdotL);
         vec3 color = mix(uColorShade, uColorLit, lit);
-        color = mix(color, uPastelWash, 0.22);
         gl_FragColor = vec4(color, uOpacity);
       }
     `,
