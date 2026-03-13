@@ -16,6 +16,15 @@ export class HUD {
     this.boostBarContainer = document.getElementById('boost-bar-container');
     this.boostBarFill = document.getElementById('boost-bar-fill');
     this.boostBarLabel = document.getElementById('boost-bar-label');
+    this.pauseScreen = document.getElementById('pause-screen');
+    this.pauseAccuracyValue = document.getElementById('pause-accuracy-value');
+    this.pauseAccuracyDetail = document.getElementById('pause-accuracy-detail');
+    this.pauseSpeedValue = document.getElementById('pause-speed-value');
+    this.pauseSpeedDetail = document.getElementById('pause-speed-detail');
+    this.pauseSensitivityInput = document.getElementById('pause-sensitivity');
+    this.pauseSensitivityValue = document.getElementById('pause-sensitivity-value');
+    this.pauseResumeBtn = document.getElementById('pause-resume-btn');
+    this.pauseRestartBtn = document.getElementById('pause-restart-btn');
     if (this.minimapCanvas) {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
@@ -163,7 +172,32 @@ export class HUD {
     }
   }
 
+  setPauseVisible(visible) {
+    if (!this.pauseScreen) return;
+    this.pauseScreen.classList.toggle('hidden', !visible);
+    this.pauseScreen.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  }
+
+  updatePauseStats(shotsFired, trashHits, averageSpeed) {
+    if (!this.pauseAccuracyValue || !this.pauseAccuracyDetail) return;
+    const percent = shotsFired > 0 ? (trashHits / shotsFired) * 100 : 0;
+    this.pauseAccuracyValue.textContent = `${percent.toFixed(shotsFired > 0 ? 1 : 0)}%`;
+    this.pauseAccuracyDetail.textContent = `${trashHits} trash hits / ${shotsFired} shots`;
+    if (this.pauseSpeedValue && this.pauseSpeedDetail) {
+      this.pauseSpeedValue.textContent = `${Math.round(averageSpeed)}`;
+      this.pauseSpeedDetail.textContent = `${Math.round(averageSpeed)} / 100 boost-scale average`;
+    }
+  }
+
+  setPauseSensitivity(rawSensitivity) {
+    if (!this.pauseSensitivityInput || !this.pauseSensitivityValue) return;
+    const displayValue = Math.round(rawSensitivity * 1000);
+    this.pauseSensitivityInput.value = `${displayValue}`;
+    this.pauseSensitivityValue.textContent = `${displayValue}`;
+  }
+
   showMessage(text) {
+    this.setPauseVisible(false);
     this.overlay.classList.remove('hidden');
     this.overlay.querySelector('h1').textContent = text;
     const btn = this.overlay.querySelector('#start-btn');

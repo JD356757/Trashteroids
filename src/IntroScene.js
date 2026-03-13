@@ -1,13 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
 const _lookTarget = new THREE.Vector3();
 const _orbitCenter = new THREE.Vector3();
 const _trashBoundsCenter = new THREE.Vector3();
 const _trashBoundsSize = new THREE.Vector3();
 const _trashDummy = new THREE.Object3D();
-const INTRO_TRASH_MODEL_PATH = '/models/trashbag.fbx';
+const INTRO_TRASH_MODEL_PATH = '/models/trashnew.glb';
 const INTRO_TRASH_COUNT = 30;
 
 function createIntroTrashMaterial(material) {
@@ -227,15 +226,15 @@ export class IntroScene {
     }
     this.scene.add(this.trashField);
 
-    const loader = new FBXLoader();
+    const loader = new GLTFLoader();
     loader.load(
       INTRO_TRASH_MODEL_PATH,
-      (fbx) => {
+      (gltf) => {
         const bakedParts = [];
         const aggregateBounds = new THREE.Box3();
 
-        fbx.updateMatrixWorld(true);
-        fbx.traverse((child) => {
+        gltf.scene.updateMatrixWorld(true);
+        gltf.scene.traverse((child) => {
           if (!child.isMesh || !child.geometry) return;
 
           const geometry = child.geometry.clone();
@@ -274,7 +273,7 @@ export class IntroScene {
       },
       undefined,
       (error) => {
-        console.error('[IntroScene] Failed to load trashbag.fbx', error);
+        console.error('[IntroScene] Failed to load trashnew.glb', error);
       }
     );
   }

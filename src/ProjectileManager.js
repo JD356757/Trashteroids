@@ -14,7 +14,7 @@ export class ProjectileManager {
   }
 
   fire(origin, direction, playerVelocity, playerQuat) {
-    if (this.cooldown > 0) return false;
+    if (this.cooldown > 0) return 0;
     this.cooldown = this.cooldownTime;
 
     const dir = direction.clone().normalize();
@@ -52,6 +52,7 @@ export class ProjectileManager {
       depthWrite: false,
     });
 
+    let spawnedCount = 0;
     const offsets = [lateralOffset, -lateralOffset];
     for (let i = 0; i < offsets.length; i++) {
       const core = new THREE.Mesh(coreGeo, coreMat);
@@ -72,9 +73,10 @@ export class ProjectileManager {
         prevPosition: core.position.clone(),
         travelled: 0,
       });
+      spawnedCount++;
     }
 
-    return true;
+    return spawnedCount;
   }
 
   update(delta) {
