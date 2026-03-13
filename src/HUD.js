@@ -36,7 +36,7 @@ export class HUD {
     this.bossIndicatorDist.textContent = `${distance} mi`;
   }
 
-  updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids, debrisList) {
+  updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids) {
     if (!visible || !this.minimapCanvas) {
       if (!this.minimap.classList.contains('hidden')) {
         this.minimap.classList.add('hidden');
@@ -52,37 +52,41 @@ export class HUD {
     const cx = 75;
     const cy = 75;
     const radius = 75;
-    const maxRange = 2000; // units
+    const maxRange = 2000;
 
-    // Draw crosshair helper lines
-    ctx.strokeStyle = 'rgba(162, 207, 254, 0.2)';
+    ctx.strokeStyle = 'rgba(181, 232, 255, 0.16)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(cx, 0); ctx.lineTo(cx, 150);
-    ctx.moveTo(0, cy); ctx.lineTo(150, cy);
+    ctx.moveTo(cx, 0);
+    ctx.lineTo(cx, 150);
+    ctx.moveTo(0, cy);
+    ctx.lineTo(150, cy);
     ctx.stroke();
 
-    const _v = new THREE.Vector3();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
 
-    // Draw Asteroids
+    const offset = new THREE.Vector3();
+
     if (asteroids && playerPos && camInvQuat) {
-      ctx.fillStyle = '#b19bb3';
+      ctx.fillStyle = '#dbc8f4';
       for (let i = 0; i < asteroids.length; i++) {
         const ast = asteroids[i];
-        _v.copy(ast.boundingSphere.center).sub(playerPos);
+        offset.copy(ast.boundingSphere.center).sub(playerPos);
 
-        if (_v.lengthSq() > maxRange * maxRange) continue;
+        if (offset.lengthSq() > maxRange * maxRange) continue;
 
-        _v.applyQuaternion(camInvQuat);
+        offset.applyQuaternion(camInvQuat);
 
-        const dx = _v.x / maxRange;
-        const dy = _v.z / maxRange; // +z is backward, so +dy is down on minimap
+        const dx = offset.x / maxRange;
+        const dy = offset.z / maxRange;
 
         if (dx * dx + dy * dy <= 1) {
           const px = cx + dx * radius;
           const py = cy + dy * radius;
-
-          let size = ast.boundingSphere.radius > 6 ? 2.5 : 1.2;
+          const size = ast.boundingSphere.radius > 6 ? 2.4 : 1.25;
           ctx.beginPath();
           ctx.arc(px, py, size, 0, Math.PI * 2);
           ctx.fill();
@@ -90,85 +94,56 @@ export class HUD {
       }
     }
 
-    if (debrisList && playerPos && camInvQuat) {
-      ctx.fillStyle = '#ff4d4d';
-      ctx.shadowColor = '#ff4d4d';
-      ctx.shadowBlur = 6;
-
-      for (let i = 0; i < debrisList.length; i += 10) {
-        const debris = debrisList[i];
-        _v.copy(debris.position).sub(playerPos);
-
-        if (_v.lengthSq() > maxRange * maxRange) continue;
-
-        _v.applyQuaternion(camInvQuat);
-        const dx = _v.x / maxRange;
-        const dy = _v.z / maxRange;
-
-        if (dx * dx + dy * dy <= 1) {
-          const px = cx + dx * radius;
-          const py = cy + dy * radius;
-          ctx.beginPath();
-          ctx.arc(px, py, 2.1, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
-      ctx.shadowBlur = 0;
-    }
-
-    // Draw Boss
     if (bossPos && playerPos && camInvQuat) {
-      _v.copy(bossPos).sub(playerPos);
-      const bossDist = _v.length();
-      _v.applyQuaternion(camInvQuat);
-      _v.y = 0; // Project to XZ plane
-      _v.normalize(); // Boss is always shown on the edge if outside range, or clamped
+      offset.copy(bossPos).sub(playerPos);
+      const bossDist = offset.length();
+      offset.applyQuaternion(camInvQuat);
+      offset.y = 0;
+      offset.normalize();
 
-      // Calculate minimap position
-      let bx, by;
+      let bx;
+      let by;
       if (bossDist < maxRange) {
-        bx = cx + (_v.x * (bossDist / maxRange) * radius);
-        by = cy + (_v.z * (bossDist / maxRange) * radius);
+        bx = cx + (offset.x * (bossDist / maxRange) * radius);
+        by = cy + (offset.z * (bossDist / maxRange) * radius);
       } else {
-        bx = cx + (_v.x * radius * 0.9);
-        by = cy + (_v.z * radius * 0.9);
+        bx = cx + (offset.x * radius * 0.9);
+        by = cy + (offset.z * radius * 0.9);
       }
 
-      ctx.fillStyle = '#f44';
-      ctx.shadowColor = '#f44';
-      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#ff8ea4';
+      ctx.shadowColor = '#ff8ea4';
+      ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.arc(bx, by, 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
     }
 
-    // Draw Player (cyan arrowhead)
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.fillStyle = 'rgba(109, 230, 127, 1)';
-    ctx.shadowColor = 'rgba(0, 151, 33, 1)';
-    ctx.shadowBlur = 5;
+    ctx.fillStyle = '#8ff7ef';
+    ctx.shadowColor = '#8ff7ef';
+    ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.moveTo(0, -6);
-    ctx.lineTo(4, 4);
-    ctx.lineTo(-4, 4);
+    ctx.moveTo(0, -7);
+    ctx.lineTo(4.5, 5);
+    ctx.lineTo(-4.5, 5);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
   }
 
   update(score, level, lives) {
-    this.scoreEl.textContent = `SCORE: ${score}`;
-    this.livesEl.textContent = 'LIVES: ' + '♥'.repeat(Math.max(0, lives));
+    this.scoreEl.textContent = `SCORE ${Math.max(0, Math.floor(score)).toString().padStart(6, '0')}`;
+    this.livesEl.textContent = `HULL ${Math.max(0, Math.floor(lives)).toString().padStart(3, '0')}%`;
 
     const labels = {
-      1: 'LEVEL 1 — 15,000 mi',
-      2: 'LEVEL 2 — 5,000 mi',
-      3: 'LEVEL 3 — 1 mi  [BOSS]',
+      1: 'SECTOR 01 / 15,000 MI',
+      2: 'SECTOR 02 / 5,000 MI',
+      3: 'SECTOR 03 / BOSS VEIL',
     };
-    this.levelEl.textContent = labels[level] || `LEVEL ${level}`;
+    this.levelEl.textContent = labels[level] || `SECTOR ${level}`;
   }
 
   updateBossBar(health, maxHealth) {
@@ -191,7 +166,6 @@ export class HUD {
   showMessage(text) {
     this.overlay.classList.remove('hidden');
     this.overlay.querySelector('h1').textContent = text;
-    this.overlay.querySelector('.subtitle').textContent = '';
     const btn = this.overlay.querySelector('#start-btn');
     btn.textContent = 'PLAY AGAIN';
     btn.onclick = () => window.location.reload();

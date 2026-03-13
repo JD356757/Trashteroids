@@ -229,10 +229,6 @@ export class IntroScene {
     wing.position.set(-0.05, 0, 0);
     fallbackBody.add(wing);
 
-    const glow = new THREE.PointLight(0x7ce8ff, 8, 14, 2);
-    glow.position.set(-1.2, 0, 0);
-    fallbackBody.add(glow);
-
     this.shipMesh = fallbackBody;
     this.shipRig.add(fallbackBody);
 
