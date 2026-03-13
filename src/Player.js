@@ -10,8 +10,6 @@ const _yAxis = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
 const _localUp = new THREE.Vector3();
 const _particleColor = new THREE.Color();
-const _particleSpawnPos = new THREE.Vector3();
-const _particleVelocityLocal = new THREE.Vector3();
 
 
 
@@ -60,7 +58,6 @@ export class Player {
     // Customizable Thruster Positions
     this.thrusterOffsetLeft = new THREE.Vector3(-2.55, 0, 1.6);
     this.thrusterOffsetRight = new THREE.Vector3(2.55, 0, 1.6);
-    this._thrusterOffsets = [this.thrusterOffsetLeft, this.thrusterOffsetRight];
 
     this.shipLight = new THREE.PointLight(0xffd7a8, 1000, 4000, 0.2);
     this.shipLight.position.set(0, 0, 0);
@@ -78,7 +75,7 @@ export class Player {
       sizeBase: 0.5,
       sizeSpread: 1.5,
       opacityBase: 2,
-      particlesPerSecond: 400,
+      particlesPerSecond: 2400,
       particleDeathAge: 0.07,
     };
 
@@ -304,35 +301,35 @@ export class Player {
         // let existing particles fade out naturally instead of killing them
       }
 
-      const emitters = this._thrusterOffsets;
+      const emitters = [this.thrusterOffsetLeft, this.thrusterOffsetRight];
       const spawnPerThruster = spawnCount > 0 ? Math.max(1, Math.ceil(spawnCount / emitters.length)) : 0;
 
       // Spawn in ship-local space so both boost plumes stay locked to the hull.
       for (const emitterOffset of emitters) {
         for (let i = 0; i < spawnPerThruster; i++) {
-          _particleSpawnPos.copy(emitterOffset).add(s.positionBase);
-          _particleSpawnPos.x += (Math.random() * 2 - 1) * s.positionSpread.x;
-          _particleSpawnPos.y += (Math.random() * 2 - 1) * s.positionSpread.y;
-          _particleSpawnPos.z += (Math.random() * 2 - 1) * s.positionSpread.z;
+          const basePos = emitterOffset.clone().add(s.positionBase);
+          basePos.x += (Math.random() * 2 - 1) * s.positionSpread.x;
+          basePos.y += (Math.random() * 2 - 1) * s.positionSpread.y;
+          basePos.z += (Math.random() * 2 - 1) * s.positionSpread.z;
 
-          _particleVelocityLocal.set(
+          const velLocal = new THREE.Vector3(
             s.velocityBase.x + (Math.random() * 2 - 1) * s.velocitySpread.x,
             s.velocityBase.y + (Math.random() * 2 - 1) * s.velocitySpread.y,
             s.velocityBase.z + (Math.random() * 2 - 1) * s.velocitySpread.z
           );
           const plumeTightness = 1 - flameLevel * 0.35;
-          _particleVelocityLocal.x *= plumeTightness;
-          _particleVelocityLocal.y *= plumeTightness;
+          velLocal.x *= plumeTightness;
+          velLocal.y *= plumeTightness;
 
           const idx = this._particleIndex % this._particlePoolSize;
           this._particleIndex++;
 
-          this._particlePositions[idx * 3 + 0] = _particleSpawnPos.x;
-          this._particlePositions[idx * 3 + 1] = _particleSpawnPos.y;
-          this._particlePositions[idx * 3 + 2] = _particleSpawnPos.z;
-          this._particleVel[idx * 3 + 0] = _particleVelocityLocal.x;
-          this._particleVel[idx * 3 + 1] = _particleVelocityLocal.y;
-          this._particleVel[idx * 3 + 2] = _particleVelocityLocal.z;
+          this._particlePositions[idx * 3 + 0] = basePos.x;
+          this._particlePositions[idx * 3 + 1] = basePos.y;
+          this._particlePositions[idx * 3 + 2] = basePos.z;
+          this._particleVel[idx * 3 + 0] = velLocal.x;
+          this._particleVel[idx * 3 + 1] = velLocal.y;
+          this._particleVel[idx * 3 + 2] = velLocal.z;
 
           this._particleSizes[idx] = (s.sizeBase + (Math.random() * 2 - 1) * s.sizeSpread) * (0.75 + flameLevel * 0.5);
           this._particleAges[idx] = 0;

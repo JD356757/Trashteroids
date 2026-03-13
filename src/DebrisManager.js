@@ -15,12 +15,6 @@ const DEBRIS_FADE_NEAR = 2500;
 const DEBRIS_FADE_FAR = 3000;
 const DEBRIS_DESPAWN_DISTANCE = 3200;
 const MAX_SPAWN_ATTEMPTS = 24;
-const DEBRIS_DRAG = 0.996;
-const MAX_DEBRIS_SPEED = 6;
-const MAX_DEBRIS_ROTATION_SPEED = 0.85;
-const MAX_ASTEROID_COLLISION_STEP = 6;
-const ASTEROID_COLLISION_BOUNCE = 0.35;
-const ASTEROID_SPAWN_PADDING = 32;
 
 const DEBRIS_TYPES = {
   b1: {
@@ -116,7 +110,7 @@ export class DebrisManager {
     this._loadModelTemplates();
   }
 
-  update(delta, spawnConfig, playerPos, asteroidColliders = null) {
+  update(delta, spawnConfig, playerPos) {
     this.spawnTimer -= delta;
     const desiredCount = spawnConfig.minActive ?? 4;
     const missingCount = Math.max(0, desiredCount - this.active.length);
@@ -128,7 +122,7 @@ export class DebrisManager {
     }
 
     for (let i = 0; i < spawnCount; i++) {
-      this._spawn(spawnConfig, playerPos, asteroidColliders);
+      this._spawn(spawnConfig, playerPos);
     }
 
     if (spawnCount > 0 && this.active.length < desiredCount) {
@@ -137,19 +131,10 @@ export class DebrisManager {
 
     for (let i = this.active.length - 1; i >= 0; i--) {
       const d = this.active[i];
-      if (!Number.isFinite(d.position.x) || !Number.isFinite(d.position.y) || !Number.isFinite(d.position.z)) {
-        this._releaseSectionSlot(d.sectionKey);
-        this.scene.remove(d.mesh);
-        this.active.splice(i, 1);
-        continue;
-      }
-
       d.mesh.position.addScaledVector(d.velocity, delta);
       d.mesh.rotation.x += d.rotSpeed.x * delta;
       d.mesh.rotation.y += d.rotSpeed.y * delta;
       d.mesh.rotation.z += d.rotSpeed.z * delta;
-      d.velocity.multiplyScalar(Math.pow(DEBRIS_DRAG, delta * 60));
-      this._clampVelocity(d.velocity);
 
       const distance = d.mesh.position.distanceTo(playerPos);
       this._applyFade(d, distance);
@@ -164,17 +149,11 @@ export class DebrisManager {
     this._resolveTrashCollisions();
   }
 
-  _spawn(config, playerPos, asteroidColliders) {
+  _spawn(config, playerPos) {
     const types = config.types || ['b1'];
     const type = types[Math.floor(Math.random() * types.length)];
     const def = DEBRIS_TYPES[type];
-    const hitHalfSize = new THREE.Vector3(
-      def.size[0] * TRASH_HITBOX_SCALE,
-      def.size[1] * TRASH_HITBOX_SCALE,
-      def.size[2] * TRASH_HITBOX_SCALE
-    );
-    const debrisRadius = hitHalfSize.length() + TRASH_COLLISION_PADDING;
-    const spawnData = this._findSpawnPosition(config, playerPos, asteroidColliders, debrisRadius);
+    const spawnData = this._findSpawnPosition(config, playerPos);
     if (!spawnData) return false;
 
     const mesh = createDebrisMesh(type);
@@ -200,9 +179,13 @@ export class DebrisManager {
 
     const speed = (config.speed + Math.random() * config.speedVariance) * (def.speedMultiplier || 1);
     const velocity = _dir.clone().multiplyScalar(speed).add(_drift);
-    this._clampVelocity(velocity);
 
     this.scene.add(mesh);
+    const hitHalfSize = new THREE.Vector3(
+      def.size[0] * TRASH_HITBOX_SCALE,
+      def.size[1] * TRASH_HITBOX_SCALE,
+      def.size[2] * TRASH_HITBOX_SCALE
+    );
     const collisionHalfSize = hitHalfSize.clone().addScalar(TRASH_COLLISION_PADDING);
     const fadeMaterials = this._prepareFadeMaterials(mesh);
 
@@ -210,9 +193,9 @@ export class DebrisManager {
       mesh,
       velocity,
       rotSpeed: {
-        x: THREE.MathUtils.clamp((Math.random() - 0.5) * 1.2, -MAX_DEBRIS_ROTATION_SPEED, MAX_DEBRIS_ROTATION_SPEED),
-        y: THREE.MathUtils.clamp((Math.random() - 0.5) * 1.2, -MAX_DEBRIS_ROTATION_SPEED, MAX_DEBRIS_ROTATION_SPEED),
-        z: THREE.MathUtils.clamp((Math.random() - 0.5) * 1.2, -MAX_DEBRIS_ROTATION_SPEED, MAX_DEBRIS_ROTATION_SPEED),
+        x: (Math.random() - 0.5) * 1.2,
+        y: (Math.random() - 0.5) * 1.2,
+        z: (Math.random() - 0.5) * 1.2,
       },
       points: def.points,
       hitRadius: def.hitRadius,
@@ -226,7 +209,7 @@ export class DebrisManager {
     return true;
   }
 
-  _findSpawnPosition(config, playerPos, asteroidColliders, debrisRadius) {
+  _findSpawnPosition(config, playerPos) {
     const sectionSize = config.sectionSize || 800;
     const minDistance = config.spawnMinDistance ?? config.spawnRadius ?? 1800;
     const maxDistance = config.spawnMaxDistance ?? (minDistance + (config.spawnJitter || 200));
@@ -248,7 +231,6 @@ export class DebrisManager {
       const sectionKey = this._getSpawnCellKey(_spawnPos, sectionSize);
       const usedInSection = this.sectionOccupancy.get(sectionKey) || 0;
       if (usedInSection >= sectionLimit) continue;
-      if (this._intersectsAsteroid(_spawnPos, debrisRadius, asteroidColliders)) continue;
 
       this.sectionOccupancy.set(sectionKey, usedInSection + 1);
       return {
@@ -258,20 +240,6 @@ export class DebrisManager {
     }
 
     return null;
-  }
-
-  _intersectsAsteroid(position, debrisRadius, asteroidColliders) {
-    if (!asteroidColliders || asteroidColliders.length === 0) return false;
-
-    for (let i = 0; i < asteroidColliders.length; i++) {
-      const sphere = asteroidColliders[i].boundingSphere;
-      const minDistance = sphere.radius + debrisRadius + ASTEROID_SPAWN_PADDING;
-      if (sphere.center.distanceToSquared(position) < minDistance * minDistance) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   _getSpawnCellKey(position, cellSize) {
@@ -375,12 +343,10 @@ export class DebrisManager {
           }
         }
 
-        const correction = Math.min(overlap + 0.02, MAX_ASTEROID_COLLISION_STEP);
-        debris.position.addScaledVector(_collisionNormal, correction);
+        debris.position.addScaledVector(_collisionNormal, overlap + 0.02);
         const inwardSpeed = debris.velocity.dot(_collisionNormal);
         if (inwardSpeed < 0) {
-          debris.velocity.addScaledVector(_collisionNormal, -inwardSpeed * (1 + ASTEROID_COLLISION_BOUNCE));
-          this._clampVelocity(debris.velocity);
+          debris.velocity.addScaledVector(_collisionNormal, -inwardSpeed * 1.35);
         }
       }
     }
@@ -418,22 +384,11 @@ export class DebrisManager {
         _separation.normalize();
         const aSpeed = a.velocity.dot(_separation);
         const bSpeed = b.velocity.dot(_separation);
-        const relativeSpeed = bSpeed - aSpeed;
-        if (relativeSpeed > 0) {
-          const impulse = relativeSpeed * 0.5;
-          a.velocity.addScaledVector(_separation, impulse);
-          b.velocity.addScaledVector(_separation, -impulse);
-          this._clampVelocity(a.velocity);
-          this._clampVelocity(b.velocity);
+        if (aSpeed < bSpeed) {
+          a.velocity.addScaledVector(_separation, bSpeed - aSpeed);
+          b.velocity.addScaledVector(_separation, aSpeed - bSpeed);
         }
       }
-    }
-  }
-
-  _clampVelocity(velocity) {
-    const maxSpeedSq = MAX_DEBRIS_SPEED * MAX_DEBRIS_SPEED;
-    if (velocity.lengthSq() > maxSpeedSq) {
-      velocity.setLength(MAX_DEBRIS_SPEED);
     }
   }
 
