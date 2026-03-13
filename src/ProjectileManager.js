@@ -7,7 +7,7 @@ export class ProjectileManager {
   constructor(scene) {
     this.scene = scene;
     this.active = [];    // { mesh, direction, position (ref) }
-    this.speed = 620;     // units per second along direction
+    this.speed = 2000;     // units per second along direction
     this.maxDist = 620;  // despawn after this travel distance
     this.cooldown = 0;
     this.cooldownTime = 0.065; // seconds between shots (rapid-fire)
@@ -38,11 +38,11 @@ export class ProjectileManager {
     const lateralOffset = 0.28; // how far apart the two bullets spawn
 
     // Reusable geometries/materials per-shot (small, cheap)
-    const coreGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.0, 6);
+    const coreGeo = new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6);
     coreGeo.rotateX(Math.PI / 2);
     const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
 
-    const glowGeo = new THREE.CylinderGeometry(0.18, 0.18, 2.0, 6);
+    const glowGeo = new THREE.CylinderGeometry(0.22, 0.22, 2.0, 6);
     glowGeo.rotateX(Math.PI / 2);
     const glowMat = new THREE.MeshBasicMaterial({
       color: 0x66ff88,

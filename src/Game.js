@@ -10,7 +10,7 @@ import { AsteroidField } from './AsteroidField.js';
 
 // Reusable vectors for camera follow
 // Offset: higher + further back so ship sits in the lower portion of the screen
-const _camOffset = new THREE.Vector3(0, 6, 18);
+const _camOffset = new THREE.Vector3(0, 6, 22);
 const _camTarget = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
 const _smoothForward = new THREE.Vector3(0, 0, -1);
@@ -158,6 +158,7 @@ export class Game {
     this.scene.add(this._effectGroup);
     this._sparks = [];
     this._popups = [];
+    this._muzzles = [];
 
     // Large decorative asteroid field around the player zone
     this.asteroidField = new AsteroidField(this.scene);
@@ -222,6 +223,8 @@ export class Game {
       const fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
         this.player.applyRecoil(this.projectiles.cooldownTime);
+        // spawn a very short muzzle particle burst attached to the player
+        this._spawnMuzzleParticles(new THREE.Vector3(0, 0.2, -1.5), { count: 18, ttl: 0.08 });
       }
     }
 
@@ -547,12 +550,22 @@ export class Game {
     _camLookTarget.copy(this.camera.position).addScaledVector(_shipForward, 200);
     this.camera.lookAt(_camLookTarget);
 
-    // Speed-responsive FOV: widen as the ship goes faster
+    // Speed-responsive FOV: widen only while boosting.
     const speed = this.player.velocity.length();
-    const fovMin = 60;
-    const fovMax = 90;
-    const speedForMaxFov = 400; // tune: speed at which FOV fully maxes out
-    const t = Math.min(speed / speedForMaxFov, 1);
+    const fovMin = 50;
+    const fovMax = 75;
+    const speedForMinFov = 400; // max non-boost speed (no FOV widening below this)
+    const speedForMaxFov = speedForMinFov * this.player.boostMultiplier * 0.8; // max boosted speed
+
+    let t = 0;
+    if (this.boostActive) {
+      if (speed <= speedForMinFov) {
+        t = 0;
+      } else {
+        t = Math.min((speed - speedForMinFov) / (speedForMaxFov - speedForMinFov), 1);
+      }
+    }
+
     const targetFov = fovMin + (fovMax - fovMin) * t;
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-3 * delta));
     this.camera.updateProjectionMatrix();
@@ -750,7 +763,7 @@ export class Game {
 
   // Spawn a short-lived spark particle burst at world `pos`.
   _spawnSparks(pos, options = {}) {
-    const count = options.count || 40;
+    const count = options.count || 12;
     const positions = new Float32Array(count * 3);
     const velocities = new Array(count);
     for (let k = 0; k < count; k++) {
@@ -768,6 +781,43 @@ export class Game {
     this._effectGroup.add(points);
 
     this._sparks.push({ mesh: points, velocities, life: 0, ttl: options.ttl || 0.75 });
+  }
+
+  // Spawn a very short-lived muzzle particle burst in player-local space.
+  _spawnMuzzleParticles(localPos, options = {}) {
+    const count = options.count || 48; // larger burst by default
+    const positions = new Float32Array(count * 3);
+    const velocities = new Array(count);
+
+    for (let k = 0; k < count; k++) {
+      positions[k * 3] = localPos.x + (Math.random() - 0.5) * 0.12;
+      positions[k * 3 + 1] = localPos.y + (Math.random() - 0.5) * 0.12;
+      positions[k * 3 + 2] = localPos.z + (Math.random() - 0.5) * 0.12;
+
+      // local-space velocity biased forward (-Z)
+      const dir = new THREE.Vector3((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, - (0.6 + Math.random() * 1.6));
+      velocities[k] = dir.multiplyScalar(18 * (0.6 + Math.random() * 0.8));
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    // Try to reuse the player's thrust sprite if available
+    let spriteTex = null;
+    try {
+      spriteTex = this.player && this.player._particlePoints && this.player._particlePoints.material && this.player._particlePoints.material.uniforms && this.player._particlePoints.material.uniforms.map ? this.player._particlePoints.material.uniforms.map.value : null;
+    } catch (e) {
+      spriteTex = null;
+    }
+    if (!spriteTex) spriteTex = new THREE.TextureLoader().load('fireparticle.png');
+
+    const mat = new THREE.PointsMaterial({ map: spriteTex, color: 0xffffff, size: options.size || 0.4, sizeAttenuation: true, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending });
+    const points = new THREE.Points(geom, mat);
+
+    // Parent to player so the burst stays attached while the ship moves
+    this.player.mesh.add(points);
+
+    this._muzzles.push({ mesh: points, velocities, life: 0, ttl: options.ttl || 0.08 });
   }
 
   // Spawn a small screen-space score popup at world `pos` with +amount.
@@ -837,6 +887,34 @@ export class Game {
       if (pop.life >= pop.ttl) {
         pop.el.remove();
         this._popups.splice(i, 1);
+      }
+    }
+
+    // Update muzzle bursts (parented to player mesh; positions are local)
+    for (let i = this._muzzles.length - 1; i >= 0; i--) {
+      const m = this._muzzles[i];
+      m.life += delta;
+      const posAttr = m.mesh.geometry.getAttribute('position');
+      for (let k = 0; k < m.velocities.length; k++) {
+        const vx = m.velocities[k].x * delta;
+        const vy = m.velocities[k].y * delta;
+        const vz = m.velocities[k].z * delta;
+        posAttr.array[k * 3] += vx;
+        posAttr.array[k * 3 + 1] += vy;
+        posAttr.array[k * 3 + 2] += vz;
+        // damp quickly
+        m.velocities[k].multiplyScalar(Math.pow(0.2, delta * 60));
+      }
+      posAttr.needsUpdate = true;
+
+      // fade out material
+      if (m.mesh.material) m.mesh.material.opacity = Math.max(0, 1 - m.life / m.ttl);
+
+      if (m.life >= m.ttl) {
+        if (m.mesh.parent) m.mesh.parent.remove(m.mesh);
+        m.mesh.geometry.dispose();
+        m.mesh.material.dispose();
+        this._muzzles.splice(i, 1);
       }
     }
   }
