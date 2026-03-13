@@ -28,8 +28,6 @@ const _aimRay = new THREE.Ray();
 const _aimDirection = new THREE.Vector3();
 const _aimPoint = new THREE.Vector3();
 const _aimOffset = new THREE.Vector3();
-const _assistTarget = new THREE.Vector3();
-const _assistDirection = new THREE.Vector3();
 const _debrisOffset = new THREE.Vector3();
 const _cameraInverse = new THREE.Quaternion();
 const _bossDirection = new THREE.Vector3();
@@ -43,9 +41,6 @@ const PLAYER_HIT_COOLDOWN = 1.0;
 const PROJECTILE_HIT_PADDING = 0.45;
 const AIM_FALLBACK_DISTANCE = 800;
 const AIM_LOWERING = 0.035;
-const AIM_ASSIST_RADIUS_FACTOR = 1.8;
-const AIM_ASSIST_MAX_DISTANCE = 900;
-const AIM_ASSIST_STRENGTH = 0.22;
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
 const MAX_FRAME_DELTA = 1 / 30;
@@ -228,7 +223,7 @@ export class Game {
     this.player.manualRollInput = rollInput;
 
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
-    if ((this.input.isDown(' ') || this.input.isDown('mouseleft')) && this.projectiles.canFire()) {
+    if (this.input.isDown(' ') || this.input.isDown('mouseleft')) {
       const fireDirection = this._getAssistedFireDirection();
       const fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
@@ -243,6 +238,7 @@ export class Game {
     this.asteroidField.update(delta, playerPos);
     this.debris.update(delta, this.levels.getSpawnConfig(), playerPos, this.asteroidField.getColliders());
     this.debris.resolveAsteroidCollisions(this.asteroidField.getColliders());
+    // Check projectile collisions against asteroids (sparks)
     this._checkProjectileAsteroidCollisions();
     this._checkAsteroidPlayerCollisions();
 
@@ -416,12 +412,13 @@ export class Game {
       this.bossMesh.rotation.x += delta * 0.05;
     }
 
+    // Check projectile hits on boss (distance-based)
     const projectiles = this.projectiles.getActive();
     for (let i = projectiles.length - 1; i >= 0; i--) {
-      const projectile = projectiles[i];
-      if (this._projectileHitsSphere(projectile, this.levels.boss.position, 200)) {
+      const p = projectiles[i];
+      if (this._projectileHitsSphere(p, this.levels.boss.position, 200)) {
         this.levels.boss.health -= 10;
-        this._spawnSparks(projectile.position.clone(), { count: 30, ttl: 0.5 });
+        this._spawnSparks(p.position.clone(), { count: 30, ttl: 0.5 });
         this.projectiles.remove(i);
         if (this.levels.boss.health <= 0) {
           if (this.bossMesh) this.bossMesh.visible = false;
@@ -586,12 +583,12 @@ export class Game {
     const segmentLengthSq = _segment.lengthSq();
 
     if (segmentLengthSq === 0) {
-      return end.distanceTo(center) <= radius + PROJECTILE_HIT_PADDING;
+      return end.distanceTo(center) <= radius;
     }
 
     _toCenter.copy(center).sub(start);
     const t = THREE.MathUtils.clamp(_toCenter.dot(_segment) / segmentLengthSq, 0, 1);
-    _closestPoint.copy(start).addScaledVector(_segment, t);
+    _closestPoint.copy(start).addScaledVector(_segment, t); 
     return _closestPoint.distanceTo(center) <= radius + PROJECTILE_HIT_PADDING;
   }
 
@@ -604,8 +601,7 @@ export class Game {
     _aimRay.direction.copy(_cameraForward);
 
     let bestDistance = Infinity;
-    let bestAssistScore = 0;
-    let hasAssistTarget = false;
+    let hasLockTarget = false;
 
     const debrisList = this.debris.getActive();
     for (let i = 0; i < debrisList.length; i++) {
@@ -615,16 +611,8 @@ export class Game {
         : this._intersectAimSphere(debris.position, debris.hitRadius || 1.0);
       if (distance < bestDistance) {
         bestDistance = distance;
-      }
-
-      const assistRadius = debris.hitHalfSize
-        ? debris.hitHalfSize.length() * AIM_ASSIST_RADIUS_FACTOR
-        : (debris.hitRadius || 1.0) * AIM_ASSIST_RADIUS_FACTOR;
-      const assistScore = this._getAimAssistScore(debris.position, assistRadius);
-      if (assistScore > bestAssistScore) {
-        bestAssistScore = assistScore;
-        _assistTarget.copy(debris.position);
-        hasAssistTarget = true;
+        _aimPoint.copy(debris.position);
+        hasLockTarget = true;
       }
     }
 
@@ -634,13 +622,8 @@ export class Game {
       const distance = this._intersectAimSphere(sphere.center, sphere.radius);
       if (distance < bestDistance) {
         bestDistance = distance;
-      }
-
-      const assistScore = this._getAimAssistScore(sphere.center, sphere.radius * AIM_ASSIST_RADIUS_FACTOR);
-      if (assistScore > bestAssistScore) {
-        bestAssistScore = assistScore;
-        _assistTarget.copy(sphere.center);
-        hasAssistTarget = true;
+        _aimPoint.copy(sphere.center);
+        hasLockTarget = true;
       }
     }
 
@@ -648,19 +631,12 @@ export class Game {
       const distance = this._intersectAimSphere(this.levels.boss.position, 200);
       if (distance < bestDistance) {
         bestDistance = distance;
-      }
-
-      const assistScore = this._getAimAssistScore(this.levels.boss.position, 240);
-      if (assistScore > bestAssistScore) {
-        bestAssistScore = assistScore;
-        _assistTarget.copy(this.levels.boss.position);
-        hasAssistTarget = true;
+        _aimPoint.copy(this.levels.boss.position);
+        hasLockTarget = true;
       }
     }
 
-    if (bestDistance < Infinity) {
-      _aimPoint.copy(_aimRay.direction).multiplyScalar(bestDistance).add(_aimRay.origin);
-    } else {
+    if (!hasLockTarget) {
       _aimPoint.copy(_aimRay.direction).multiplyScalar(AIM_FALLBACK_DISTANCE).add(_aimRay.origin);
     }
 
@@ -669,36 +645,7 @@ export class Game {
       return _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize().clone();
     }
 
-    _aimDirection.normalize();
-
-    if (hasAssistTarget && bestAssistScore > 0) {
-      _assistDirection.copy(_assistTarget).sub(playerPos);
-      if (_assistDirection.lengthSq() > 0) {
-        _assistDirection.normalize();
-        _aimDirection.lerp(_assistDirection, bestAssistScore * AIM_ASSIST_STRENGTH).normalize();
-      }
-    }
-
-    return _aimDirection.clone();
-  }
-
-  _getAimAssistScore(targetPosition, targetRadius) {
-    _toCenter.copy(targetPosition).sub(_aimRay.origin);
-    const alongRay = _toCenter.dot(_aimRay.direction);
-
-    if (alongRay <= 0 || alongRay > AIM_ASSIST_MAX_DISTANCE) {
-      return 0;
-    }
-
-    _closestPoint.copy(_aimRay.direction).multiplyScalar(alongRay).add(_aimRay.origin);
-    const missDistance = _closestPoint.distanceTo(targetPosition);
-    if (missDistance > targetRadius) {
-      return 0;
-    }
-
-    const alignment = 1 - missDistance / targetRadius;
-    const distanceFalloff = 1 - alongRay / AIM_ASSIST_MAX_DISTANCE;
-    return Math.max(0, alignment * distanceFalloff);
+    return _aimDirection.normalize().clone();
   }
 
   _intersectAimSphere(center, radius) {
@@ -805,6 +752,7 @@ export class Game {
     return tMax > 0 ? tMin : Infinity;
   }
 
+  // Projectile vs asteroid collisions: spawn sparks at hit point
   _checkProjectileAsteroidCollisions() {
     const projectiles = this.projectiles.getActive();
     const asteroids = this.asteroidField.getColliders();
@@ -813,7 +761,10 @@ export class Game {
       for (let j = 0; j < asteroids.length; j++) {
         const sphere = asteroids[j].boundingSphere;
         if (this._projectileHitsSphere(projectiles[i], sphere.center, sphere.radius)) {
+          // _closestPoint was computed by _projectileHitsSphere
           this._spawnSparks(_closestPoint.clone());
+          // NOTE: do NOT modify asteroid velocity from projectile hits;
+          // bullets are cosmetic and should not push asteroids.
           this.projectiles.remove(i);
           break;
         }
