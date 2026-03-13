@@ -49,22 +49,6 @@ body {
 #hud-level { color: #ff0; }
 #hud-lives { color: #f44; }
 
-#fps-counter {
-  position: fixed;
-  left: 18px;
-  bottom: 18px;
-  z-index: 12;
-  pointer-events: none;
-  font-size: 11px;
-  color: #8af6ff;
-  text-shadow: 0 0 8px rgba(124, 232, 255, 0.8);
-  background: rgba(6, 10, 20, 0.64);
-  border: 1px solid rgba(124, 232, 255, 0.28);
-  border-radius: 4px;
-  padding: 8px 10px 7px;
-  min-width: 88px;
-}
-
 #overlay {
   --overlay-shift-x: 0px;
   --overlay-shift-y: 0px;
@@ -484,13 +468,5 @@ body {
     padding: 12px 14px;
     font-size: 10px;
     gap: 8px;
-  }
-
-  #fps-counter {
-    left: 12px;
-    bottom: 12px;
-    font-size: 9px;
-    min-width: 74px;
-    padding: 7px 8px 6px;
   }
 }

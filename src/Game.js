@@ -13,6 +13,7 @@ import { AsteroidField } from './AsteroidField.js';
 const _camOffset = new THREE.Vector3(0, 6, 18);
 const _camTarget = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
+const _smoothForward = new THREE.Vector3(0, 0, -1);
 const _shipForward = new THREE.Vector3();
 const _cameraForward = new THREE.Vector3();
 const _cameraDown = new THREE.Vector3();
@@ -28,10 +29,6 @@ const _aimRay = new THREE.Ray();
 const _aimDirection = new THREE.Vector3();
 const _aimPoint = new THREE.Vector3();
 const _aimOffset = new THREE.Vector3();
-const _debrisOffset = new THREE.Vector3();
-const _cameraInverse = new THREE.Quaternion();
-const _bossDirection = new THREE.Vector3();
-const _popupScreen = new THREE.Vector3();
 // Debug flag: when true the camera will not follow the ship (helps observe movement)
 const DEBUG_FREEZE_CAMERA = false;
 const PLAYER_COLLISION_RADIUS = 1.1;
@@ -43,8 +40,6 @@ const AIM_FALLBACK_DISTANCE = 800;
 const AIM_LOWERING = 0.035;
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
-const MAX_FRAME_DELTA = 1 / 30;
-const MINIMAP_REFRESH_INTERVAL = 1 / 20;
 
 export class Game {
   constructor(canvas, startLevel = 1) {
@@ -56,20 +51,20 @@ export class Game {
     this.playerHitCooldown = 0;
     this.boostCharge = 1;
     this.boostActive = false;
-    this._minimapTimer = 0;
-    this._fpsElapsed = 0;
-    this._fpsFrames = 0;
     this._startLevel = startLevel;
-    this.timer = new THREE.Timer();
-    this.timer.connect(document);
+    this.clock = new THREE.Clock();
+
+    // Camera follow smoothing: use a framerate-independent follow speed (higher = tighter)
+    this.cameraFollowSpeed = 18.0;
 
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000011);
-    // Shadows are currently not used by active scene lights.
-    this.renderer.shadowMap.enabled = false;
+    // Enable shadows
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Scene
     this.scene = new THREE.Scene();
@@ -77,7 +72,7 @@ export class Game {
     //change fog here 0 is no fog
 
     // Camera — extend far plane for distant planet
-    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 50000);
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 50000);
     this.camera.position.set(0, 3, 20);
 
     // Lighting — replace generic directional with a sun
@@ -179,20 +174,18 @@ export class Game {
   start() {
     if (this.running) return;
     this.running = true;
-    this.timer.reset();
+    this.clock.start();
     this.levels.setLevel(this._startLevel);
     this._setBossVisible(this.levels.isBossUnlocked());
     this.hud.update(this.score, this.levels.current, this.lives);
     this._loop();
   }
 
-  _loop(timestamp) {
+  _loop() {
     if (!this.running) return;
-    requestAnimationFrame((nextTimestamp) => this._loop(nextTimestamp));
+    requestAnimationFrame(() => this._loop());
 
-    this.timer.update(timestamp);
-    const rawDelta = this.timer.getDelta();
-    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
+    const delta = this.clock.getDelta();
     this.playerHitCooldown = Math.max(0, this.playerHitCooldown - delta);
 
     // Mouse → pitch / yaw
@@ -225,7 +218,7 @@ export class Game {
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
     if (this.input.isDown(' ') || this.input.isDown('mouseleft')) {
       const fireDirection = this._getAssistedFireDirection();
-      const fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
+      const fired = this.projectiles.fire(this.player.getPosition(), fireDirection, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
         this.player.applyRecoil(this.projectiles.cooldownTime);
       }
@@ -234,9 +227,9 @@ export class Game {
     // Update subsystems
     this.player.update(delta);
     this.projectiles.update(delta);
-    const playerPos = this.player.mesh.position;
+    const playerPos = this.player.getPosition();
     this.asteroidField.update(delta, playerPos);
-    this.debris.update(delta, this.levels.getSpawnConfig(), playerPos, this.asteroidField.getColliders());
+    this.debris.update(delta, this.levels.getSpawnConfig(), playerPos);
     this.debris.resolveAsteroidCollisions(this.asteroidField.getColliders());
     // Check projectile collisions against asteroids (sparks)
     this._checkProjectileAsteroidCollisions();
@@ -264,11 +257,7 @@ export class Game {
     // Level progression
     this.levels.update(this.score, playerPos);
     this._setBossVisible(this.levels.isBossUnlocked() && (!this.levels.boss || this.levels.boss.health > 0));
-    this._minimapTimer += delta;
-    if (this._minimapTimer >= MINIMAP_REFRESH_INTERVAL) {
-      this._minimapTimer = 0;
-      this._updateMinimap();
-    }
+    this._updateMinimap();
     
     // Boss Indicator
     this._updateBossIndicator(delta);
@@ -280,13 +269,6 @@ export class Game {
 
     this.hud.update(this.score, this.levels.current, this.lives);
     this.hud.updateBoostBar(this.boostCharge, this.boostActive);
-    this._fpsElapsed += rawDelta;
-    this._fpsFrames++;
-    if (this._fpsElapsed >= 0.25) {
-      this.hud.updateFps(this._fpsFrames / this._fpsElapsed);
-      this._fpsElapsed = 0;
-      this._fpsFrames = 0;
-    }
     this.input.resetPressed();
     this.renderer.render(this.scene, this.camera);
   }
@@ -314,14 +296,14 @@ export class Game {
 
   _checkDebrisPlayerCollisions() {
     const debrisList = this.debris.getActive();
-    const playerPos = this.player.mesh.position;
+    const playerPos = this.player.getPosition();
     // Ship forward for "passed behind" dot-product test
-    _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion);
+    _shipForward.set(0, 0, -1).applyQuaternion(this.player.getQuaternion());
 
     for (let i = debrisList.length - 1; i >= 0; i--) {
       const d = debrisList[i];
-      _debrisOffset.copy(d.position).sub(playerPos);
-      const dist = _debrisOffset.length();
+      const toDebris = d.position.clone().sub(playerPos);
+      const dist = toDebris.length();
 
       // Direct hit
       if (dist < 1.5) {
@@ -331,7 +313,7 @@ export class Game {
       }
 
       // Debris passed behind the player (dot < 0 means behind, and close-ish)
-      if (dist < 8 && _debrisOffset.dot(_shipForward) < -2) {
+      if (dist < 8 && toDebris.dot(_shipForward) < -2) {
         this.score = Math.max(0, this.score - 50);
         this.debris.remove(i);
       }
@@ -458,25 +440,24 @@ export class Game {
     }
 
     const bossPos = this.levels.bossWorldPosition;
-    const playerPos = this.player.mesh.position;
+    const playerPos = this.player.getPosition();
     const dist = playerPos.distanceTo(bossPos);
 
     // Vector from camera to boss
-    _bossDirection.copy(bossPos).sub(this.camera.position).normalize();
+    const toBoss = bossPos.clone().sub(this.camera.position).normalize();
     // Convert to camera's local space (+x right, +y up, -z forward)
-    _cameraInverse.copy(this.camera.quaternion).invert();
-    _bossDirection.applyQuaternion(_cameraInverse);
+    toBoss.applyQuaternion(this.camera.quaternion.clone().invert());
     
     // If looking roughly at the boss (dot product with forward > 0.9), hide the indicator
     // In camera local space, forward is (0, 0, -1) so dot product is -toBoss.z
-    if (-_bossDirection.z > 0.9) {
+    if (-toBoss.z > 0.9) {
       this.hud.updateBossIndicator(false, 0, 0, 0, 0);
       return;
     }
     
     // Project to 2D Screen direction (+y down for screen coords)
-    let dx = _bossDirection.x;
-    let dy = -_bossDirection.y;
+    let dx = toBoss.x;
+    let dy = -toBoss.y;
     
     // Avoid singularity
     if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
@@ -516,10 +497,10 @@ export class Game {
   }
 
   _updateMinimap() {
-    const playerPos = this.player.mesh.position;
-    _cameraInverse.copy(this.camera.quaternion).invert();
+    const playerPos = this.player.getPosition();
+    const camInvQuat = this.camera.quaternion.clone().invert();
     const bossPos = this.levels.isBossUnlocked() ? this.levels.bossWorldPosition : null;
-    this.hud.updateMinimap(true, bossPos, playerPos, _cameraInverse, this.asteroidField.getColliders());
+    this.hud.updateMinimap(true, bossPos, playerPos, camInvQuat, this.asteroidField.getColliders(), this.debris.getActive());
   }
 
   _setBossVisible(visible) {
@@ -530,13 +511,11 @@ export class Game {
 
   _gameOver() {
     this.running = false;
-    this.timer.dispose();
     this.hud.showMessage('GAME OVER');
   }
 
   _victory() {
     this.running = false;
-    this.timer.dispose();
     this.hud.showMessage('EARTH IS SAVED!');
   }
 
@@ -566,8 +545,8 @@ export class Game {
 
     // Speed-responsive FOV: widen as the ship goes faster
     const speed = this.player.velocity.length();
-    const fovMin = 54;
-    const fovMax = 74;
+    const fovMin = 60;
+    const fovMax = 90;
     const speedForMaxFov = 400; // tune: speed at which FOV fully maxes out
     const t = Math.min(speed / speedForMaxFov, 1);
     const targetFov = fovMin + (fovMax - fovMin) * t;
@@ -593,7 +572,7 @@ export class Game {
   }
 
   _getAssistedFireDirection() {
-    const playerPos = this.player.mesh.position;
+    const playerPos = this.player.getPosition();
     _cameraForward.set(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
     _cameraDown.set(0, -1, 0).applyQuaternion(this.camera.quaternion).normalize();
     _cameraForward.addScaledVector(_cameraDown, AIM_LOWERING).normalize();
@@ -601,7 +580,6 @@ export class Game {
     _aimRay.direction.copy(_cameraForward);
 
     let bestDistance = Infinity;
-    let hasLockTarget = false;
 
     const debrisList = this.debris.getActive();
     for (let i = 0; i < debrisList.length; i++) {
@@ -611,8 +589,6 @@ export class Game {
         : this._intersectAimSphere(debris.position, debris.hitRadius || 1.0);
       if (distance < bestDistance) {
         bestDistance = distance;
-        _aimPoint.copy(debris.position);
-        hasLockTarget = true;
       }
     }
 
@@ -622,8 +598,6 @@ export class Game {
       const distance = this._intersectAimSphere(sphere.center, sphere.radius);
       if (distance < bestDistance) {
         bestDistance = distance;
-        _aimPoint.copy(sphere.center);
-        hasLockTarget = true;
       }
     }
 
@@ -631,18 +605,18 @@ export class Game {
       const distance = this._intersectAimSphere(this.levels.boss.position, 200);
       if (distance < bestDistance) {
         bestDistance = distance;
-        _aimPoint.copy(this.levels.boss.position);
-        hasLockTarget = true;
       }
     }
 
-    if (!hasLockTarget) {
+    if (bestDistance < Infinity) {
+      _aimPoint.copy(_aimRay.direction).multiplyScalar(bestDistance).add(_aimRay.origin);
+    } else {
       _aimPoint.copy(_aimRay.direction).multiplyScalar(AIM_FALLBACK_DISTANCE).add(_aimRay.origin);
     }
 
     _aimDirection.copy(_aimPoint).sub(playerPos);
     if (_aimDirection.lengthSq() === 0) {
-      return _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize().clone();
+      return _shipForward.set(0, 0, -1).applyQuaternion(this.player.getQuaternion()).normalize().clone();
     }
 
     return _aimDirection.normalize().clone();
@@ -849,11 +823,11 @@ export class Game {
       pop.life += delta;
       const t = pop.life / pop.ttl;
       // Project world pos to screen
-      _popupScreen.copy(pop.worldPos).project(this.camera);
+      const vec = pop.worldPos.clone().project(this.camera);
       const halfW = this.renderer.domElement.clientWidth / 2;
       const halfH = this.renderer.domElement.clientHeight / 2;
-      const x = (_popupScreen.x * halfW) + halfW;
-      const y = (-_popupScreen.y * halfH) + halfH;
+      const x = (vec.x * halfW) + halfW + this.renderer.domElement.getBoundingClientRect().left;
+      const y = (-vec.y * halfH) + halfH + this.renderer.domElement.getBoundingClientRect().top;
       pop.el.style.left = `${x}px`;
       pop.el.style.top = `${y - t * 40}px`;
       pop.el.style.opacity = `${Math.max(0, 1 - t)}`;

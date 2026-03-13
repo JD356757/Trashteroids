@@ -1,17 +1,15 @@
 import * as THREE from 'three';
 
-const _minimapVector = new THREE.Vector3();
-
 export class HUD {
   constructor() {
     this.scoreEl = document.getElementById('hud-score');
     this.levelEl = document.getElementById('hud-level');
     this.livesEl = document.getElementById('hud-lives');
-    this.fpsEl = document.getElementById('fps-counter');
     this.bossContainer = document.getElementById('boss-bar-container');
     this.bossFill = document.getElementById('boss-bar-fill');
     this.overlay = document.getElementById('overlay');
     this.bossIndicator = document.getElementById('boss-indicator');
+    this.bossIndicatorArrow = document.getElementById('boss-indicator-arrow');
     this.bossIndicatorDist = document.getElementById('boss-indicator-dist');
     this.minimap = document.getElementById('minimap');
     this.minimapCanvas = document.getElementById('minimap-canvas');
@@ -21,15 +19,6 @@ export class HUD {
     if (this.minimapCanvas) {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
-
-    this._lastScore = null;
-    this._lastLevel = null;
-    this._lastLives = null;
-    this._lastBossPct = null;
-    this._lastBoostPct = null;
-    this._lastBoostActive = null;
-    this._lastBoostLabel = null;
-    this._lastFps = null;
   }
 
   updateBossIndicator(visible, x, y, angle, distance) {
@@ -47,7 +36,7 @@ export class HUD {
     this.bossIndicatorDist.textContent = `${distance} mi`;
   }
 
-  updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids) {
+  updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids, debrisList) {
     if (!visible || !this.minimapCanvas) {
       if (!this.minimap.classList.contains('hidden')) {
         this.minimap.classList.add('hidden');
@@ -63,34 +52,37 @@ export class HUD {
     const cx = 75;
     const cy = 75;
     const radius = 75;
-    const maxRange = 2000;
+    const maxRange = 2000; // units
 
+    // Draw crosshair helper lines
     ctx.strokeStyle = 'rgba(162, 207, 254, 0.2)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(cx, 0);
-    ctx.lineTo(cx, 150);
-    ctx.moveTo(0, cy);
-    ctx.lineTo(150, cy);
+    ctx.moveTo(cx, 0); ctx.lineTo(cx, 150);
+    ctx.moveTo(0, cy); ctx.lineTo(150, cy);
     ctx.stroke();
 
+    const _v = new THREE.Vector3();
+
+    // Draw Asteroids
     if (asteroids && playerPos && camInvQuat) {
       ctx.fillStyle = '#b19bb3';
       for (let i = 0; i < asteroids.length; i++) {
         const ast = asteroids[i];
-        _minimapVector.copy(ast.boundingSphere.center).sub(playerPos);
+        _v.copy(ast.boundingSphere.center).sub(playerPos);
 
-        if (_minimapVector.lengthSq() > maxRange * maxRange) continue;
+        if (_v.lengthSq() > maxRange * maxRange) continue;
 
-        _minimapVector.applyQuaternion(camInvQuat);
+        _v.applyQuaternion(camInvQuat);
 
-        const dx = _minimapVector.x / maxRange;
-        const dy = _minimapVector.z / maxRange;
+        const dx = _v.x / maxRange;
+        const dy = _v.z / maxRange; // +z is backward, so +dy is down on minimap
 
         if (dx * dx + dy * dy <= 1) {
           const px = cx + dx * radius;
           const py = cy + dy * radius;
-          const size = ast.boundingSphere.radius > 6 ? 2.5 : 1.2;
+
+          let size = ast.boundingSphere.radius > 6 ? 2.5 : 1.2;
           ctx.beginPath();
           ctx.arc(px, py, size, 0, Math.PI * 2);
           ctx.fill();
@@ -98,21 +90,49 @@ export class HUD {
       }
     }
 
-    if (bossPos && playerPos && camInvQuat) {
-      _minimapVector.copy(bossPos).sub(playerPos);
-      const bossDist = _minimapVector.length();
-      _minimapVector.applyQuaternion(camInvQuat);
-      _minimapVector.y = 0;
-      _minimapVector.normalize();
+    if (debrisList && playerPos && camInvQuat) {
+      ctx.fillStyle = '#ff4d4d';
+      ctx.shadowColor = '#ff4d4d';
+      ctx.shadowBlur = 6;
 
-      let bx;
-      let by;
+      for (let i = 0; i < debrisList.length; i += 10) {
+        const debris = debrisList[i];
+        _v.copy(debris.position).sub(playerPos);
+
+        if (_v.lengthSq() > maxRange * maxRange) continue;
+
+        _v.applyQuaternion(camInvQuat);
+        const dx = _v.x / maxRange;
+        const dy = _v.z / maxRange;
+
+        if (dx * dx + dy * dy <= 1) {
+          const px = cx + dx * radius;
+          const py = cy + dy * radius;
+          ctx.beginPath();
+          ctx.arc(px, py, 2.1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.shadowBlur = 0;
+    }
+
+    // Draw Boss
+    if (bossPos && playerPos && camInvQuat) {
+      _v.copy(bossPos).sub(playerPos);
+      const bossDist = _v.length();
+      _v.applyQuaternion(camInvQuat);
+      _v.y = 0; // Project to XZ plane
+      _v.normalize(); // Boss is always shown on the edge if outside range, or clamped
+
+      // Calculate minimap position
+      let bx, by;
       if (bossDist < maxRange) {
-        bx = cx + (_minimapVector.x * (bossDist / maxRange) * radius);
-        by = cy + (_minimapVector.z * (bossDist / maxRange) * radius);
+        bx = cx + (_v.x * (bossDist / maxRange) * radius);
+        by = cy + (_v.z * (bossDist / maxRange) * radius);
       } else {
-        bx = cx + (_minimapVector.x * radius * 0.9);
-        by = cy + (_minimapVector.z * radius * 0.9);
+        bx = cx + (_v.x * radius * 0.9);
+        by = cy + (_v.z * radius * 0.9);
       }
 
       ctx.fillStyle = '#f44';
@@ -124,6 +144,7 @@ export class HUD {
       ctx.shadowBlur = 0;
     }
 
+    // Draw Player (cyan arrowhead)
     ctx.save();
     ctx.translate(cx, cy);
     ctx.fillStyle = 'rgba(109, 230, 127, 1)';
@@ -139,64 +160,32 @@ export class HUD {
   }
 
   update(score, level, lives) {
-    if (score !== this._lastScore) {
-      this.scoreEl.textContent = `SCORE: ${score}`;
-      this._lastScore = score;
-    }
-
-    if (lives !== this._lastLives) {
-      this.livesEl.textContent = `LIVES: ${'♥'.repeat(Math.max(0, lives))}`;
-      this._lastLives = lives;
-    }
+    this.scoreEl.textContent = `SCORE: ${score}`;
+    this.livesEl.textContent = 'LIVES: ' + '♥'.repeat(Math.max(0, lives));
 
     const labels = {
-      1: 'LEVEL 1 - 15,000 mi',
-      2: 'LEVEL 2 - 5,000 mi',
-      3: 'LEVEL 3 - 1 mi [BOSS]',
+      1: 'LEVEL 1 — 15,000 mi',
+      2: 'LEVEL 2 — 5,000 mi',
+      3: 'LEVEL 3 — 1 mi  [BOSS]',
     };
-
-    if (level !== this._lastLevel) {
-      this.levelEl.textContent = labels[level] || `LEVEL ${level}`;
-      this._lastLevel = level;
-    }
+    this.levelEl.textContent = labels[level] || `LEVEL ${level}`;
   }
 
   updateBossBar(health, maxHealth) {
     this.bossContainer.classList.remove('hidden');
     const pct = Math.max(0, (health / maxHealth) * 100);
-    if (pct !== this._lastBossPct) {
-      this.bossFill.style.width = `${pct}%`;
-      this._lastBossPct = pct;
-    }
+    this.bossFill.style.width = `${pct}%`;
   }
 
   updateBoostBar(charge, active) {
     if (!this.boostBarFill || !this.boostBarContainer) return;
     this.boostBarContainer.classList.remove('hidden');
     const pct = Math.max(0, Math.min(1, charge)) * 100;
-    if (pct !== this._lastBoostPct) {
-      this.boostBarFill.style.width = `${pct}%`;
-      this._lastBoostPct = pct;
-    }
-    if (active !== this._lastBoostActive) {
-      this.boostBarFill.classList.toggle('boosting', !!active);
-      this._lastBoostActive = active;
-    }
+    this.boostBarFill.style.width = `${pct}%`;
+    this.boostBarFill.classList.toggle('boosting', !!active);
     if (this.boostBarLabel) {
-      const label = active ? 'BOOST' : 'RECHARGE';
-      if (label !== this._lastBoostLabel) {
-        this.boostBarLabel.textContent = label;
-        this._lastBoostLabel = label;
-      }
+      this.boostBarLabel.textContent = active ? 'BOOST' : 'RECHARGE';
     }
-  }
-
-  updateFps(fps) {
-    if (!this.fpsEl) return;
-    const rounded = Math.max(0, Math.round(fps));
-    if (rounded === this._lastFps) return;
-    this.fpsEl.textContent = `FPS: ${rounded}`;
-    this._lastFps = rounded;
   }
 
   showMessage(text) {

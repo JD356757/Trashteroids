@@ -2,12 +2,6 @@ import * as THREE from 'three';
 
 // Debug flag: when true projectiles will not move (helpful to verify ship movement)
 const DEBUG_FREEZE_PROJECTILES = false;
-const _projectileDirection = new THREE.Vector3();
-const _projectileVelocity = new THREE.Vector3();
-const _projectileRight = new THREE.Vector3();
-const _worldUp = new THREE.Vector3(0, 1, 0);
-const _projectileForward = new THREE.Vector3(0, 0, -1);
-const PROJECTILE_OFFSETS = [0.28, -0.28];
 
 export class ProjectileManager {
   constructor(scene) {
@@ -17,57 +11,63 @@ export class ProjectileManager {
     this.maxDist = 620;  // despawn after this travel distance
     this.cooldown = 0;
     this.cooldownTime = 0.065; // seconds between shots (rapid-fire)
-
-    this.coreGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.0, 6);
-    this.coreGeo.rotateX(Math.PI / 2);
-    this.coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
-
-    this.glowGeo = new THREE.CylinderGeometry(0.18, 0.18, 2.0, 6);
-    this.glowGeo.rotateX(Math.PI / 2);
-    this.glowMat = new THREE.MeshBasicMaterial({
-      color: 0x66ff88,
-      transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
   }
 
   fire(origin, direction, playerVelocity, playerQuat) {
     if (this.cooldown > 0) return false;
     this.cooldown = this.cooldownTime;
 
-    _projectileDirection.copy(direction).normalize();
+    const dir = direction.clone().normalize();
     // Combine bullet speed along aim direction with the player's current velocity
-    _projectileVelocity.copy(_projectileDirection).multiplyScalar(this.speed);
-    if (playerVelocity) _projectileVelocity.add(playerVelocity);
+    const vel = dir.clone().multiplyScalar(this.speed);
+    if (playerVelocity) vel.add(playerVelocity);
 
     // Determine lateral right vector for dual-shot offsets.
     // Prefer the ship's local right (includes roll) if available, otherwise
     // fall back to cross(dir, worldUp).
+    const right = new THREE.Vector3();
     if (playerQuat) {
-      _projectileRight.set(1, 0, 0).applyQuaternion(playerQuat).normalize();
+      right.set(1, 0, 0).applyQuaternion(playerQuat).normalize();
     } else {
-      _projectileRight.crossVectors(_projectileDirection, _worldUp);
-      if (_projectileRight.lengthSq() < 1e-6) _projectileRight.set(1, 0, 0);
-      _projectileRight.normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      right.crossVectors(dir, up);
+      if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+      right.normalize();
     }
 
-    for (let i = 0; i < PROJECTILE_OFFSETS.length; i++) {
-      const core = new THREE.Mesh(this.coreGeo, this.coreMat);
-      const glow = new THREE.Mesh(this.glowGeo, this.glowMat);
+    const lateralOffset = 0.28; // how far apart the two bullets spawn
+
+    // Reusable geometries/materials per-shot (small, cheap)
+    const coreGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.0, 6);
+    coreGeo.rotateX(Math.PI / 2);
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
+
+    const glowGeo = new THREE.CylinderGeometry(0.18, 0.18, 2.0, 6);
+    glowGeo.rotateX(Math.PI / 2);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0x66ff88,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const offsets = [lateralOffset, -lateralOffset];
+    for (let i = 0; i < offsets.length; i++) {
+      const core = new THREE.Mesh(coreGeo, coreMat);
+      const glow = new THREE.Mesh(glowGeo, glowMat);
       core.add(glow);
 
       // Position: forward from origin, then apply lateral offset
-      core.position.copy(origin).addScaledVector(_projectileDirection, 1.5).addScaledVector(_projectileRight, PROJECTILE_OFFSETS[i]);
+      core.position.copy(origin).addScaledVector(dir, 1.5).addScaledVector(right, offsets[i]);
 
       // Orient beam along its travel direction
-      core.quaternion.setFromUnitVectors(_projectileForward, _projectileDirection);
+      core.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
 
       this.scene.add(core);
       this.active.push({
         mesh: core,
-        velocity: _projectileVelocity.clone(),
+        velocity: vel.clone(),
         position: core.position,
         prevPosition: core.position.clone(),
         travelled: 0,

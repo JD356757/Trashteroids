@@ -36,7 +36,7 @@ export class LevelSelect {
     this._shipArrived = false;
 
     /* ── renderer (reuse the game canvas) ── */
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000011);
@@ -97,8 +97,7 @@ export class LevelSelect {
     this._onResize = this._onResize.bind(this);
     this._frame = this._frame.bind(this);
 
-    this._timer = new THREE.Timer();
-    this._timer.connect(document);
+    this._clock = new THREE.Clock();
     this._rafId = null;
   }
 
@@ -117,7 +116,7 @@ export class LevelSelect {
 
     window.addEventListener('click', this._onClick);
     window.addEventListener('resize', this._onResize);
-    this._timer.reset();
+    this._clock.start();
     this._frame();
   }
 
@@ -132,17 +131,15 @@ export class LevelSelect {
 
   dispose() {
     this.hide();
-    this._timer.dispose();
     this.renderer.dispose();
   }
 
   /* ════════════════  internals  ════════════════ */
 
-  _frame(timestamp) {
+  _frame() {
     if (!this.active) return;
     this._rafId = requestAnimationFrame(this._frame);
-    this._timer.update(timestamp);
-    const delta = this._timer.getDelta();
+    const delta = this._clock.getDelta();
 
     this._animateShip(delta);
     this._animateNodes(delta);
