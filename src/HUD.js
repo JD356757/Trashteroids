@@ -145,7 +145,7 @@ export class HUD {
     }
 
     if (lives !== this._lastLives) {
-      this.livesEl.textContent = `LIVES: ${'\u2665'.repeat(Math.max(0, lives))}`;
+      this.livesEl.textContent = `LIVES: ${'♥'.repeat(Math.max(0, lives))}`;
       this._lastLives = lives;
     }
 
@@ -202,8 +202,7 @@ export class HUD {
   showMessage(text) {
     this.overlay.classList.remove('hidden');
     this.overlay.querySelector('h1').textContent = text;
-    const subtitle = this.overlay.querySelector('.subtitle');
-    if (subtitle) subtitle.textContent = '';
+    this.overlay.querySelector('.subtitle').textContent = '';
     const btn = this.overlay.querySelector('#start-btn');
     btn.textContent = 'PLAY AGAIN';
     btn.onclick = () => window.location.reload();

@@ -2,41 +2,36 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const _lookTarget = new THREE.Vector3();
-const _routePoint = new THREE.Vector3();
-
-const INTRO_ROUTE = [
-  { label: 'DEBRIS', color: 0xffc36d, pos: new THREE.Vector3(-5, 3.2, -4.5) },
-  { label: 'JUNK', color: 0xff925d, pos: new THREE.Vector3(2.8, 0.4, -8.6) },
-  { label: 'BOSS', color: 0xff6f7b, pos: new THREE.Vector3(10.5, 3.1, -12.4) },
-];
+const _orbitCenter = new THREE.Vector3();
 
 export class IntroScene {
   constructor(canvas) {
     this.canvas = canvas;
     this.active = false;
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x12090a, 0.012);
+    this.scene.fog = new THREE.FogExp2(0x040816, 0.016);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setClearColor(0x12090a);
+    this.renderer.setClearColor(0x040816);
 
-    this.camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 320);
-    this.camera.position.set(0, 7, 24);
+    this.camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 300);
+    this.camera.position.set(0, 1.5, 16);
 
     this.timer = new THREE.Timer();
     this.timer.connect(document);
     this._rafId = null;
     this._elapsed = 0;
     this.overlay = document.getElementById('overlay');
+    this.overlayPanel = this.overlay?.querySelector('.overlay-panel') ?? null;
     this.startButton = document.getElementById('start-btn');
 
     this._buildLights();
-    this._buildStars();
-    this._buildEarth();
-    this._buildRoute();
-    this._buildFlightPath();
+    this._buildBackdrop();
+    this._buildPlanet();
+    this._buildAsteroids();
+    this._buildTrashHalo();
     this._buildShip();
 
     this._onResize = this._onResize.bind(this);
@@ -72,155 +67,141 @@ export class IntroScene {
   }
 
   _buildLights() {
-    this.scene.add(new THREE.AmbientLight(0x6f4636, 1.35));
+    this.scene.add(new THREE.AmbientLight(0x456080, 1.15));
 
-    const key = new THREE.DirectionalLight(0xffd2a8, 2.1);
-    key.position.set(14, 16, 10);
+    const key = new THREE.DirectionalLight(0x9ed8ff, 2.2);
+    key.position.set(8, 6, 10);
     this.scene.add(key);
 
-    const fill = new THREE.PointLight(0xff8f5f, 22, 80, 2);
-    fill.position.set(2, 3, 12);
-    this.scene.add(fill);
-
-    const rim = new THREE.PointLight(0xffd58f, 16, 70, 2);
-    rim.position.set(-16, 6, -12);
+    const rim = new THREE.PointLight(0x39c3ff, 30, 60, 2);
+    rim.position.set(-10, 4, -6);
     this.scene.add(rim);
+
+    const warm = new THREE.PointLight(0xff8f4d, 18, 40, 2);
+    warm.position.set(10, -3, 6);
+    this.scene.add(warm);
   }
 
-  _buildStars() {
-    const count = 2200;
-    const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 340;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 180;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 340;
+  _buildBackdrop() {
+    const stars = new Float32Array(1800 * 3);
+    for (let i = 0; i < 1800; i++) {
+      stars[i * 3 + 0] = (Math.random() - 0.5) * 160;
+      stars[i * 3 + 1] = (Math.random() - 0.5) * 100;
+      stars[i * 3 + 2] = (Math.random() - 0.5) * 160;
     }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const material = new THREE.PointsMaterial({
-      color: 0xffe0b0,
-      size: 0.28,
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(stars, 3));
+    const starMat = new THREE.PointsMaterial({
+      color: 0xcce9ff,
+      size: 0.22,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.94,
+      opacity: 0.95,
     });
-
-    this.starfield = new THREE.Points(geometry, material);
+    this.starfield = new THREE.Points(starGeo, starMat);
     this.scene.add(this.starfield);
+
   }
 
-  _buildEarth() {
-    const group = new THREE.Group();
-    group.position.set(-12, -0.2, 0);
+  _buildPlanet() {
+    const planetGroup = new THREE.Group();
+    planetGroup.position.set(-8.5, -2.2, -14);
 
-    const loader = new THREE.TextureLoader();
-    const diffuse = loader.load('/textures/planet/Earth_Diffuse_6K.jpg');
-    const normal = loader.load('/textures/planet/Earth_NormalNRM_6K.jpg');
-
-    const earth = new THREE.Mesh(
-      new THREE.SphereGeometry(2.8, 64, 64),
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(4.8, 48, 48),
       new THREE.MeshStandardMaterial({
-        map: diffuse,
-        normalMap: normal,
+        color: 0x1f5378,
         roughness: 0.95,
-        metalness: 0.0,
-      }),
+        metalness: 0.02,
+      })
     );
-    group.add(earth);
+    planetGroup.add(planet);
+
+    const cloud = new THREE.Mesh(
+      new THREE.SphereGeometry(5.05, 42, 42),
+      new THREE.MeshBasicMaterial({
+        color: 0x8fdcff,
+        transparent: true,
+        opacity: 0.12,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    planetGroup.add(cloud);
 
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(4.1, 0.08, 18, 96),
+      new THREE.TorusGeometry(7.1, 0.18, 10, 80),
       new THREE.MeshBasicMaterial({
-        color: 0xffb96f,
-        transparent: true,
-        opacity: 0.32,
-      }),
-    );
-    ring.rotation.x = Math.PI / 2;
-    group.add(ring);
-
-    const glow = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        color: 0xffb06b,
+        color: 0x66d9ff,
         transparent: true,
         opacity: 0.18,
-        depthWrite: false,
-      }),
+      })
     );
-    glow.scale.set(11, 11, 1);
-    group.add(glow);
+    ring.rotation.x = Math.PI / 2.25;
+    ring.rotation.y = 0.45;
+    planetGroup.add(ring);
 
-    this.earth = earth;
-    this.earthRing = ring;
-    this.earthGlow = glow;
-    this.earthGroup = group;
-    this.scene.add(group);
-
-    const label = this._makeTextSprite('EARTH', 0xffb96f);
-    label.position.copy(group.position).add(new THREE.Vector3(0, -4.5, 0));
-    this.scene.add(label);
-    this.earthLabel = label;
+    this.planetGroup = planetGroup;
+    this.scene.add(planetGroup);
   }
 
-  _buildRoute() {
-    this.routeNodes = [];
-
-    for (const node of INTRO_ROUTE) {
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.95, 32, 32),
+  _buildAsteroids() {
+    this.asteroidField = new THREE.Group();
+    for (let i = 0; i < 18; i++) {
+      const radius = 0.24 + Math.random() * 0.9;
+      const asteroid = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(radius, 0),
         new THREE.MeshStandardMaterial({
-          color: node.color,
-          emissive: node.color,
-          emissiveIntensity: 0.62,
-          roughness: 0.28,
+          color: 0xb7a8ba,
+          roughness: 0.95,
           metalness: 0.08,
-        }),
+        })
       );
-      mesh.position.copy(node.pos);
-      this.scene.add(mesh);
-
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(1.48, 0.05, 18, 80),
-        new THREE.MeshBasicMaterial({
-          color: node.color,
-          transparent: true,
-          opacity: 0.44,
-        }),
+      asteroid.position.set(
+        (Math.random() - 0.5) * 18,
+        (Math.random() - 0.5) * 7,
+        -8 - Math.random() * 16
       );
-      ring.position.copy(node.pos);
-      ring.rotation.x = Math.PI / 2;
-      this.scene.add(ring);
-
-      const label = this._makeTextSprite(node.label, node.color);
-      label.position.copy(node.pos).add(new THREE.Vector3(0, -2.1, 0));
-      this.scene.add(label);
-
-      this.routeNodes.push({ ...node, mesh, ring, label });
+      asteroid.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      asteroid.userData.spin = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.35,
+        (Math.random() - 0.5) * 0.35,
+        (Math.random() - 0.5) * 0.35
+      );
+      asteroid.userData.drift = 0.2 + Math.random() * 0.35;
+      this.asteroidField.add(asteroid);
     }
+    this.scene.add(this.asteroidField);
   }
 
-  _buildFlightPath() {
-    const curvePoints = [
-      new THREE.Vector3(-12, 1.8, 2.6),
-      new THREE.Vector3(-8.4, 4.6, -0.8),
-      new THREE.Vector3(-2.2, 3.4, -5.2),
-      new THREE.Vector3(4.2, 1.6, -9.2),
-      new THREE.Vector3(11.6, 4.2, -13.6),
-    ];
-    this.flightCurve = new THREE.CatmullRomCurve3(curvePoints);
-
-    const pathGeometry = new THREE.BufferGeometry().setFromPoints(this.flightCurve.getPoints(80));
-    const pathMaterial = new THREE.LineDashedMaterial({
-      color: 0xffb56f,
-      dashSize: 0.7,
-      gapSize: 0.35,
-      transparent: true,
-      opacity: 0.52,
-    });
-    this.flightPath = new THREE.Line(pathGeometry, pathMaterial);
-    this.flightPath.computeLineDistances();
-    this.scene.add(this.flightPath);
+  _buildTrashHalo() {
+    this.trashField = new THREE.Group();
+    for (let i = 0; i < 42; i++) {
+      const size = 0.08 + Math.random() * 0.18;
+      const piece = new THREE.Mesh(
+        new THREE.BoxGeometry(size, size * (0.9 + Math.random() * 0.6), size),
+        new THREE.MeshStandardMaterial({
+          color: i % 3 === 0 ? 0xff8347 : i % 3 === 1 ? 0x65d98d : 0x7cc7ff,
+          emissive: 0x111111,
+          roughness: 0.7,
+          metalness: 0.15,
+        })
+      );
+      const radius = 4.6 + Math.random() * 3.6;
+      const angle = Math.random() * Math.PI * 2;
+      const height = (Math.random() - 0.5) * 2.2;
+      piece.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius - 10);
+      piece.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      piece.userData.spin = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.7,
+        (Math.random() - 0.5) * 0.7,
+        (Math.random() - 0.5) * 0.7
+      );
+      piece.userData.orbitRadius = radius;
+      piece.userData.orbitAngle = angle;
+      piece.userData.orbitHeight = height;
+      this.trashField.add(piece);
+    }
+    this.scene.add(this.trashField);
   }
 
   _buildShip() {
@@ -230,28 +211,28 @@ export class IntroScene {
     const fallbackBody = new THREE.Mesh(
       new THREE.ConeGeometry(0.52, 2.2, 12),
       new THREE.MeshStandardMaterial({
-        color: 0xffddb6,
-        emissive: 0x341a0d,
-        roughness: 0.32,
-        metalness: 0.58,
-      }),
+        color: 0xdbefff,
+        emissive: 0x132334,
+        roughness: 0.28,
+        metalness: 0.6,
+      })
     );
     fallbackBody.rotation.z = -Math.PI / 2;
 
     const wing = new THREE.Mesh(
       new THREE.BoxGeometry(1.6, 0.08, 0.7),
       new THREE.MeshStandardMaterial({
-        color: 0xffa66e,
-        emissive: 0x261109,
-        roughness: 0.38,
-        metalness: 0.5,
-      }),
+        color: 0x76d6ff,
+        emissive: 0x102433,
+        roughness: 0.35,
+        metalness: 0.55,
+      })
     );
     wing.position.set(-0.05, 0, 0);
     fallbackBody.add(wing);
 
-    const glow = new THREE.PointLight(0xffb46b, 10, 18, 2);
-    glow.position.set(-1.3, 0, 0);
+    const glow = new THREE.PointLight(0x7ce8ff, 8, 14, 2);
+    glow.position.set(-1.2, 0, 0);
     fallbackBody.add(glow);
 
     this.shipMesh = fallbackBody;
@@ -267,17 +248,26 @@ export class IntroScene {
       model.traverse((child) => {
         if (!child.isMesh) return;
         const materials = Array.isArray(child.material) ? child.material : [child.material];
-        const converted = materials.map((material) => {
-          const cloned = material?.clone ? material.clone() : new THREE.MeshStandardMaterial({ color: 0xffddb6 });
+        const clonedMaterials = materials.map((material) => {
+          if (!material?.clone) {
+            return new THREE.MeshStandardMaterial({
+              color: new THREE.Color(0xdbefff),
+              emissive: new THREE.Color(0x08121d),
+              roughness: 0.35,
+              metalness: 0.58,
+            });
+          }
+
+          const cloned = material.clone();
           if ('emissive' in cloned && cloned.emissive?.setHex) {
-            cloned.emissive.setHex(0x2a160e);
-            if ('emissiveIntensity' in cloned) cloned.emissiveIntensity = 0.42;
+            cloned.emissive.setHex(0x08121d);
+            if ('emissiveIntensity' in cloned) cloned.emissiveIntensity = 0.35;
           }
           if ('roughness' in cloned && cloned.roughness !== undefined) cloned.roughness = Math.min(cloned.roughness, 0.5);
-          if ('metalness' in cloned && cloned.metalness !== undefined) cloned.metalness = Math.max(cloned.metalness, 0.38);
+          if ('metalness' in cloned && cloned.metalness !== undefined) cloned.metalness = Math.max(cloned.metalness, 0.35);
           return cloned;
         });
-        child.material = Array.isArray(child.material) ? converted : converted[0];
+        child.material = Array.isArray(child.material) ? clonedMaterials : clonedMaterials[0];
       });
       this.shipMesh = model;
       this.shipRig.add(model);
@@ -293,57 +283,73 @@ export class IntroScene {
 
     const t = this._elapsed;
     this.camera.position.set(
-      Math.sin(t * 0.13) * 24,
-      8 + Math.sin(t * 0.24) * 1.6,
-      5 + Math.cos(t * 0.13) * 23,
+      Math.cos(t * 0.16) * 2.8,
+      1.8 + Math.sin(t * 0.27) * 0.45,
+      15 + Math.sin(t * 0.2) * 1.1
     );
-    this.camera.lookAt(0, 0.5, -4);
+    this.camera.lookAt(0, 0, -9);
+
+    if (this.shipRig) {
+      _orbitCenter.copy(this.planetGroup?.position || new THREE.Vector3(-8.5, -2.2, -14));
+      const orbitAngle = t * 0.46;
+      const orbitRadiusX = 7.8;
+      const orbitRadiusZ = 5.4;
+      const shipX = _orbitCenter.x + Math.cos(orbitAngle) * orbitRadiusX;
+      const shipY = _orbitCenter.y + 1.8 + Math.sin(t * 1.15) * 1.1;
+      const shipZ = _orbitCenter.z + Math.sin(orbitAngle) * orbitRadiusZ;
+      this.shipRig.position.set(shipX, shipY, shipZ);
+
+      _lookTarget.set(
+        _orbitCenter.x + Math.cos(orbitAngle + 0.55) * orbitRadiusX,
+        _orbitCenter.y + Math.sin(t * 1.15 + 0.4) * 0.9 + 1.2,
+        _orbitCenter.z + Math.sin(orbitAngle + 0.55) * orbitRadiusZ
+      );
+      this.shipRig.lookAt(_lookTarget);
+      this.shipRig.rotateY(Math.PI / 2);
+    }
 
     this._animateOverlay(t);
-    this._animateEarth(t, delta);
-    this._animateRoute(t, delta);
-    this._animateShip(t);
+
+    if (this.planetGroup) {
+      this.planetGroup.rotation.y += delta * 0.08;
+      this.planetGroup.rotation.z = Math.sin(t * 0.18) * 0.05;
+    }
+
+    if (this.asteroidField) {
+      for (let i = 0; i < this.asteroidField.children.length; i++) {
+        const asteroid = this.asteroidField.children[i];
+        asteroid.rotation.x += asteroid.userData.spin.x * delta;
+        asteroid.rotation.y += asteroid.userData.spin.y * delta;
+        asteroid.rotation.z += asteroid.userData.spin.z * delta;
+        asteroid.position.z += asteroid.userData.drift * delta;
+        if (asteroid.position.z > 8) {
+          asteroid.position.z = -26 - Math.random() * 10;
+          asteroid.position.x = (Math.random() - 0.5) * 18;
+          asteroid.position.y = (Math.random() - 0.5) * 7;
+        }
+      }
+    }
+
+    if (this.trashField) {
+      this.trashField.rotation.y += delta * 0.06;
+      for (let i = 0; i < this.trashField.children.length; i++) {
+        const piece = this.trashField.children[i];
+        piece.rotation.x += piece.userData.spin.x * delta;
+        piece.rotation.y += piece.userData.spin.y * delta;
+        piece.rotation.z += piece.userData.spin.z * delta;
+        piece.userData.orbitAngle += delta * (0.08 + i * 0.0008);
+        piece.position.x = Math.cos(piece.userData.orbitAngle) * piece.userData.orbitRadius;
+        piece.position.z = Math.sin(piece.userData.orbitAngle) * piece.userData.orbitRadius - 10;
+        piece.position.y = piece.userData.orbitHeight + Math.sin(t * 0.7 + i) * 0.16;
+      }
+    }
 
     if (this.starfield) {
-      this.starfield.rotation.y += delta * 0.004;
-      this.starfield.rotation.x = Math.sin(t * 0.08) * 0.03;
+      this.starfield.rotation.y += delta * 0.006;
+      this.starfield.rotation.x = Math.sin(t * 0.12) * 0.05;
     }
 
     this.renderer.render(this.scene, this.camera);
-  }
-
-  _animateEarth(t, delta) {
-    if (!this.earthGroup) return;
-    this.earthGroup.position.y = -0.2 + Math.sin(t * 0.7) * 0.28;
-    this.earth.rotation.y += delta * 0.09;
-    this.earthRing.rotation.z += delta * 0.34;
-    this.earthLabel.position.copy(this.earthGroup.position).add(new THREE.Vector3(0, -4.5, 0));
-    this.earthGlow.material.opacity = 0.16 + Math.sin(t * 1.1) * 0.03;
-  }
-
-  _animateRoute(t, delta) {
-    for (let i = 0; i < this.routeNodes.length; i++) {
-      const node = this.routeNodes[i];
-      const wave = Math.sin(t * 1.25 + i * 1.8);
-      node.mesh.position.y = node.pos.y + wave * 0.24;
-      node.mesh.scale.setScalar(1 + wave * 0.06);
-      node.ring.position.y = node.mesh.position.y;
-      node.ring.rotation.z += delta * (0.3 + i * 0.06);
-      node.ring.material.opacity = 0.34 + (wave + 1) * 0.08;
-      node.label.position.copy(node.mesh.position).add(new THREE.Vector3(0, -2.1, 0));
-    }
-  }
-
-  _animateShip(t) {
-    if (!this.shipRig || !this.flightCurve) return;
-
-    const progress = (t * 0.055) % 1;
-    const lead = (progress + 0.02) % 1;
-    this.shipRig.position.copy(this.flightCurve.getPointAt(progress));
-    _routePoint.copy(this.flightCurve.getPointAt(lead));
-    _lookTarget.copy(_routePoint).add(new THREE.Vector3(0, 0.08, 0));
-    this.shipRig.lookAt(_lookTarget);
-    this.shipRig.rotateY(Math.PI / 2);
   }
 
   _onResize() {
@@ -355,47 +361,27 @@ export class IntroScene {
   _animateOverlay(t) {
     if (!this.overlay) return;
 
-    let shiftX = Math.sin(t * 0.56) * 5;
-    let shiftY = Math.cos(t * 0.72) * 4;
-    let tiltX = Math.sin(t * 0.3) * 2.1;
-    let tiltY = Math.cos(t * 0.38) * 3;
+    let shiftX = Math.sin(t * 0.62) * 6;
+    let shiftY = Math.cos(t * 0.78) * 4;
+    let tiltX = Math.sin(t * 0.31) * 2.4;
+    let tiltY = Math.cos(t * 0.43) * 3.4;
 
     if (this.shipRig) {
       const projected = this.shipRig.position.clone().project(this.camera);
-      shiftX += projected.x * 8;
-      shiftY += projected.y * -7;
-      tiltY += projected.x * 2.1;
-      tiltX += projected.y * -1.8;
+      shiftX += projected.x * 10;
+      shiftY += projected.y * -8;
+      tiltY += projected.x * 2.8;
+      tiltX += projected.y * -2.2;
     }
 
     this.overlay.style.setProperty('--overlay-shift-x', `${shiftX.toFixed(2)}px`);
     this.overlay.style.setProperty('--overlay-shift-y', `${shiftY.toFixed(2)}px`);
     this.overlay.style.setProperty('--overlay-tilt-x', `${tiltX.toFixed(2)}deg`);
     this.overlay.style.setProperty('--overlay-tilt-y', `${tiltY.toFixed(2)}deg`);
-    this.overlay.style.setProperty('--overlay-glow', `${(0.22 + Math.sin(t * 1.2) * 0.07).toFixed(3)}`);
+    this.overlay.style.setProperty('--overlay-glow', `${(0.22 + Math.sin(t * 1.4) * 0.08).toFixed(3)}`);
 
     if (this.startButton) {
-      this.startButton.style.setProperty('--button-float', `${(Math.sin(t * 1.1) * 2.5).toFixed(2)}px`);
+      this.startButton.style.setProperty('--button-float', `${(Math.sin(t * 1.2) * 3).toFixed(2)}px`);
     }
-  }
-
-  _makeTextSprite(text, color) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.font = 'bold 48px "Press Start 2P", monospace';
-    ctx.fillStyle = `#${new THREE.Color(color).getHexString()}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = ctx.fillStyle;
-    ctx.shadowBlur = 16;
-    ctx.fillText(text, 256, 64);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(5, 1.25, 1);
-    return sprite;
   }
 }
