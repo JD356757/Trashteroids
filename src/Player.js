@@ -11,8 +11,6 @@ const _zAxis = new THREE.Vector3(0, 0, 1);
 const _localUp = new THREE.Vector3();
 const _particleColor = new THREE.Color();
 
-
-
 export class Player {
   constructor(scene) {
     // Flight parameters
@@ -58,10 +56,6 @@ export class Player {
     // Customizable Thruster Positions
     this.thrusterOffsetLeft = new THREE.Vector3(-2.55, 0, 1.6);
     this.thrusterOffsetRight = new THREE.Vector3(2.55, 0, 1.6);
-
-    this.shipLight = new THREE.PointLight(0xffd7a8, 1000, 4000, 0.2);
-    this.shipLight.position.set(0, 0, 0);
-    this.mesh.add(this.shipLight);
 
     // Particle exhaust emitter setup (replaces simple cone exhaust)
     this.thrustLevel = 0; // 0..1
@@ -294,8 +288,6 @@ export class Player {
       this._spawnAccumulator += spawnRate * delta;
       const spawnCount = Math.floor(this._spawnAccumulator);
       this._spawnAccumulator -= spawnCount;
-      this.shipLight.intensity = 12 + flameLevel * 36 + Math.sin(Date.now() * 0.016) * 4 * flameLevel;
-
       if (!this.thrustActive) {
         this._spawnAccumulator = 0;
         // let existing particles fade out naturally instead of killing them

@@ -5,63 +5,69 @@ const _dir = new THREE.Vector3();
 const _drift = new THREE.Vector3();
 const _spawnPos = new THREE.Vector3();
 const _defaultScale = new THREE.Vector3(1, 1, 1);
-const _closestPoint = new THREE.Vector3();
-const _collisionDelta = new THREE.Vector3();
+const _collisionOffset = new THREE.Vector3();
 const _collisionNormal = new THREE.Vector3();
 const _separation = new THREE.Vector3();
-const TRASH_HITBOX_SCALE = 0.7;
-const TRASH_COLLISION_PADDING = 0.28;
+const _relativeVelocity = new THREE.Vector3();
 const DEBRIS_FADE_NEAR = 2500;
 const DEBRIS_FADE_FAR = 3000;
+const DEBRIS_FADE_NEAR_SQ = DEBRIS_FADE_NEAR * DEBRIS_FADE_NEAR;
+const DEBRIS_FADE_FAR_SQ = DEBRIS_FADE_FAR * DEBRIS_FADE_FAR;
 const DEBRIS_DESPAWN_DISTANCE = 3200;
+const DEBRIS_DESPAWN_DISTANCE_SQ = DEBRIS_DESPAWN_DISTANCE * DEBRIS_DESPAWN_DISTANCE;
 const MAX_SPAWN_ATTEMPTS = 24;
+const MAX_DEBRIS_SPEED = 4.5;
+const DEBRIS_HIT_RADIUS = 2.4;
+const DEBRIS_COLLISION_RADIUS = 2.9;
+const DEBRIS_ASTEROID_BOUNCE = 0.42;
+const MAX_DEBRIS_POOL_SIZE = 384;
 
 const DEBRIS_TYPES = {
   b1: {
-    modelPath: '/models/b1.glb',
-    modelScale: 0.03,
+    modelPath: '/models/elroid.glb',
+    modelScale: 1,
     color: 0x7cc7ff,
     emissive: 0x17374e,
     geometry: 'dodecahedron',
-    size: [2, 2, 2],
-    points: 100,
-    hitRadius: 0.9,
+    size: [1, 1, 1],
+    points: 300,
+    hitRadius: DEBRIS_HIT_RADIUS,
     speedMultiplier: 1.0,
     drift: 0.18,
   },
   b2: {
-    modelPath: '/models/b2.glb',
-    modelScale: 0.03,
+    modelPath: '/models/elroid.glb',
+    modelScale: 1,
     color: 0x65d98d,
     emissive: 0x173d28,
     geometry: 'dodecahedron',
-    size: [2, 2, 2],
-    points: 120,
-    hitRadius: 0.9,
+    size: [1, 1, 1],
+    points: 300,
+    hitRadius: DEBRIS_HIT_RADIUS,
     speedMultiplier: 1.05,
     drift: 0.2,
   },
   b3: {
-    modelPath: '/models/b3.glb',
-    modelScale: 0.03,
+    modelPath: '/models/elroid.glb',
+    modelScale: 1,
     color: 0xf48c1b,
     emissive: 0x4a2203,
     geometry: 'dodecahedron',
-    size: [2, 2, 2],
-    points: 140,
-    hitRadius: 0.9,
+    size: [1, 1, 1],
+    points: 300,
+    hitRadius: DEBRIS_HIT_RADIUS,
     speedMultiplier: 1.1,
     drift: 0.22,
   },
   laptop: {
-    modelPath: '/models/laptop.glb',
-    modelScale: 0.03,
+    modelPath: '/models/elroid.glb',
+    modelScale: 1,
     color: 0x8a8a95,
     emissive: 0x1f1f28,
     geometry: 'dodecahedron',
-    size: [2, 2, 2],
-    points: 180,
-    hitRadius: 1.0,
+    size: [1, 1, 1],
+    points: 300,
+    hitRadius: DEBRIS_HIT_RADIUS,
     speedMultiplier: 0.9,
     drift: 0.14,
   },
@@ -76,11 +82,8 @@ function createDebrisMesh(type) {
   }
 
   const geo = new THREE.DodecahedronGeometry(def.size[0] * 0.6, 0);
-  const mat = new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshBasicMaterial({
     color: def.color,
-    emissive: def.emissive,
-    metalness: 0.3,
-    roughness: 0.7,
     transparent: true,
   });
 
@@ -99,13 +102,33 @@ function createDebrisMesh(type) {
   return mesh;
 }
 
+function cloneUnlitMaterial(material, fallbackColor) {
+  const color = material.color ? material.color.clone() : new THREE.Color(fallbackColor);
+  const next = new THREE.MeshBasicMaterial({
+    color,
+    map: material.map || null,
+    alphaMap: material.alphaMap || null,
+    transparent: material.transparent || !!material.alphaMap || material.opacity < 1,
+    opacity: material.opacity ?? 1,
+    side: material.side,
+    fog: material.fog,
+    wireframe: material.wireframe,
+    vertexColors: material.vertexColors,
+  });
+  next.depthWrite = material.depthWrite;
+  return next;
+}
+
 export class DebrisManager {
   constructor(scene) {
     this.scene = scene;
     this.active = [];
+    this.pool = [];
     this.spawnTimer = 0;
     this.despawnDist = DEBRIS_DESPAWN_DISTANCE;
+    this.despawnDistSq = DEBRIS_DESPAWN_DISTANCE_SQ;
     this.maxSpawnPerFrame = 28;
+    this.maxPoolSize = MAX_DEBRIS_POOL_SIZE;
     this.sectionOccupancy = new Map();
     this._loadModelTemplates();
   }
@@ -136,13 +159,11 @@ export class DebrisManager {
       d.mesh.rotation.y += d.rotSpeed.y * delta;
       d.mesh.rotation.z += d.rotSpeed.z * delta;
 
-      const distance = d.mesh.position.distanceTo(playerPos);
-      this._applyFade(d, distance);
+      const distanceSq = d.mesh.position.distanceToSquared(playerPos);
+      this._applyFade(d, distanceSq);
 
-      if (distance > this.despawnDist) {
-        this._releaseSectionSlot(d.sectionKey);
-        this.scene.remove(d.mesh);
-        this.active.splice(i, 1);
+      if (distanceSq > this.despawnDistSq) {
+        this.remove(i);
       }
     }
 
@@ -156,7 +177,8 @@ export class DebrisManager {
     const spawnData = this._findSpawnPosition(config, playerPos);
     if (!spawnData) return false;
 
-    const mesh = createDebrisMesh(type);
+    const entry = this._acquireEntry(type);
+    const mesh = entry.mesh;
     mesh.position.copy(spawnData.position);
     mesh.rotation.set(
       Math.random() * Math.PI * 2,
@@ -179,32 +201,21 @@ export class DebrisManager {
 
     const speed = (config.speed + Math.random() * config.speedVariance) * (def.speedMultiplier || 1);
     const velocity = _dir.clone().multiplyScalar(speed).add(_drift);
+    this._clampVelocity(velocity);
 
-    this.scene.add(mesh);
-    const hitHalfSize = new THREE.Vector3(
-      def.size[0] * TRASH_HITBOX_SCALE,
-      def.size[1] * TRASH_HITBOX_SCALE,
-      def.size[2] * TRASH_HITBOX_SCALE
+    entry.velocity.copy(velocity);
+    entry.rotSpeed.set(
+      (Math.random() - 0.5) * 1.2,
+      (Math.random() - 0.5) * 1.2,
+      (Math.random() - 0.5) * 1.2
     );
-    const collisionHalfSize = hitHalfSize.clone().addScalar(TRASH_COLLISION_PADDING);
-    const fadeMaterials = this._prepareFadeMaterials(mesh);
-
-    this.active.push({
-      mesh,
-      velocity,
-      rotSpeed: {
-        x: (Math.random() - 0.5) * 1.2,
-        y: (Math.random() - 0.5) * 1.2,
-        z: (Math.random() - 0.5) * 1.2,
-      },
-      points: def.points,
-      hitRadius: def.hitRadius,
-      hitHalfSize,
-      collisionHalfSize,
-      fadeMaterials,
-      sectionKey: spawnData.sectionKey,
-      position: mesh.position,
-    });
+    entry.points = def.points;
+    entry.hitRadius = def.hitRadius;
+    entry.collisionRadius = DEBRIS_COLLISION_RADIUS;
+    entry.sectionKey = spawnData.sectionKey;
+    mesh.visible = true;
+    this.scene.add(mesh);
+    this.active.push(entry);
 
     return true;
   }
@@ -267,7 +278,7 @@ export class DebrisManager {
       if (!child.isMesh || !child.material) return;
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       const cloned = materials.map((material) => {
-        const next = material.clone();
+        const next = cloneUnlitMaterial(material, 0xffffff);
         next.transparent = true;
         fadeMaterials.push(next);
         return next;
@@ -278,12 +289,12 @@ export class DebrisManager {
     return fadeMaterials;
   }
 
-  _applyFade(debris, distance) {
+  _applyFade(debris, distanceSq) {
     let opacity = 1;
-    if (distance > DEBRIS_FADE_NEAR) {
-      opacity = distance >= DEBRIS_FADE_FAR
+    if (distanceSq > DEBRIS_FADE_NEAR_SQ) {
+      opacity = distanceSq >= DEBRIS_FADE_FAR_SQ
         ? 0
-        : 1 - (distance - DEBRIS_FADE_NEAR) / (DEBRIS_FADE_FAR - DEBRIS_FADE_NEAR);
+        : 1 - (Math.sqrt(distanceSq) - DEBRIS_FADE_NEAR) / (DEBRIS_FADE_FAR - DEBRIS_FADE_NEAR);
     }
 
     if (!debris.fadeMaterials) return;
@@ -299,54 +310,36 @@ export class DebrisManager {
 
     for (let i = 0; i < this.active.length; i++) {
       const debris = this.active[i];
-      const halfSize = debris.collisionHalfSize || debris.hitHalfSize;
-      if (!halfSize) continue;
+      const debrisRadius = debris.collisionRadius || debris.hitRadius;
+      if (!debrisRadius) continue;
 
       for (let j = 0; j < asteroids.length; j++) {
         const sphere = asteroids[j].boundingSphere;
-        const minX = debris.position.x - halfSize.x;
-        const maxX = debris.position.x + halfSize.x;
-        const minY = debris.position.y - halfSize.y;
-        const maxY = debris.position.y + halfSize.y;
-        const minZ = debris.position.z - halfSize.z;
-        const maxZ = debris.position.z + halfSize.z;
+        const minDistance = sphere.radius + debrisRadius;
+        _collisionOffset.copy(debris.position).sub(sphere.center);
+        const distanceSq = _collisionOffset.lengthSq();
+        if (distanceSq >= minDistance * minDistance) continue;
 
-        _closestPoint.set(
-          THREE.MathUtils.clamp(sphere.center.x, minX, maxX),
-          THREE.MathUtils.clamp(sphere.center.y, minY, maxY),
-          THREE.MathUtils.clamp(sphere.center.z, minZ, maxZ)
-        );
-
-        _collisionDelta.copy(debris.position).sub(sphere.center);
-        _collisionNormal.copy(sphere.center).sub(_closestPoint);
-        let overlap = sphere.radius;
-
-        if (_collisionNormal.lengthSq() > 1e-8) {
-          const distance = _collisionNormal.length();
-          overlap -= distance;
-          if (overlap <= 0) continue;
-          _collisionNormal.multiplyScalar(1 / distance);
-        } else {
-          const ax = Math.abs(_collisionDelta.x / Math.max(halfSize.x, 1e-6));
-          const ay = Math.abs(_collisionDelta.y / Math.max(halfSize.y, 1e-6));
-          const az = Math.abs(_collisionDelta.z / Math.max(halfSize.z, 1e-6));
-
-          if (ax >= ay && ax >= az) {
-            _collisionNormal.set(Math.sign(_collisionDelta.x) || 1, 0, 0);
-            overlap += halfSize.x - Math.abs(_collisionDelta.x);
-          } else if (ay >= az) {
-            _collisionNormal.set(0, Math.sign(_collisionDelta.y) || 1, 0);
-            overlap += halfSize.y - Math.abs(_collisionDelta.y);
+        let distance = Math.sqrt(distanceSq);
+        if (distance <= 1e-6) {
+          _collisionNormal.copy(debris.velocity);
+          if (_collisionNormal.lengthSq() <= 1e-6) {
+            _collisionNormal.set(0, 1, 0);
           } else {
-            _collisionNormal.set(0, 0, Math.sign(_collisionDelta.z) || 1);
-            overlap += halfSize.z - Math.abs(_collisionDelta.z);
+            _collisionNormal.normalize();
           }
+          distance = 0;
+        } else {
+          _collisionNormal.copy(_collisionOffset).multiplyScalar(1 / distance);
         }
 
+        const overlap = minDistance - distance;
         debris.position.addScaledVector(_collisionNormal, overlap + 0.02);
+
         const inwardSpeed = debris.velocity.dot(_collisionNormal);
         if (inwardSpeed < 0) {
-          debris.velocity.addScaledVector(_collisionNormal, -inwardSpeed * 1.35);
+          debris.velocity.addScaledVector(_collisionNormal, -inwardSpeed * (1 + DEBRIS_ASTEROID_BOUNCE));
+          this._clampVelocity(debris.velocity);
         }
       }
     }
@@ -355,57 +348,117 @@ export class DebrisManager {
   _resolveTrashCollisions() {
     for (let i = 0; i < this.active.length; i++) {
       const a = this.active[i];
-      const halfA = a.collisionHalfSize || a.hitHalfSize;
-      if (!halfA) continue;
+      const radiusA = a.collisionRadius || a.hitRadius;
+      if (!radiusA) continue;
 
       for (let j = i + 1; j < this.active.length; j++) {
         const b = this.active[j];
-        const halfB = b.collisionHalfSize || b.hitHalfSize;
-        if (!halfB) continue;
+        const radiusB = b.collisionRadius || b.hitRadius;
+        if (!radiusB) continue;
 
-        const overlapX = halfA.x + halfB.x - Math.abs(a.position.x - b.position.x);
-        if (overlapX <= 0) continue;
-        const overlapY = halfA.y + halfB.y - Math.abs(a.position.y - b.position.y);
-        if (overlapY <= 0) continue;
-        const overlapZ = halfA.z + halfB.z - Math.abs(a.position.z - b.position.z);
-        if (overlapZ <= 0) continue;
+        _separation.copy(a.position).sub(b.position);
+        const minDistance = radiusA + radiusB;
+        const distanceSq = _separation.lengthSq();
+        if (distanceSq >= minDistance * minDistance) continue;
 
-        if (overlapX <= overlapY && overlapX <= overlapZ) {
-          _separation.set(Math.sign(a.position.x - b.position.x) || 1, 0, 0).multiplyScalar(overlapX * 0.5 + 0.01);
-        } else if (overlapY <= overlapZ) {
-          _separation.set(0, Math.sign(a.position.y - b.position.y) || 1, 0).multiplyScalar(overlapY * 0.5 + 0.01);
+        let distance = Math.sqrt(distanceSq);
+        if (distance <= 1e-6) {
+          _separation.set(1, 0, 0);
+          distance = 0;
         } else {
-          _separation.set(0, 0, Math.sign(a.position.z - b.position.z) || 1).multiplyScalar(overlapZ * 0.5 + 0.01);
+          _separation.multiplyScalar(1 / distance);
         }
+        const overlap = minDistance - distance;
+        _separation.multiplyScalar(overlap * 0.5 + 0.01);
 
         a.position.add(_separation);
         b.position.sub(_separation);
 
         _separation.normalize();
-        const aSpeed = a.velocity.dot(_separation);
-        const bSpeed = b.velocity.dot(_separation);
-        if (aSpeed < bSpeed) {
-          a.velocity.addScaledVector(_separation, bSpeed - aSpeed);
-          b.velocity.addScaledVector(_separation, aSpeed - bSpeed);
+        _relativeVelocity.copy(a.velocity).sub(b.velocity);
+        const closingSpeed = _relativeVelocity.dot(_separation);
+        if (closingSpeed < 0) {
+          const correction = Math.min(-closingSpeed * 0.35, 0.75);
+          a.velocity.addScaledVector(_separation, correction);
+          b.velocity.addScaledVector(_separation, -correction);
+          a.velocity.multiplyScalar(0.985);
+          b.velocity.multiplyScalar(0.985);
+          this._clampVelocity(a.velocity);
+          this._clampVelocity(b.velocity);
         }
       }
+    }
+  }
+
+  _clampVelocity(velocity) {
+    if (velocity.lengthSq() > MAX_DEBRIS_SPEED * MAX_DEBRIS_SPEED) {
+      velocity.setLength(MAX_DEBRIS_SPEED);
+    }
+  }
+
+  _acquireEntry(type) {
+    const def = DEBRIS_TYPES[type];
+    const entry = this.pool.pop();
+    if (entry) {
+      entry.mesh.visible = true;
+      entry.points = def.points;
+      entry.hitRadius = def.hitRadius;
+      entry.collisionRadius = DEBRIS_COLLISION_RADIUS;
+      return entry;
+    }
+
+    const mesh = createDebrisMesh(type);
+    const fadeMaterials = this._prepareFadeMaterials(mesh);
+    return {
+      mesh,
+      velocity: new THREE.Vector3(),
+      rotSpeed: new THREE.Vector3(),
+      points: def.points,
+      hitRadius: def.hitRadius,
+      collisionRadius: DEBRIS_COLLISION_RADIUS,
+      fadeMaterials,
+      sectionKey: null,
+      position: mesh.position,
+    };
+  }
+
+  _releaseEntry(entry) {
+    this._releaseSectionSlot(entry.sectionKey);
+    entry.sectionKey = null;
+    entry.mesh.visible = false;
+    this.scene.remove(entry.mesh);
+    entry.velocity.set(0, 0, 0);
+    entry.rotSpeed.set(0, 0, 0);
+    this._applyFade(entry, 0);
+    if (this.pool.length < this.maxPoolSize) {
+      this.pool.push(entry);
     }
   }
 
   _loadModelTemplates() {
     const loader = new GLTFLoader();
 
+    const defsByPath = new Map();
     for (const def of Object.values(DEBRIS_TYPES)) {
-      loader.load(def.modelPath, (gltf) => {
+      const defs = defsByPath.get(def.modelPath) || [];
+      defs.push(def);
+      defsByPath.set(def.modelPath, defs);
+    }
+
+    for (const [modelPath, defs] of defsByPath) {
+      loader.load(modelPath, (gltf) => {
         const template = gltf.scene;
         template.traverse((child) => {
           if (!child.isMesh) return;
-          child.castShadow = true;
-          child.receiveShadow = true;
+          child.castShadow = false;
+          child.receiveShadow = false;
         });
 
-        def.template = template;
-        def.modelScaleVector = new THREE.Vector3(def.modelScale, def.modelScale, def.modelScale);
+        for (let i = 0; i < defs.length; i++) {
+          const def = defs[i];
+          def.template = template;
+          def.modelScaleVector = new THREE.Vector3(def.modelScale, def.modelScale, def.modelScale);
+        }
       });
     }
   }
@@ -415,11 +468,14 @@ export class DebrisManager {
   }
 
   remove(index) {
-    const d = this.active[index];
-    if (d) {
-      this._releaseSectionSlot(d.sectionKey);
-      this.scene.remove(d.mesh);
-      this.active.splice(index, 1);
+    const lastIndex = this.active.length - 1;
+    if (index < 0 || index > lastIndex) return;
+
+    const entry = this.active[index];
+    if (index !== lastIndex) {
+      this.active[index] = this.active[lastIndex];
     }
+    this.active.pop();
+    this._releaseEntry(entry);
   }
 }

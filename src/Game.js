@@ -279,8 +279,8 @@ export class Game {
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
       for (let j = debrisList.length - 1; j >= 0; j--) {
-        const hitHalfSize = debrisList[j].hitHalfSize;
-        if (hitHalfSize && this._projectileHitsBox(projectiles[i], debrisList[j].position, hitHalfSize, PROJECTILE_HIT_PADDING)) {
+        const hitRadius = debrisList[j].hitRadius || 1;
+        if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
           const points = debrisList[j].points || 100;
           this.score += points;
           this.levels.registerTrashDestroyed();
@@ -500,7 +500,7 @@ export class Game {
     const playerPos = this.player.getPosition();
     const camInvQuat = this.camera.quaternion.clone().invert();
     const bossPos = this.levels.isBossUnlocked() ? this.levels.bossWorldPosition : null;
-    this.hud.updateMinimap(true, bossPos, playerPos, camInvQuat, this.asteroidField.getColliders(), this.debris.getActive());
+    this.hud.updateMinimap(true, bossPos, playerPos, camInvQuat, this.asteroidField.getColliders());
   }
 
   _setBossVisible(visible) {
@@ -584,9 +584,7 @@ export class Game {
     const debrisList = this.debris.getActive();
     for (let i = 0; i < debrisList.length; i++) {
       const debris = debrisList[i];
-      const distance = debris.hitHalfSize
-        ? this._intersectAimBox(debris.position, debris.hitHalfSize)
-        : this._intersectAimSphere(debris.position, debris.hitRadius || 1.0);
+      const distance = this._intersectAimSphere(debris.position, debris.hitRadius || 1.0);
       if (distance < bestDistance) {
         bestDistance = distance;
       }
