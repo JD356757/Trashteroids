@@ -446,14 +446,22 @@ export class DebrisManager {
             transparent: true,
             opacity: 1,
             depthWrite: false,
+            depthTest: true,
             fog: true,
           });
+          // Reduce z-fighting by slightly offsetting polygon depth when rendering outlines
+          outlineMaterial.polygonOffset = true;
+          outlineMaterial.polygonOffsetFactor = 1;
+          outlineMaterial.polygonOffsetUnits = 1;
           const outlineLayer = new THREE.InstancedMesh(part.geometry, outlineMaterial, MAX_TRASH);
           outlineLayer.count = 0;
           outlineLayer.castShadow = false;
           outlineLayer.receiveShadow = false;
           outlineLayer.frustumCulled = false;
           outlineLayer.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          // Render outlines after base geometry to reduce flicker while still
+          // allowing depthTest to discard occluded outlines.
+          outlineLayer.renderOrder = 1;
           this._renderRoot.add(outlineLayer);
           this._outlineLayers.push(outlineLayer);
         }
