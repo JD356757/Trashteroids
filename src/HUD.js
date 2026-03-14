@@ -5,6 +5,8 @@ export class HUD {
     this.scoreEl = document.getElementById('hud-score');
     this.levelEl = document.getElementById('hud-level');
     this.livesEl = document.getElementById('hud-lives');
+    this.hullFill = document.getElementById('hull-bar-fill');
+    this.hullPercent = document.getElementById('hull-percent');
     this.bossContainer = document.getElementById('boss-bar-container');
     this.bossFill = document.getElementById('boss-bar-fill');
     this.overlay = document.getElementById('overlay');
@@ -16,6 +18,7 @@ export class HUD {
     this.boostBarContainer = document.getElementById('boost-bar-container');
     this.boostBarFill = document.getElementById('boost-bar-fill');
     this.boostBarLabel = document.getElementById('boost-bar-label');
+    this.speedometerValue = document.getElementById('speedometer-value');
     this.pauseScreen = document.getElementById('pause-screen');
     this.pauseAccuracyValue = document.getElementById('pause-accuracy-value');
     this.pauseAccuracyDetail = document.getElementById('pause-accuracy-detail');
@@ -25,9 +28,17 @@ export class HUD {
     this.pauseSensitivityValue = document.getElementById('pause-sensitivity-value');
     this.pauseResumeBtn = document.getElementById('pause-resume-btn');
     this.pauseRestartBtn = document.getElementById('pause-restart-btn');
+    this.levelTimerEl = document.getElementById('level-timer');
+    this.objectivesPanel = document.getElementById('objectives-panel');
+    this.objectivesList = document.getElementById('objectives-list');
     if (this.minimapCanvas) {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
+    this.damageVignette = document.getElementById('damage-vignette');
+    this._lowHealth = false;
+    this._flashTimer = null;
+    this._fadeTimer = null;
+    this._speedSamples = [];
   }
 
   updateBossIndicator(visible, x, y, angle, distance) {
@@ -145,20 +156,133 @@ export class HUD {
 
   update(score, level, lives) {
     this.scoreEl.textContent = `SCORE ${Math.max(0, Math.floor(score)).toString().padStart(6, '0')}`;
-    this.livesEl.textContent = `HULL ${Math.max(0, Math.floor(lives)).toString().padStart(3, '0')}%`;
+    // update hull progress bar and percent
+    const pct = Math.max(0, Math.min(100, Math.round(lives)));
+    if (this.hullFill) this.hullFill.style.width = `${pct}%`;
+    if (this.hullPercent) this.hullPercent.textContent = `${pct}%`;
 
+    // Level label
     const labels = {
       1: 'SECTOR 01 / 15,000 MI',
       2: 'SECTOR 02 / 5,000 MI',
       3: 'SECTOR 03 / BOSS VEIL',
     };
     this.levelEl.textContent = labels[level] || `SECTOR ${level}`;
+
+    // also update low-health state if needed
+    if (this.damageVignette) {
+      const low = pct <= 20;
+      if (low !== this._lowHealth) this.setLowHealth(low);
+    }
+  }
+
+  flashDamage(amount = 1) {
+    if (!this.damageVignette) return;
+    // clear any existing fade timers so repeated hits stack correctly
+    if (this._fadeTimer) {
+      clearTimeout(this._fadeTimer);
+      this._fadeTimer = null;
+    }
+
+    const el = this.damageVignette;
+    const lowOpacity = this._lowHealth ? 0.28 : 0;
+    const flashOpacity = Math.min(0.95, 0.4 + Math.min(amount, 4) * 0.15);
+
+    // Immediately show at full flash opacity (no CSS transition)
+    el.style.transition = 'none';
+    el.style.opacity = `${flashOpacity}`;
+    // force reflow so the immediate style takes effect
+    // eslint-disable-next-line no-unused-expressions
+    el.offsetWidth;
+
+    // then schedule a slow fade back down to the lowOpacity
+    // use a CSS transition only for the fade-out controlled here
+    el.style.transition = 'opacity 900ms cubic-bezier(.22,.9,.3,1)';
+    // small timeout to ensure transition is applied
+    setTimeout(() => {
+      el.style.opacity = `${lowOpacity}`;
+    }, 20);
+
+    // clear transition after fade completes to keep future flashes instant
+    this._fadeTimer = setTimeout(() => {
+      el.style.transition = '';
+      // if low health is enabled, keep the lowOpacity; otherwise ensure fully hidden
+      el.style.opacity = `${lowOpacity}`;
+      this._fadeTimer = null;
+    }, 950);
+  }
+
+  setLowHealth(enabled) {
+    if (!this.damageVignette) return;
+    this._lowHealth = !!enabled;
+    this.damageVignette.classList.toggle('low', !!enabled);
+    // Cancel any ongoing fade so low-health state appears immediately
+    if (this._fadeTimer) {
+      clearTimeout(this._fadeTimer);
+      this._fadeTimer = null;
+    }
+    // Apply low-health opacity immediately (no transition)
+    const el = this.damageVignette;
+    el.style.transition = 'none';
+    el.style.opacity = enabled ? '0.28' : '0';
+    // ensure the style takes effect
+    // eslint-disable-next-line no-unused-expressions
+    el.offsetWidth;
+    // clear inline transition so future flashes can set their own
+    el.style.transition = '';
   }
 
   updateBossBar(health, maxHealth) {
     this.bossContainer.classList.remove('hidden');
     const pct = Math.max(0, (health / maxHealth) * 100);
     this.bossFill.style.width = `${pct}%`;
+  }
+
+  updateSpeedometer(speed) {
+    if (!this.speedometerValue) return;
+    this._speedSamples.push(speed);
+    if (this._speedSamples.length > 5) this._speedSamples.shift();
+    const avg = this._speedSamples.reduce((s, v) => s + v, 0) / this._speedSamples.length;
+    this.speedometerValue.textContent = String(Math.round(avg * 0.45)).padStart(3, '0');
+  }
+
+  updateTimer(secondsLeft) {
+    if (!this.levelTimerEl) return;
+    if (secondsLeft < 0) secondsLeft = 0;
+    this.levelTimerEl.classList.remove('hidden');
+    const m = Math.floor(secondsLeft / 60);
+    const s = Math.floor(secondsLeft % 60);
+    this.levelTimerEl.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    this.levelTimerEl.classList.toggle('urgent', secondsLeft <= 30);
+  }
+
+  hideTimer() {
+    if (this.levelTimerEl) this.levelTimerEl.classList.add('hidden');
+  }
+
+  // objectives: array of { label, current, target, complete, bonus }
+  updateObjectives(objectives) {
+    if (!this.objectivesPanel || !this.objectivesList) return;
+    this.objectivesPanel.classList.remove('hidden');
+    this.objectivesList.innerHTML = '';
+    for (const obj of objectives) {
+      const li = document.createElement('li');
+      if (obj.bonus) li.classList.add('bonus');
+      if (obj.complete) li.classList.add('complete');
+      if (obj.failed) li.classList.add('failed');
+
+      const check = document.createElement('span');
+      check.className = 'obj-check';
+      check.textContent = obj.complete ? '✓' : (obj.failed ? '✗' : (obj.bonus ? '◇' : '○'));
+
+      const text = document.createElement('span');
+      const progress = obj.target > 1 ? ` (${Math.min(obj.current, obj.target)}/${obj.target})` : '';
+      text.textContent = obj.label + progress;
+
+      li.appendChild(check);
+      li.appendChild(text);
+      this.objectivesList.appendChild(li);
+    }
   }
 
   updateBoostBar(charge, active) {
@@ -185,7 +309,7 @@ export class HUD {
     this.pauseAccuracyDetail.textContent = `${trashHits} trash hits / ${shotsFired} shots`;
     if (this.pauseSpeedValue && this.pauseSpeedDetail) {
       this.pauseSpeedValue.textContent = `${Math.round(averageSpeed)}`;
-      this.pauseSpeedDetail.textContent = `${Math.round(averageSpeed)} / 100 boost-scale average`;
+      this.pauseSpeedDetail.textContent = `${Math.round(averageSpeed)} units/s average`;
     }
   }
 

@@ -61,6 +61,14 @@ export class Game {
     this._averageSpeedTime = 0;
     this._pauseUnlockArmed = false;
     this._startLevel = startLevel;
+
+    // Level objectives & timer
+    this._levelTimer = 180; // 3 minutes for level 1
+    this._levelTimerRunning = false;
+    this._trashDestroyedRequired = 0;   // required: 75 trash
+    this._trashDestroyedFast = 0;       // bonus: 10 trash while speed > 300 m/s (display)
+    this._bonusFastThresholdWorld = 300 / 0.45; // display 300 → world speed threshold
+    this._levelComplete = false;
     this.clock = new THREE.Clock();
     this.crosshair = document.getElementById('crosshair');
 
@@ -182,9 +190,11 @@ export class Game {
 
     // Planet — large Earth in the background, unreachable
     this._loadPlanet();
-    
-    // Boss Mesh setup
-    this._initBossMesh();
+
+    // Level complete screen
+    this._levelCompleteEl = document.getElementById('level-complete-screen');
+    document.getElementById('level-next-btn')?.addEventListener('click', () => this._onLevelNext());
+    document.getElementById('level-retry-btn')?.addEventListener('click', () => this._onLevelRetry());
 
     // Handle resize
     window.addEventListener('resize', () => this._onResize());
@@ -195,8 +205,8 @@ export class Game {
     this.running = true;
     this.clock.start();
     this.levels.setLevel(this._startLevel);
-    this._setBossVisible(this.levels.isBossUnlocked());
     this.hud.update(this.score, this.levels.current, this.lives);
+    this._levelTimerRunning = true;
     this._loop();
   }
 
@@ -256,10 +266,7 @@ export class Game {
 
   _getAverageSpeed() {
     if (this._averageSpeedTime <= 0) return 0;
-    const averageWorldSpeed = this._averageSpeedSum / this._averageSpeedTime;
-    const boostSpeedReference = this.player.thrustPower * this.player.boostMultiplier / (1 - this.player.dampening);
-    if (boostSpeedReference <= 0) return 0;
-    return THREE.MathUtils.clamp((averageWorldSpeed / boostSpeedReference) * DISPLAY_SPEED_MAX, 0, DISPLAY_SPEED_MAX);
+    return this._averageSpeedSum / this._averageSpeedTime;
   }
 
   _pauseGame() {
@@ -401,23 +408,70 @@ export class Game {
     // Collision: trash vs player (hits / misses)
     this._checkDebrisPlayerCollisions(playerPos, playerQuat);
 
-    // Level progression
-    this.levels.update(this.score, playerPos);
-    this._setBossVisible(this.levels.isBossUnlocked() && (!this.levels.boss || this.levels.boss.health > 0));
     this._updateMinimap();
-    
-    // Boss Indicator
-    this._updateBossIndicator(delta);
-
-    // Boss-specific logic
-    if (this.levels.current === 3) {
-      this._updateBoss(delta);
-    }
 
     this.hud.update(this.score, this.levels.current, this.lives);
     this.hud.updateBoostBar(this.boostCharge, this.boostActive);
+    this.hud.updateSpeedometer(this.player.velocity.length());
+    this._updateLevelObjectives(delta);
     this.input.resetPressed();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  _updateLevelObjectives(delta) {
+    // Only active for level 1 (objective-based)
+    if (this.levels.current !== 1 || this._levelComplete) return;
+
+    // Tick timer
+    if (this._levelTimerRunning && !this.paused) {
+      this._levelTimer = Math.max(0, this._levelTimer - delta);
+    }
+    this.hud.updateTimer(this._levelTimer);
+
+    const REQ_TRASH = 75;
+    const BONUS_FAST = 10;
+    const reqDone = this._trashDestroyedRequired >= REQ_TRASH;
+    const fastDone = this._trashDestroyedFast >= BONUS_FAST;
+    const shieldFailed = this.lives <= 90;
+    const shieldDone = !shieldFailed && !this._levelComplete ? false : (!shieldFailed);
+
+    this.hud.updateObjectives([
+      {
+        label: `Destroy ${REQ_TRASH} pieces of trash`,
+        current: this._trashDestroyedRequired,
+        target: REQ_TRASH,
+        complete: reqDone,
+        bonus: false,
+      },
+      {
+        label: `Destroy 10 trash above 300 m/s`,
+        current: this._trashDestroyedFast,
+        target: BONUS_FAST,
+        complete: fastDone,
+        bonus: true,
+      },
+      {
+        label: 'Finish with over 90% shield',
+        current: 0,
+        target: 1,
+        complete: false,
+        failed: shieldFailed,
+        bonus: true,
+      },
+    ]);
+
+    // Level complete when required objective met or timer runs out
+    if (reqDone || this._levelTimer <= 0) {
+      this._levelComplete = true;
+      this._levelTimerRunning = false;
+      const shieldBonus = this.lives > 90;
+      this.hud.updateObjectives([
+        { label: `Destroy ${REQ_TRASH} pieces of trash`, current: this._trashDestroyedRequired, target: REQ_TRASH, complete: reqDone, bonus: false },
+        { label: 'Destroy 10 trash above 300 m/s', current: this._trashDestroyedFast, target: BONUS_FAST, complete: fastDone, bonus: true },
+        { label: 'Finish with over 90% shield', current: 0, target: 1, complete: shieldBonus, failed: !shieldBonus, bonus: true },
+      ]);
+      this._showLevelCompleteScreen(reqDone, fastDone, shieldBonus);
+    }
   }
 
   _segmentIntersectsSphere(start, end, center, radius) {
@@ -449,8 +503,11 @@ export class Game {
           const points = debrisList[j].points || 100;
           this.score += points;
           this.trashHits++;
+          this._trashDestroyedRequired++;
+          if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
+            this._trashDestroyedFast++;
+          }
           this._refreshPauseMenu();
-          this.levels.registerTrashDestroyed();
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
           this._spawnScorePopup(_closestPoint.clone(), points);
           this.projectiles.remove(i);
@@ -540,7 +597,7 @@ export class Game {
 
     for (let i = 0; i < asteroids.length; i++) {
       const sphere = asteroids[i].boundingSphere;
-      const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius * 0.8;
+      const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius * 0.9; // slight forgiveness on asteroid radius for better feel
 
       _collisionNormal.copy(playerPos).sub(sphere.center);
       const distanceSq = _collisionNormal.lengthSq();
@@ -569,7 +626,7 @@ export class Game {
 
         const impactSpeed = Math.max(0, -normalSpeed);
         // Map impactSpeed to damage — reduced sensitivity so 20 is only at very high speed
-        const damage = THREE.MathUtils.clamp(Math.round(8 + (impactSpeed / 300) * 12), 5, 20);
+        const damage = THREE.MathUtils.clamp(Math.round(8 + (impactSpeed / 420) * 12), 5, 20);
         this._damagePlayer(damage);
         if (!this.running) return;
       } else {
@@ -602,6 +659,14 @@ export class Game {
     this.playerHitCooldown = PLAYER_HIT_COOLDOWN;
     this.player.flashWhite();
 
+    // trigger HUD damage flash and low-health indicator
+    try {
+      if (this.hud && typeof this.hud.flashDamage === 'function') this.hud.flashDamage(damage);
+      if (this.hud && typeof this.hud.setLowHealth === 'function') this.hud.setLowHealth(this.lives <= 20);
+    } catch (e) {
+      // ignore HUD errors
+    }
+
     if (this.lives <= 0) {
       this._gameOver();
     }
@@ -609,130 +674,64 @@ export class Game {
     return true;
   }
 
-  _updateBoss(delta) {
-    if (!this.levels.isBossUnlocked() || !this.levels.boss) return;
-    // Boss health bar shown in HUD
-    this.hud.updateBossBar(this.levels.boss.health, this.levels.boss.maxHealth);
+  _showLevelCompleteScreen(reqDone, fastDone, shieldBonus) {
+    this.paused = true;
+    this.hud.hideTimer();
+    if (this.crosshair) this.crosshair.classList.add('hidden');
+    if (document.pointerLockElement) document.exitPointerLock();
 
-    if (this.bossMesh) {
-      this.bossMesh.rotation.y += delta * 0.1;
-      this.bossMesh.rotation.x += delta * 0.05;
+    const el = this._levelCompleteEl;
+    if (!el) return;
+
+    const title = el.querySelector('#level-complete-title');
+    const sub = el.querySelector('#level-complete-subtitle');
+    const bonuses = el.querySelector('#level-complete-bonuses');
+
+    if (title) title.textContent = reqDone ? 'SECTOR 1 CLEARED' : 'TIME\'S UP';
+    if (sub) sub.textContent = reqDone ? 'Required objective complete.' : 'You ran out of time.';
+    if (bonuses) {
+      const earned = [fastDone && '⬡ Fast Destroyer bonus', shieldBonus && '⬡ Full Shield bonus'].filter(Boolean);
+      bonuses.textContent = earned.length ? earned.join('   ') : '';
     }
 
-    // Check projectile hits on boss (distance-based)
-    const projectiles = this.projectiles.getActive();
-    for (let i = projectiles.length - 1; i >= 0; i--) {
-      const p = projectiles[i];
-      if (this._projectileHitsSphere(p, this.levels.boss.position, 200)) {
-        this.levels.boss.health -= 10;
-        this._spawnSparks(p.position.clone(), { count: 30, ttl: 0.5 });
-        this.projectiles.remove(i);
-        if (this.levels.boss.health <= 0) {
-          if (this.bossMesh) this.bossMesh.visible = false;
-          this._spawnSparks(this.levels.boss.position, { count: 500, ttl: 3.0 });
-          this._victory();
-        }
-      }
-    }
+    el.classList.remove('hidden');
   }
 
-  _initBossMesh() {
-    const bossGeo = new THREE.IcosahedronGeometry(200, 2);
-    const bossMat = new THREE.MeshStandardMaterial({
-      color: 0x444455,
-      roughness: 0.9,
-      metalness: 0.3,
-      flatShading: true
-    });
-    this.bossMesh = new THREE.Mesh(bossGeo, bossMat);
-    this.bossMesh.position.copy(this.levels.bossWorldPosition);
-    this.bossMesh.visible = false;
-    this.scene.add(this.bossMesh);
-    
-    const bossLight = new THREE.PointLight(0xff4400, 2, 800);
-    this.bossMesh.add(bossLight);
+  _onLevelNext() {
+    this._levelCompleteEl?.classList.add('hidden');
+    // Advance to level 2 — reset objectives and timer
+    this.paused = false;
+    this._levelComplete = false;
+    this._levelTimer = 240; // Level 2 gets 4 minutes (placeholder)
+    this._trashDestroyedRequired = 0;
+    this._trashDestroyedFast = 0;
+    this._levelTimerRunning = true;
+    this.levels.setLevel(2);
+    if (this.crosshair) this.crosshair.classList.remove('hidden');
+    this.canvas.requestPointerLock();
   }
 
-  _updateBossIndicator(delta) {
-    if (!this.levels.bossWorldPosition || !this.levels.isBossUnlocked()) {
-      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
-      return;
-    }
-
-    if (this.levels.current === 3) {
-      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
-      return;
-    }
-
-    const bossPos = this.levels.bossWorldPosition;
-    const playerPos = this.player.mesh.position;
-    const dist = playerPos.distanceTo(bossPos);
-
-    // Vector from camera to boss
-    const toBoss = bossPos.clone().sub(this.camera.position).normalize();
-    // Convert to camera's local space (+x right, +y up, -z forward)
-    toBoss.applyQuaternion(this.camera.quaternion.clone().invert());
-    
-    // If looking roughly at the boss (dot product with forward > 0.9), hide the indicator
-    // In camera local space, forward is (0, 0, -1) so dot product is -toBoss.z
-    if (-toBoss.z > 0.9) {
-      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
-      return;
-    }
-    
-    // Project to 2D Screen direction (+y down for screen coords)
-    let dx = toBoss.x;
-    let dy = -toBoss.y;
-    
-    // Avoid singularity
-    if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
-      dy = 1;
-    }
-
-    const dir = new THREE.Vector2(dx, dy).normalize();
-    
-    // Stiffen smoothing (less lerp time means faster reaction)
-    if (!this._indicatorDir) {
-      this._indicatorDir = dir.clone();
-    } else {
-      this._indicatorDir.lerp(dir, 20 * delta).normalize();
-    }
-    
-    dx = this._indicatorDir.x;
-    dy = this._indicatorDir.y;
-    
-    const angle = Math.atan2(dx, -dy);
-    
-    // Clamp to screen edge (push indicator further in)
-    const halfW = window.innerWidth / 2;
-    const halfH = window.innerHeight / 2;
-    const marginW = 150; // Keep it inside screen, much further in
-    const marginH = 150; 
-    const boundX = halfW - marginW;
-    const boundY = halfH - marginH;
-    
-    const tX = boundX / (Math.abs(dx) || 0.0001);
-    const tY = boundY / (Math.abs(dy) || 0.0001);
-    const t = Math.min(tX, tY);
-    
-    const sx = halfW + dx * t;
-    const sy = halfH + dy * t;
-    
-    this.hud.updateBossIndicator(true, sx, sy, angle, Math.floor(dist));
+  _onLevelRetry() {
+    this._levelCompleteEl?.classList.add('hidden');
+    this.paused = false;
+    this._levelComplete = false;
+    this._levelTimer = 180;
+    this._trashDestroyedRequired = 0;
+    this._trashDestroyedFast = 0;
+    this._levelTimerRunning = true;
+    this.levels.setLevel(1);
+    this.score = 0;
+    this.lives = 100;
+    if (this.crosshair) this.crosshair.classList.remove('hidden');
+    this.canvas.requestPointerLock();
   }
 
   _updateMinimap() {
     const playerPos = this.player.mesh.position;
     const camInvQuat = this.camera.quaternion.clone().invert();
-    const bossPos = this.levels.isBossUnlocked() ? this.levels.bossWorldPosition : null;
-    this.hud.updateMinimap(true, bossPos, playerPos, camInvQuat, this.asteroidField.getColliders());
+    this.hud.updateMinimap(true, null, playerPos, camInvQuat, this.asteroidField.getColliders());
   }
 
-  _setBossVisible(visible) {
-    if (this.bossMesh) {
-      this.bossMesh.visible = visible;
-    }
-  }
 
   _gameOver() {
     this.running = false;
@@ -837,13 +836,6 @@ export class Game {
     for (let i = 0; i < asteroids.length; i++) {
       const sphere = asteroids[i].boundingSphere;
       const distance = this._intersectAimSphere(sphere.center, sphere.radius);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-      }
-    }
-
-    if (this.levels.boss && this.levels.boss.health > 0) {
-      const distance = this._intersectAimSphere(this.levels.boss.position, 200);
       if (distance < bestDistance) {
         bestDistance = distance;
       }
@@ -980,6 +972,7 @@ export class Game {
         if (this._projectileHitsSphere(projectiles[i], sphere.center, hitRadius)) {
           // NOTE: do NOT modify asteroid velocity from projectile hits;
           // bullets are cosmetic and should not push asteroids.
+          const hitPoint = _closestPoint.clone();
           this.projectiles.remove(i);
           break;
         }
