@@ -10,7 +10,23 @@
   <div id="hud">
     <div id="hud-score">SCORE 000000</div>
     <div id="hud-level">SECTOR 01 / 15,000 MI</div>
-    <div id="hud-lives">HULL 100%</div>
+    <div id="hud-lives">
+      <div id="hull-left">
+        <svg id="hull-shield" width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 2L4 5v6c0 5.55 3.84 10.74 8 11 4.16-.26 8-5.45 8-11V5l-8-3z" fill="#ffd5b0"/>
+          <path d="M12 7a5 5 0 100 10 5 5 0 000-10z" fill="#ff9eb8" opacity="0.3"/>
+        </svg>
+      </div>
+      <div id="hull-bar-track"><div id="hull-bar-fill"></div></div>
+      <div id="hull-percent">100%</div>
+    </div>
+  </div>
+
+  <div id="level-timer" class="hidden">3:00</div>
+
+  <div id="objectives-panel" class="hidden">
+    <div id="objectives-title">OBJECTIVES</div>
+    <ul id="objectives-list"></ul>
   </div>
 
   <div id="boss-indicator" class="hidden">
@@ -34,7 +50,8 @@
   </div>
 
   <div id="boost-bar-container" class="hidden">
-    <div id="boost-bar-label">RECHARGE</div>
+    <div id="speedometer"><span id="speedometer-value">000</span> <span id="speedometer-unit">m/s</span></div>
+    <div id="boost-bar-label">BOOST</div>
     <div id="boost-bar-track"><div id="boost-bar-fill"></div></div>
   </div>
 
@@ -63,7 +80,7 @@
         <section class="pause-card">
           <div class="pause-label">Average Speed</div>
           <div id="pause-speed-value" class="pause-stat-value pause-stat-value-speed">0</div>
-          <div id="pause-speed-detail" class="pause-stat-detail">0 / 100 boost-scale average</div>
+          <div id="pause-speed-detail" class="pause-stat-detail">0 units/s average</div>
         </section>
 
         <section class="pause-card">
@@ -82,6 +99,24 @@
     </div>
   </div>
 
+  <div id="level-briefing" class="hidden">
+    <!-- left: level identity -->
+    <div id="briefing-left">
+      <div id="briefing-level-label">LEVEL 1</div>
+      <div id="briefing-tagline">Placeholder mission briefing text goes here.</div>
+    </div>
+    <!-- right: objectives + start -->
+    <div id="briefing-inner">
+      <div id="briefing-objectives">
+        <div class="briefing-section-title">REQUIRED OBJECTIVES</div>
+        <ul id="briefing-required-list"></ul>
+        <div class="briefing-section-title briefing-bonus-title">BONUS OBJECTIVES</div>
+        <ul id="briefing-bonus-list"></ul>
+      </div>
+      <button id="briefing-start-btn">START</button>
+    </div>
+  </div>
+
   <div id="level-popup" class="hidden">
     <div id="level-popup-label">LEVEL 1</div>
     <div id="level-popup-sub">15,000 mi - Debris Field</div>
@@ -95,7 +130,23 @@
     <canvas id="minimap-canvas" width="150" height="150"></canvas>
   </div>
 
+  <div id="level-complete-screen" class="hidden">
+    <div id="level-cutscene">
+      <div id="cutscene-placeholder">[ CUTSCENE — PLACEHOLDER ]</div>
+    </div>
+    <div id="level-complete-menu">
+      <div id="level-complete-title">SECTOR 1 CLEARED</div>
+      <div id="level-complete-subtitle"></div>
+      <div id="level-complete-bonuses"></div>
+      <div id="level-complete-actions">
+        <button id="level-next-btn">NEXT SECTOR</button>
+        <button id="level-retry-btn">RETRY SECTOR</button>
+      </div>
+    </div>
+  </div>
+
   <canvas id="game-canvas"></canvas>
+  <div id="damage-vignette" aria-hidden="true"></div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

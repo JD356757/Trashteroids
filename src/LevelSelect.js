@@ -18,6 +18,24 @@ const LEVEL_DATA = [
   { id: 3, label: 'LEVEL 3', sub: '1 mi — BOSS',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
 ];
 
+const LEVEL_BRIEFINGS = {
+  1: {
+    tagline: 'Incoming debris field detected near Earth orbit. Clear the threat before time runs out.',
+    required: ['Destroy 75 pieces of trash'],
+    bonus: ['Destroy 10 pieces of trash above 300 m/s', 'Finish with over 90% shield integrity'],
+  },
+  2: {
+    tagline: 'The junk belt is thickening. Push deeper and keep the lanes clear.',
+    required: ['Destroy 100 pieces of trash'],
+    bonus: ['Destroy 15 pieces of trash above 400 m/s', 'Finish with over 90% shield integrity'],
+  },
+  3: {
+    tagline: 'Final approach. One mile out and closing fast.',
+    required: ['Destroy 120 pieces of trash'],
+    bonus: ['Destroy 20 pieces of trash above 500 m/s', 'Finish with over 90% shield integrity'],
+  },
+};
+
 // Smooth ease-in-out (cubic)
 function easeInOut(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -91,6 +109,18 @@ export class LevelSelect {
 
     this._popupYes.addEventListener('click', () => this._confirmLevel());
     this._popupNo.addEventListener('click', () => this._cancelPopup());
+
+    /* ── briefing screen ── */
+    this._briefingEl = document.getElementById('level-briefing');
+    this._briefingLevel = document.getElementById('briefing-level-label');
+    this._briefingTagline = document.getElementById('briefing-tagline');
+    this._briefingRequiredList = document.getElementById('briefing-required-list');
+    this._briefingBonusList = document.getElementById('briefing-bonus-list');
+    this._pendingLevelId = null;
+    document.getElementById('briefing-start-btn').addEventListener('click', () => {
+      this._briefingEl.classList.add('hidden');
+      this.onLevelChosen(this._pendingLevelId);
+    });
 
     /* ── bind events ── */
     this._onClick = this._onClick.bind(this);
@@ -362,7 +392,56 @@ export class LevelSelect {
     const id = this._selectedLevel.id;
     this._hidePopup();
     this.hide();
-    this.onLevelChosen(id);
+    this._showBriefing(id);
+  }
+
+  _showBriefing(id) {
+    const levelData = LEVEL_DATA.find(l => l.id === id);
+    const brief = LEVEL_BRIEFINGS[id];
+    this._pendingLevelId = id;
+
+    this._briefingLevel.textContent = levelData ? levelData.label : `LEVEL ${id}`;
+    this._briefingTagline.textContent = '';
+
+    this._briefingRequiredList.innerHTML = '';
+    for (const item of (brief?.required ?? [])) {
+      const li = document.createElement('li');
+      li.textContent = item;
+      this._briefingRequiredList.appendChild(li);
+    }
+
+    this._briefingBonusList.innerHTML = '';
+    for (const item of (brief?.bonus ?? [])) {
+      const li = document.createElement('li');
+      li.textContent = item;
+      this._briefingBonusList.appendChild(li);
+    }
+
+    this._briefingEl.classList.remove('hidden');
+    this._typeTagline(brief?.tagline ?? '');
+  }
+
+  _typeTagline(text) {
+    // Cancel any previous typing animation
+    if (this._typeTimeout) clearTimeout(this._typeTimeout);
+    this._typeTimeout = null;
+
+    let i = 0;
+    const el = this._briefingTagline;
+    el.textContent = '';
+
+    const type = () => {
+      if (i >= text.length) return;
+      el.textContent += text[i];
+      const ch = text[i];
+      i++;
+      // Pause longer after sentence-ending punctuation
+      const delay = (ch === '.' || ch === '!' || ch === '?') ? 480
+                  : (ch === ',')                              ? 120
+                  : 34;
+      this._typeTimeout = setTimeout(type, delay);
+    };
+    type();
   }
 
   _cancelPopup() {
