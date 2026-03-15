@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 export class HUD {
   constructor() {
+    this.hudRoot = document.getElementById('hud');
     this.scoreEl = document.getElementById('hud-score');
     this.levelEl = document.getElementById('hud-level');
     this.livesEl = document.getElementById('hud-lives');
@@ -22,8 +23,6 @@ export class HUD {
     this.pauseScreen = document.getElementById('pause-screen');
     this.pauseAccuracyValue = document.getElementById('pause-accuracy-value');
     this.pauseAccuracyDetail = document.getElementById('pause-accuracy-detail');
-    this.pauseSpeedValue = document.getElementById('pause-speed-value');
-    this.pauseSpeedDetail = document.getElementById('pause-speed-detail');
     this.pauseSensitivityInput = document.getElementById('pause-sensitivity');
     this.pauseSensitivityValue = document.getElementById('pause-sensitivity-value');
     this.pauseResumeBtn = document.getElementById('pause-resume-btn');
@@ -42,6 +41,22 @@ export class HUD {
     this._flashTimer = null;
     this._fadeTimer = null;
     this._speedSamples = [];
+  }
+
+  setGameplayVisible(visible) {
+    if (this.hudRoot) {
+      this.hudRoot.classList.toggle('hidden', !visible);
+    }
+
+    if (visible) return;
+
+    if (this.levelTimerEl) this.levelTimerEl.classList.add('hidden');
+    if (this.objectivesPanel) this.objectivesPanel.classList.add('hidden');
+    if (this.boostBarContainer) this.boostBarContainer.classList.add('hidden');
+    if (this.bossContainer) this.bossContainer.classList.add('hidden');
+    if (this.minimap) this.minimap.classList.add('hidden');
+    if (this.bossIndicator) this.bossIndicator.classList.add('hidden');
+    if (this.tutorialCallout) this.tutorialCallout.classList.add('hidden');
   }
 
   updateBossIndicator(visible, x, y, angle, distance) {
@@ -236,9 +251,15 @@ export class HUD {
   }
 
   updateBossBar(health, maxHealth) {
+    if (!this.bossContainer || !this.bossFill) return;
     this.bossContainer.classList.remove('hidden');
     const pct = Math.max(0, (health / maxHealth) * 100);
     this.bossFill.style.width = `${pct}%`;
+  }
+
+  setBossBarVisible(visible) {
+    if (!this.bossContainer) return;
+    this.bossContainer.classList.toggle('hidden', !visible);
   }
 
   updateSpeedometer(speed) {
@@ -325,10 +346,6 @@ export class HUD {
     const percent = shotsFired > 0 ? Math.round(((trashHits / shotsFired) * 100) * 4) : 0;
     this.pauseAccuracyValue.textContent = `${percent.toFixed(shotsFired > 0 ? 1 : 0)}%`;
     this.pauseAccuracyDetail.textContent = `${trashHits} trash hits / ${shotsFired} shots`;
-    if (this.pauseSpeedValue && this.pauseSpeedDetail) {
-      this.pauseSpeedValue.textContent = `${Math.round(averageSpeed)}`;
-      this.pauseSpeedDetail.textContent = `${Math.round(averageSpeed)} units/s average`;
-    }
   }
 
   setPauseSensitivity(rawSensitivity) {
@@ -339,6 +356,7 @@ export class HUD {
   }
 
   showMessage(text) {
+    this.setGameplayVisible(false);
     this.setPauseVisible(false);
     this.overlay.classList.remove('hidden');
     this.overlay.querySelector('h1').textContent = text;

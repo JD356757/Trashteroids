@@ -30,6 +30,14 @@ const _aimDirection = new THREE.Vector3();
 const _aimPoint = new THREE.Vector3();
 const _aimOffset = new THREE.Vector3();
 const _toDebris = new THREE.Vector3();
+const _targetOffset = new THREE.Vector3();
+const _targetScreenPos = new THREE.Vector3();
+const _bossDesiredPos = new THREE.Vector3();
+const _bossRight = new THREE.Vector3();
+const _bossUp = new THREE.Vector3();
+const _bossAim = new THREE.Vector3();
+const _bossMuzzle = new THREE.Vector3();
+const _worldUp = new THREE.Vector3(0, 1, 0);
 // Debug flag: when true the camera will not follow the ship (helps observe movement)
 const DEBUG_FREEZE_CAMERA = false;
 const PLAYER_COLLISION_RADIUS = 1.1;
@@ -42,8 +50,13 @@ const AIM_LOWERING = 0.035;
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
 const PLAYER_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
-const DISPLAY_SPEED_MAX = 100;
+const DISPLAY_DISTANCE_SCALE = 0.45;
 const TUTORIAL_TIME_SCALE = 0.35;
+const TRASHTEROID_APPROACH_DISTANCE_WORLD = 5000 / DISPLAY_DISTANCE_SCALE;
+const TRASHTEROID_HIT_RADIUS = 72;
+const TRASHTEROID_SURFACE_OFFSET = 58;
+const TRASHTEROID_SCORE_PER_HIT = 35;
+const TRASHTEROID_SCORE_ON_DESTROY = 5000;
 const TUTORIAL_BEATS = {
   controls: {
     title: 'Flight Controls',
@@ -61,6 +74,18 @@ const TUTORIAL_BEATS = {
     placement: 'center',
   },
 };
+
+function toWorldSpeed(displaySpeed) {
+  return displaySpeed / DISPLAY_DISTANCE_SCALE;
+}
+
+function toWorldDistance(displayDistance) {
+  return displayDistance / DISPLAY_DISTANCE_SCALE;
+}
+
+function toDisplayDistance(worldDistance) {
+  return Math.max(0, Math.round(worldDistance * DISPLAY_DISTANCE_SCALE));
+}
 
 export class Game {
   constructor(canvas, startLevel = 1, options = {}) {
@@ -84,11 +109,11 @@ export class Game {
     this._tutorial = this._createTutorialState();
 
     // Level objectives & timer
-    this._levelTimer = 180; // 3 minutes for level 1
+    this._levelTimer = 0;
     this._levelTimerRunning = false;
-    this._trashDestroyedRequired = 0;   // required: 75 trash
-    this._trashDestroyedFast = 0;       // bonus: 10 trash while speed > 300 m/s (display)
-    this._bonusFastThresholdWorld = 300 / 0.45; // display 300 → world speed threshold
+    this._trashDestroyedRequired = 0;
+    this._trashDestroyedFast = 0;
+    this._bonusFastThresholdWorld = toWorldSpeed(200);
     this._levelComplete = false;
     this.clock = new THREE.Clock();
     this.crosshair = document.getElementById('crosshair');
@@ -193,6 +218,8 @@ export class Game {
     this.levels = new LevelManager();
     this.hud = new HUD();
     this.hud.hideTutorialCallout();
+    this.hud.setBossBarVisible(false);
+    this.hud.updateBossIndicator(false, 0, 0, 0, 0);
     this.starfield = new Starfield(this.scene);
     this._applySavedSensitivity();
     this._bindPauseControls();
@@ -206,6 +233,14 @@ export class Game {
     this._sparks = [];
     this._popups = [];
     this._muzzles = [];
+    this._enemyProjectiles = [];
+    this._enemyProjectileGeometry = new THREE.SphereGeometry(3.2, 10, 10);
+    this._enemyProjectileMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff6948,
+      transparent: true,
+      opacity: 0.92,
+    });
+    this._trashteroid = this._createTrashteroid();
 
     // Large decorative asteroid field around the player zone
     this.asteroidField = new AsteroidField(this.scene);
@@ -226,10 +261,8 @@ export class Game {
     if (this.running) return;
     this.running = true;
     this.clock.start();
-    this.levels.setLevel(this._startLevel);
     this._resetTutorialState();
-    this.hud.update(this.score, this.levels.current, this.lives);
-    this._levelTimerRunning = true;
+    this._enterLevel(this._startLevel, { resetPlayerPosition: true });
     this._loop();
   }
 
@@ -290,6 +323,597 @@ export class Game {
   _getAverageSpeed() {
     if (this._averageSpeedTime <= 0) return 0;
     return this._averageSpeedSum / this._averageSpeedTime;
+  }
+
+  _clearTransientEffects() {
+    for (let i = this._sparks.length - 1; i >= 0; i--) {
+      const effect = this._sparks[i];
+      this._effectGroup.remove(effect.mesh);
+      effect.mesh.geometry?.dispose?.();
+      effect.mesh.material?.dispose?.();
+    }
+    this._sparks.length = 0;
+
+    for (let i = this._popups.length - 1; i >= 0; i--) {
+      this._popups[i].el.remove();
+    }
+    this._popups.length = 0;
+
+    for (let i = this._muzzles.length - 1; i >= 0; i--) {
+      const muzzle = this._muzzles[i];
+      if (muzzle.mesh.parent) {
+        muzzle.mesh.parent.remove(muzzle.mesh);
+      }
+      muzzle.mesh.geometry?.dispose?.();
+      muzzle.mesh.material?.dispose?.();
+    }
+    this._muzzles.length = 0;
+  }
+
+  _createTrashteroid() {
+    const group = new THREE.Group();
+    group.name = 'Trashteroid';
+    group.visible = false;
+
+    const shell = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(52, 1),
+      new THREE.MeshStandardMaterial({
+        color: 0x48505c,
+        roughness: 0.96,
+        metalness: 0.12,
+        emissive: 0x10151d,
+        emissiveIntensity: 0.55,
+      })
+    );
+    group.add(shell);
+
+    const coreGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(30, 18, 18),
+      new THREE.MeshBasicMaterial({
+        color: 0xff6e42,
+        transparent: true,
+        opacity: 0.2,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    group.add(coreGlow);
+
+    const scrapGeometries = [
+      new THREE.BoxGeometry(18, 9, 13),
+      new THREE.BoxGeometry(12, 16, 10),
+      new THREE.CylinderGeometry(5, 7, 18, 8),
+      new THREE.ConeGeometry(7, 18, 6),
+      new THREE.TorusGeometry(8, 2.4, 8, 16),
+    ];
+    const scrapColors = [0x7d8b9b, 0x5c6975, 0x9b8e6c, 0x64788a, 0x6d635a];
+
+    for (let i = 0; i < 22; i++) {
+      const chunk = new THREE.Mesh(
+        scrapGeometries[i % scrapGeometries.length],
+        new THREE.MeshStandardMaterial({
+          color: scrapColors[i % scrapColors.length],
+          roughness: 0.88,
+          metalness: 0.18,
+          emissive: 0x0d1117,
+          emissiveIntensity: 0.22,
+        })
+      );
+
+      _targetOffset.set(
+        Math.random() - 0.5,
+        Math.random() - 0.5,
+        Math.random() - 0.5
+      ).normalize();
+      chunk.position.copy(_targetOffset).multiplyScalar(44 + Math.random() * 20);
+      chunk.rotation.set(
+        Math.random() * Math.PI,
+        Math.random() * Math.PI,
+        Math.random() * Math.PI
+      );
+      chunk.scale.setScalar(0.72 + Math.random() * 0.85);
+      group.add(chunk);
+    }
+
+    const hazardRing = new THREE.Mesh(
+      new THREE.TorusGeometry(76, 2.4, 10, 40),
+      new THREE.MeshBasicMaterial({
+        color: 0xff6e42,
+        transparent: true,
+        opacity: 0.16,
+        depthWrite: false,
+      })
+    );
+    hazardRing.rotation.set(Math.PI * 0.35, 0, Math.PI * 0.18);
+    group.add(hazardRing);
+
+    this.scene.add(group);
+
+    return {
+      group,
+      shell,
+      glow: coreGlow,
+      ring: hazardRing,
+      anchor: new THREE.Vector3(),
+      health: 1,
+      maxHealth: 1,
+      hitRadius: TRASHTEROID_HIT_RADIUS,
+      active: false,
+      mode: 'approach',
+      time: 0,
+      shotCooldown: 0,
+    };
+  }
+
+  _resetPlayerState(resetPosition = false) {
+    this.player.velocity.set(0, 0, 0);
+    this.player.currentRoll = 0;
+    this.player.manualRollInput = 0;
+    this.player.turnInputYaw = 0;
+    this.player.turnInputPitch = 0;
+    this.player.yawRate = 0;
+    this.player.pitchRate = 0;
+    this.playerHitCooldown = 0;
+    this.boostCharge = 1;
+    this.boostActive = false;
+
+    if (resetPosition) {
+      this.player.mesh.position.set(0, 0, 10);
+      this.player.baseQuaternion.identity();
+    }
+
+    this.player.mesh.quaternion.copy(this.player.baseQuaternion);
+    this._prevPlayerPos.copy(this.player.mesh.position);
+  }
+
+  _enterLevel(levelNumber, { resetPlayerPosition = false, resetRunStats = false } = {}) {
+    const levelConfig = this.levels.getConfig(levelNumber);
+    const mission = levelConfig.mission ?? {};
+    const fastSpeedDisplay = mission.bonus?.fastSpeedDisplay ?? 200;
+
+    this._levelCompleteEl?.classList.add('hidden');
+    this.levels.setLevel(levelNumber);
+    this._resetTutorialState();
+    this.paused = false;
+    this._levelComplete = false;
+    this._levelTimer = levelConfig.timer ?? 0;
+    this._levelTimerRunning = this._levelTimer > 0;
+    this._trashDestroyedRequired = 0;
+    this._trashDestroyedFast = 0;
+    this._bonusFastThresholdWorld = toWorldSpeed(fastSpeedDisplay);
+
+    if (resetRunStats) {
+      this.score = 0;
+      this.lives = 100;
+      this.shotsFired = 0;
+      this.trashHits = 0;
+      this._averageSpeedSum = 0;
+      this._averageSpeedTime = 0;
+    }
+
+    this.projectiles.clear();
+    this.debris.clear();
+    this._clearTransientEffects();
+    this._resetPlayerState(resetPlayerPosition);
+    this._configureTrashteroidForLevel(levelConfig);
+    this.hud.setGameplayVisible(true);
+    this.hud.setBossBarVisible(!!levelConfig.boss);
+    this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+    this.hud.update(this.score, this.levels.current, this.lives);
+    this.hud.updateTimer(this._levelTimer);
+    this.hud.updateObjectives(this._getMissionObjectiveState(false).objectives);
+    this._refreshPauseMenu();
+  }
+
+  _configureTrashteroidForLevel(levelConfig) {
+    const primary = levelConfig.mission?.primary ?? {};
+    const bossConfig = levelConfig.boss ?? null;
+    const trashteroid = this._trashteroid;
+
+    this._clearTrashteroidProjectiles();
+
+    if (!primary.reachTrashteroid && !primary.destroyTrashteroid) {
+      trashteroid.active = false;
+      trashteroid.group.visible = false;
+      this.hud.setBossBarVisible(false);
+      return;
+    }
+
+    _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize();
+    const startDistance = bossConfig?.startDistance ?? TRASHTEROID_APPROACH_DISTANCE_WORLD;
+
+    trashteroid.group.position.copy(this.player.mesh.position).addScaledVector(_shipForward, startDistance);
+    trashteroid.anchor.copy(trashteroid.group.position);
+    trashteroid.group.rotation.set(0, 0, 0);
+    trashteroid.health = bossConfig?.maxHealth ?? 1;
+    trashteroid.maxHealth = bossConfig?.maxHealth ?? 1;
+    trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS;
+    trashteroid.active = true;
+    trashteroid.mode = bossConfig ? 'boss' : 'approach';
+    trashteroid.time = 0;
+    trashteroid.shotCooldown = bossConfig ? bossConfig.shotInterval * 0.8 : 0;
+    trashteroid.group.visible = true;
+
+    if (bossConfig) {
+      this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
+    }
+  }
+
+  _clearTrashteroidProjectiles() {
+    for (let i = this._enemyProjectiles.length - 1; i >= 0; i--) {
+      this.scene.remove(this._enemyProjectiles[i].mesh);
+    }
+    this._enemyProjectiles.length = 0;
+  }
+
+  _despawnEnemyProjectile(index) {
+    const projectile = this._enemyProjectiles[index];
+    if (!projectile) return;
+    this.scene.remove(projectile.mesh);
+    projectile.mesh.traverse?.((child) => {
+      if (child.material && child.material !== this._enemyProjectileMaterial) {
+        child.material.dispose?.();
+      }
+    });
+    this._enemyProjectiles.splice(index, 1);
+  }
+
+  _spawnTrashteroidProjectile(origin, direction, speed, ttl) {
+    const core = new THREE.Mesh(this._enemyProjectileGeometry, this._enemyProjectileMaterial);
+    const glow = new THREE.Mesh(
+      this._enemyProjectileGeometry,
+      new THREE.MeshBasicMaterial({
+        color: 0xffbf73,
+        transparent: true,
+        opacity: 0.26,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    glow.scale.setScalar(1.8);
+    core.add(glow);
+
+    core.position.copy(origin);
+    core.scale.setScalar(0.95 + Math.random() * 0.35);
+    this.scene.add(core);
+
+    this._enemyProjectiles.push({
+      mesh: core,
+      position: core.position,
+      prevPosition: core.position.clone(),
+      velocity: direction.clone().multiplyScalar(speed),
+      life: 0,
+      ttl,
+    });
+  }
+
+  _fireTrashteroidBurst(bossConfig) {
+    const trashteroid = this._trashteroid;
+    if (!trashteroid?.active) return;
+
+    _bossAim
+      .copy(this.player.mesh.position)
+      .addScaledVector(this.player.velocity, 0.45)
+      .sub(trashteroid.group.position);
+
+    if (_bossAim.lengthSq() === 0) return;
+    _bossAim.normalize();
+
+    _bossRight.crossVectors(_bossAim, _worldUp);
+    if (_bossRight.lengthSq() < 1e-5) {
+      _bossRight.set(1, 0, 0);
+    }
+    _bossRight.normalize();
+    _bossUp.crossVectors(_bossRight, _bossAim).normalize();
+
+    const sideOffsets = [-18, 18];
+    for (let i = 0; i < sideOffsets.length; i++) {
+      _bossMuzzle
+        .copy(trashteroid.group.position)
+        .addScaledVector(_bossAim, TRASHTEROID_SURFACE_OFFSET)
+        .addScaledVector(_bossRight, sideOffsets[i])
+        .addScaledVector(_bossUp, 8);
+
+      const spreadDirection = _bossAim
+        .clone()
+        .addScaledVector(_bossRight, sideOffsets[i] * 0.0015)
+        .addScaledVector(_bossUp, (Math.random() - 0.5) * 0.03)
+        .normalize();
+
+      this._spawnTrashteroidProjectile(
+        _bossMuzzle,
+        spreadDirection,
+        bossConfig.projectileSpeed,
+        bossConfig.projectileLifetime
+      );
+      this._spawnSparks(_bossMuzzle.clone(), {
+        count: 8,
+        speed: 18,
+        ttl: 0.24,
+        color: 0xff8855,
+        size: 1.2,
+      });
+    }
+  }
+
+  _updateTrashteroid(delta) {
+    const trashteroid = this._trashteroid;
+    if (!trashteroid?.active) return;
+
+    const levelConfig = this.levels.getCurrentConfig();
+    const bossConfig = levelConfig.boss ?? null;
+
+    trashteroid.time += delta;
+    trashteroid.group.rotation.x += delta * 0.08;
+    trashteroid.group.rotation.y += delta * 0.18;
+    trashteroid.group.rotation.z += delta * 0.05;
+
+    if (trashteroid.ring) {
+      trashteroid.ring.rotation.z += delta * 0.22;
+    }
+    if (trashteroid.glow) {
+      const pulse = 1 + Math.sin(trashteroid.time * 2.8) * 0.08;
+      trashteroid.glow.scale.setScalar(pulse);
+      trashteroid.glow.material.opacity = bossConfig ? 0.24 : 0.18;
+    }
+
+    if (trashteroid.mode === 'approach' || !bossConfig) {
+      trashteroid.group.position.copy(trashteroid.anchor);
+      trashteroid.group.position.x += Math.sin(trashteroid.time * 0.22) * 40;
+      trashteroid.group.position.y += Math.sin(trashteroid.time * 0.55 + 0.7) * 22;
+      return;
+    }
+
+    _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize();
+    _bossRight.set(1, 0, 0).applyQuaternion(this.player.baseQuaternion).normalize();
+    _bossUp.set(0, 1, 0).applyQuaternion(this.player.baseQuaternion).normalize();
+
+    _bossDesiredPos
+      .copy(this.player.mesh.position)
+      .addScaledVector(_shipForward, bossConfig.startDistance)
+      .addScaledVector(_bossRight, Math.sin(trashteroid.time * 0.85) * bossConfig.strafeAmplitude)
+      .addScaledVector(_bossUp, Math.sin(trashteroid.time * 0.58 + 0.8) * bossConfig.verticalAmplitude);
+
+    trashteroid.group.position.lerp(
+      _bossDesiredPos,
+      1 - Math.exp(-bossConfig.moveSharpness * delta)
+    );
+
+    trashteroid.shotCooldown -= delta;
+    if (trashteroid.shotCooldown <= 0) {
+      this._fireTrashteroidBurst(bossConfig);
+      trashteroid.shotCooldown = bossConfig.shotInterval;
+    }
+
+    this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
+  }
+
+  _updateTrashteroidProjectiles(delta) {
+    const bossConfig = this.levels.getCurrentConfig().boss;
+    if (!bossConfig || !this._enemyProjectiles.length) return;
+
+    for (let i = this._enemyProjectiles.length - 1; i >= 0; i--) {
+      const projectile = this._enemyProjectiles[i];
+      projectile.life += delta;
+      projectile.prevPosition.copy(projectile.mesh.position);
+      projectile.mesh.position.addScaledVector(projectile.velocity, delta);
+
+      if (this._projectileHitsSphere(projectile, this.player.mesh.position, PLAYER_COLLISION_RADIUS + 0.45)) {
+        this._spawnSparks(_closestPoint.clone(), {
+          count: 18,
+          speed: 20,
+          ttl: 0.45,
+          color: 0xff7a52,
+          size: 1.5,
+        });
+        this._damagePlayer(bossConfig.projectileDamage);
+        this._despawnEnemyProjectile(i);
+        continue;
+      }
+
+      if (projectile.life >= projectile.ttl) {
+        this._despawnEnemyProjectile(i);
+      }
+    }
+  }
+
+  _checkProjectileTrashteroidCollisions() {
+    const trashteroid = this._trashteroid;
+    if (!trashteroid?.active) return;
+
+    const projectiles = this.projectiles.getActive();
+    const bossConfig = this.levels.getCurrentConfig().boss ?? null;
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      if (!this._projectileHitsSphere(projectiles[i], trashteroid.group.position, trashteroid.hitRadius)) {
+        continue;
+      }
+
+      const impactPoint = _closestPoint.clone();
+      this.projectiles.remove(i);
+
+      if (!bossConfig) {
+        this._spawnSparks(impactPoint, {
+          count: 18,
+          speed: 20,
+          ttl: 0.5,
+          color: 0xffc66e,
+          size: 1.35,
+        });
+        continue;
+      }
+
+      trashteroid.health = Math.max(0, trashteroid.health - 1);
+      this.score += TRASHTEROID_SCORE_PER_HIT;
+      this._spawnSparks(impactPoint, {
+        count: 22,
+        speed: 26,
+        ttl: 0.55,
+        color: 0xff8c55,
+        size: 1.8,
+      });
+      this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
+
+      if (trashteroid.health > 0) continue;
+
+      this.score += TRASHTEROID_SCORE_ON_DESTROY;
+      this._spawnExplosion(trashteroid.group.position.clone(), { count: 360, ttl: 2.5 });
+      trashteroid.active = false;
+      trashteroid.group.visible = false;
+      this.hud.setBossBarVisible(false);
+      this._clearTrashteroidProjectiles();
+      this._finalizeLevel(true);
+      break;
+    }
+  }
+
+  _getMissionTargetPosition() {
+    return this._trashteroid?.active ? this._trashteroid.group.position : null;
+  }
+
+  _updateMissionTargetIndicator() {
+    const targetPos = this._getMissionTargetPosition();
+    if (!targetPos) {
+      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+      return;
+    }
+
+    _targetScreenPos.copy(targetPos).project(this.camera);
+    const onScreen =
+      _targetScreenPos.z > -1 &&
+      _targetScreenPos.z < 1 &&
+      Math.abs(_targetScreenPos.x) <= 0.92 &&
+      Math.abs(_targetScreenPos.y) <= 0.88;
+
+    if (onScreen) {
+      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+      return;
+    }
+
+    _targetOffset.copy(targetPos).sub(this.camera.position);
+    _targetOffset.applyQuaternion(this.camera.quaternion.clone().invert());
+
+    let angle = Math.atan2(_targetOffset.x, _targetOffset.y);
+    if (_targetOffset.z > 0) {
+      angle += Math.PI;
+    }
+
+    const centerX = window.innerWidth * 0.5;
+    const centerY = window.innerHeight * 0.5;
+    const radiusX = Math.max(120, window.innerWidth * 0.36);
+    const radiusY = Math.max(90, window.innerHeight * 0.26);
+    const x = centerX + Math.sin(angle) * radiusX;
+    const y = centerY - Math.cos(angle) * radiusY;
+    const distance = toDisplayDistance(targetPos.distanceTo(this.player.mesh.position));
+
+    this.hud.updateBossIndicator(true, x, y, angle, Math.max(1, distance));
+  }
+
+  _getMissionObjectiveState(finalizeShield = false) {
+    const levelConfig = this.levels.getCurrentConfig();
+    const mission = levelConfig.mission ?? {};
+    const primary = mission.primary ?? {};
+    const bonus = mission.bonus ?? {};
+    const objectives = [];
+    let primaryComplete = true;
+
+    if (primary.trashRequired) {
+      const complete = this._trashDestroyedRequired >= primary.trashRequired;
+      objectives.push({
+        label: `Destroy ${primary.trashRequired} pieces of trash`,
+        current: this._trashDestroyedRequired,
+        target: primary.trashRequired,
+        complete,
+        bonus: false,
+      });
+      primaryComplete = primaryComplete && complete;
+    }
+
+    if (primary.reachTrashteroid) {
+      const targetPos = this._getMissionTargetPosition();
+      const reachDistanceDisplay = primary.reachDistanceDisplay ?? 60;
+      const reachDistanceWorld = toWorldDistance(reachDistanceDisplay);
+      const distanceDisplay = targetPos
+        ? toDisplayDistance(targetPos.distanceTo(this.player.mesh.position))
+        : reachDistanceDisplay;
+      const reached = targetPos
+        ? targetPos.distanceTo(this.player.mesh.position) <= reachDistanceWorld
+        : false;
+
+      objectives.push({
+        label: reached
+          ? 'Reach Trashteroid'
+          : `Reach Trashteroid (${distanceDisplay} mi out)`,
+        current: reached ? 1 : 0,
+        target: 1,
+        complete: reached,
+        bonus: false,
+      });
+      primaryComplete = primaryComplete && reached;
+    }
+
+    if (primary.destroyTrashteroid) {
+      const maxHealth = this._trashteroid?.maxHealth ?? 1;
+      const remainingHealth = this._trashteroid?.health ?? 0;
+      const destroyed = !this._trashteroid?.active || remainingHealth <= 0;
+      objectives.push({
+        label: 'Destroy Trashteroid',
+        current: destroyed ? maxHealth : maxHealth - remainingHealth,
+        target: maxHealth,
+        complete: destroyed,
+        bonus: false,
+      });
+      primaryComplete = primaryComplete && destroyed;
+    }
+
+    const fastRequired = bonus.fastTrashRequired ?? 0;
+    const fastSpeedDisplay = bonus.fastSpeedDisplay ?? 0;
+    const fastDone = fastRequired > 0 ? this._trashDestroyedFast >= fastRequired : false;
+    if (fastRequired > 0 && fastSpeedDisplay > 0) {
+      objectives.push({
+        label: `Destroy ${fastRequired} trash above ${fastSpeedDisplay} m/s`,
+        current: this._trashDestroyedFast,
+        target: fastRequired,
+        complete: fastDone,
+        bonus: true,
+      });
+    }
+
+    const shieldThreshold = bonus.shieldThreshold;
+    const shieldBonus = shieldThreshold != null ? this.lives > shieldThreshold : false;
+    const shieldFailed = shieldThreshold != null ? this.lives <= shieldThreshold : false;
+    if (shieldThreshold != null) {
+      objectives.push({
+        label: `Finish with over ${shieldThreshold}% shield`,
+        current: 0,
+        target: 1,
+        complete: finalizeShield ? shieldBonus : false,
+        failed: finalizeShield ? !shieldBonus : shieldFailed,
+        bonus: true,
+      });
+    }
+
+    return {
+      objectives,
+      primaryComplete,
+      fastDone,
+      shieldBonus,
+    };
+  }
+
+  _finalizeLevel(primaryComplete) {
+    if (this._levelComplete) return;
+
+    const state = this._getMissionObjectiveState(true);
+    this._levelComplete = true;
+    this._levelTimerRunning = false;
+    this.paused = true;
+    this.boostActive = false;
+    this.hud.updateObjectives(state.objectives);
+    this.hud.hideTimer();
+    this.hud.setBossBarVisible(false);
+    this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+    this._showLevelCompleteScreen(primaryComplete, state.fastDone, state.shieldBonus);
   }
 
   _createTutorialState() {
@@ -435,6 +1059,7 @@ export class Game {
     this._pauseUnlockArmed = false;
     this._clearActiveTutorialBeat();
     this._refreshPauseMenu();
+    this.hud.setGameplayVisible(false);
     this.hud.setPauseVisible(true);
     if (this.crosshair) {
       this.crosshair.classList.add('hidden');
@@ -450,6 +1075,7 @@ export class Game {
 
     this.paused = false;
     this._pauseUnlockArmed = false;
+    this.hud.setGameplayVisible(true);
     this.hud.setPauseVisible(false);
     if (this.crosshair) {
       this.crosshair.classList.remove('hidden');
@@ -553,8 +1179,11 @@ export class Game {
     this.asteroidField.update(delta, playerPos);
     this.debris.update(delta, this.levels.getSpawnConfig(), playerPos, playerQuat);
     this.debris.resolveAsteroidCollisions(this.asteroidField.getColliders());
+    this._updateTrashteroid(delta);
+    this._updateTrashteroidProjectiles(delta);
     // Check projectile collisions against asteroids (sparks)
     this._checkProjectileAsteroidCollisions();
+    this._checkProjectileTrashteroidCollisions();
     this._checkAsteroidPlayerCollisions();
 
     // Camera follows behind ship (updated before rendering)
@@ -576,69 +1205,30 @@ export class Game {
     // Collision: trash vs player (hits / misses)
     this._checkDebrisPlayerCollisions(playerPos, playerQuat);
 
+    this._updateMissionTargetIndicator();
     this._updateMinimap();
 
     this.hud.update(this.score, this.levels.current, this.lives);
     this.hud.updateBoostBar(this.boostCharge, this.boostActive);
     this.hud.updateSpeedometer(this.player.velocity.length());
-    this._updateLevelObjectives(delta);
+    this._updateMissionObjectives(delta);
     this.input.resetPressed();
     this.renderer.render(this.scene, this.camera);
   }
 
-  _updateLevelObjectives(delta) {
-    // Only active for level 1 (objective-based)
-    if (this.levels.current !== 1 || this._levelComplete) return;
+  _updateMissionObjectives(delta) {
+    if (this._levelComplete) return;
 
-    // Tick timer
     if (this._levelTimerRunning && !this.paused) {
       this._levelTimer = Math.max(0, this._levelTimer - delta);
     }
     this.hud.updateTimer(this._levelTimer);
 
-    const REQ_TRASH = 75;
-    const BONUS_FAST = 10;
-    const reqDone = this._trashDestroyedRequired >= REQ_TRASH;
-    const fastDone = this._trashDestroyedFast >= BONUS_FAST;
-    const shieldFailed = this.lives <= 90;
-    const shieldDone = !shieldFailed && !this._levelComplete ? false : (!shieldFailed);
+    const state = this._getMissionObjectiveState(false);
+    this.hud.updateObjectives(state.objectives);
 
-    this.hud.updateObjectives([
-      {
-        label: `Destroy ${REQ_TRASH} pieces of trash`,
-        current: this._trashDestroyedRequired,
-        target: REQ_TRASH,
-        complete: reqDone,
-        bonus: false,
-      },
-      {
-        label: `Destroy 10 trash above 300 m/s`,
-        current: this._trashDestroyedFast,
-        target: BONUS_FAST,
-        complete: fastDone,
-        bonus: true,
-      },
-      {
-        label: 'Finish with over 90% shield',
-        current: 0,
-        target: 1,
-        complete: false,
-        failed: shieldFailed,
-        bonus: true,
-      },
-    ]);
-
-    // Level complete when required objective met or timer runs out
-    if (reqDone || this._levelTimer <= 0) {
-      this._levelComplete = true;
-      this._levelTimerRunning = false;
-      const shieldBonus = this.lives > 90;
-      this.hud.updateObjectives([
-        { label: `Destroy ${REQ_TRASH} pieces of trash`, current: this._trashDestroyedRequired, target: REQ_TRASH, complete: reqDone, bonus: false },
-        { label: 'Destroy 10 trash above 300 m/s', current: this._trashDestroyedFast, target: BONUS_FAST, complete: fastDone, bonus: true },
-        { label: 'Finish with over 90% shield', current: 0, target: 1, complete: shieldBonus, failed: !shieldBonus, bonus: true },
-      ]);
-      this._showLevelCompleteScreen(reqDone, fastDone, shieldBonus);
+    if (state.primaryComplete || this._levelTimer <= 0) {
+      this._finalizeLevel(state.primaryComplete);
     }
   }
 
@@ -845,6 +1435,7 @@ export class Game {
 
   _showLevelCompleteScreen(reqDone, fastDone, shieldBonus) {
     this.paused = true;
+    this.hud.setGameplayVisible(false);
     this.hud.hideTimer();
     if (this.crosshair) this.crosshair.classList.add('hidden');
     if (document.pointerLockElement) document.exitPointerLock();
@@ -852,45 +1443,76 @@ export class Game {
     const el = this._levelCompleteEl;
     if (!el) return;
 
+    const mission = this.levels.getMissionConfig();
+    const nextLevel = reqDone ? this.levels.getNextLevel() : null;
     const title = el.querySelector('#level-complete-title');
     const sub = el.querySelector('#level-complete-subtitle');
     const bonuses = el.querySelector('#level-complete-bonuses');
+    const nextBtn = el.querySelector('#level-next-btn');
+    const retryBtn = el.querySelector('#level-retry-btn');
+    const cutsceneKicker = el.querySelector('#cutscene-kicker');
+    const cutsceneFrom = el.querySelector('#cutscene-from-label');
+    const cutsceneTo = el.querySelector('#cutscene-to-label');
 
-    if (title) title.textContent = reqDone ? 'SECTOR 1 CLEARED' : 'TIME\'S UP';
-    if (sub) sub.textContent = reqDone ? 'Required objective complete.' : 'You ran out of time.';
-    if (bonuses) {
-      const earned = [fastDone && '⬡ Fast Destroyer bonus', shieldBonus && '⬡ Full Shield bonus'].filter(Boolean);
-      bonuses.textContent = earned.length ? earned.join('   ') : '';
+    const currentSectorLabel = `SECTOR ${String(this.levels.current).padStart(2, '0')}`;
+    const destinationLabel = reqDone
+      ? (nextLevel ? `SECTOR ${String(nextLevel).padStart(2, '0')}` : 'MISSION COMPLETE')
+      : 'RETRY SECTOR';
+
+    if (title) {
+      title.textContent = reqDone
+        ? (mission?.successTitle ?? `SECTOR ${this.levels.current} CLEARED`)
+        : 'TIME UP';
     }
+    if (sub) {
+      sub.textContent = reqDone
+        ? (mission?.successSubtitle ?? 'Primary objectives complete.')
+        : 'You ran out of time before the primary objectives were complete.';
+    }
+    if (bonuses) {
+      const earned = [
+        fastDone && 'Fast Destroyer bonus',
+        shieldBonus && 'Full Shield bonus',
+      ].filter(Boolean);
+      bonuses.textContent = earned.length ? earned.join('   ') : 'No bonus objectives completed.';
+    }
+
+    if (nextBtn) {
+      nextBtn.classList.toggle('hidden', !nextLevel);
+      nextBtn.textContent = nextLevel ? 'NEXT SECTOR' : 'MISSION COMPLETE';
+    }
+
+    if (retryBtn) {
+      retryBtn.textContent = reqDone && !nextLevel ? 'PLAY AGAIN' : 'RETRY SECTOR';
+    }
+
+    if (cutsceneKicker) {
+      cutsceneKicker.textContent = reqDone
+        ? (nextLevel ? 'SECTOR TRANSITION' : 'MISSION COMPLETE')
+        : 'RETRY LOCK';
+    }
+    if (cutsceneFrom) cutsceneFrom.textContent = currentSectorLabel;
+    if (cutsceneTo) cutsceneTo.textContent = destinationLabel;
 
     el.classList.remove('hidden');
   }
 
   _onLevelNext() {
+    const nextLevel = this.levels.getNextLevel();
+    if (!nextLevel) return;
+
     this._levelCompleteEl?.classList.add('hidden');
-    // Advance to level 2 — reset objectives and timer
-    this.paused = false;
-    this._levelComplete = false;
-    this._levelTimer = 240; // Level 2 gets 4 minutes (placeholder)
-    this._trashDestroyedRequired = 0;
-    this._trashDestroyedFast = 0;
-    this._levelTimerRunning = true;
-    this.levels.setLevel(2);
+    this._enterLevel(nextLevel);
     if (this.crosshair) this.crosshair.classList.remove('hidden');
     this.canvas.requestPointerLock();
   }
 
   _onLevelRetry() {
     this._levelCompleteEl?.classList.add('hidden');
-    this.paused = false;
-    this._levelComplete = false;
-    this._levelTimer = 180;
-    this._trashDestroyedRequired = 0;
-    this._trashDestroyedFast = 0;
-    this._levelTimerRunning = true;
-    this.levels.setLevel(1);
-    this.score = 0;
-    this.lives = 100;
+    this._enterLevel(this.levels.current, {
+      resetPlayerPosition: true,
+      resetRunStats: true,
+    });
     if (this.crosshair) this.crosshair.classList.remove('hidden');
     this.canvas.requestPointerLock();
   }
@@ -898,12 +1520,19 @@ export class Game {
   _updateMinimap() {
     const playerPos = this.player.mesh.position;
     const camInvQuat = this.camera.quaternion.clone().invert();
-    this.hud.updateMinimap(true, null, playerPos, camInvQuat, this.asteroidField.getColliders());
+    this.hud.updateMinimap(
+      true,
+      this._getMissionTargetPosition(),
+      playerPos,
+      camInvQuat,
+      this.asteroidField.getColliders()
+    );
   }
 
 
   _gameOver() {
     this.running = false;
+    this.hud.setGameplayVisible(false);
     this.hud.setPauseVisible(false);
     if (this.crosshair) {
       this.crosshair.classList.add('hidden');
@@ -913,6 +1542,7 @@ export class Game {
 
   _victory() {
     this.running = false;
+    this.hud.setGameplayVisible(false);
     this.hud.setPauseVisible(false);
     if (this.crosshair) {
       this.crosshair.classList.add('hidden');

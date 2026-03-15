@@ -369,6 +369,12 @@ export class DebrisManager {
     }
   }
 
+  clear() {
+    while (this.active.length > 0) {
+      this._deactivateByActiveIndex(this.active.length - 1);
+    }
+  }
+
   _deactivateByActiveIndex(activeIndex) {
     const lastIndex = this.active.length - 1;
     const slot = this.active[activeIndex];

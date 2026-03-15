@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
-  <div id="hud">
+  <div id="hud" class="hidden">
     <div id="hud-score">SCORE 000000</div>
     <div id="hud-level">SECTOR 01 / 15,000 MI</div>
     <div id="hud-lives">
@@ -84,12 +84,6 @@
         </section>
 
         <section class="pause-card">
-          <div class="pause-label">Average Speed</div>
-          <div id="pause-speed-value" class="pause-stat-value pause-stat-value-speed">0</div>
-          <div id="pause-speed-detail" class="pause-stat-detail">0 units/s average</div>
-        </section>
-
-        <section class="pause-card">
           <label class="pause-label" for="pause-sensitivity">Mouse Sensitivity</label>
           <input id="pause-sensitivity" type="range" min="8" max="60" step="1" value="24" />
           <div id="pause-sensitivity-value" class="pause-sensitivity-value">24</div>
@@ -147,6 +141,16 @@
 
   <div id="level-complete-screen" class="hidden">
     <div id="level-cutscene">
+      <div class="cutscene-fade cutscene-fade-a"></div>
+      <div class="cutscene-fade cutscene-fade-b"></div>
+      <div id="cutscene-copy">
+        <div id="cutscene-kicker">TRANSITION</div>
+        <div id="cutscene-route">
+          <span id="cutscene-from-label">SECTOR 01</span>
+          <span id="cutscene-route-arrow">→</span>
+          <span id="cutscene-to-label">SECTOR 02</span>
+        </div>
+      </div>
       <div id="cutscene-placeholder">[ CUTSCENE — PLACEHOLDER ]</div>
     </div>
     <div id="level-complete-menu">

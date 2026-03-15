@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { LEVEL_CONFIGS } from './LevelManager.js';
 
 /**
  * 3D level-select screen.
@@ -18,23 +19,43 @@ const LEVEL_DATA = [
   { id: 3, label: 'LEVEL 3', sub: '1 mi — BOSS',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
 ];
 
-const LEVEL_BRIEFINGS = {
-  1: {
-    tagline: 'Incoming debris field detected near Earth orbit. Clear the threat before time runs out.',
-    required: ['Destroy 75 pieces of trash'],
-    bonus: ['Destroy 10 pieces of trash above 200 m/s', 'Finish with over 90% shield integrity'],
-  },
-  2: {
-    tagline: 'The junk belt is thickening. Push deeper and keep the lanes clear.',
-    required: ['Destroy 100 pieces of trash'],
-    bonus: ['Destroy 15 pieces of trash above 400 m/s', 'Finish with over 90% shield integrity'],
-  },
-  3: {
-    tagline: 'Final approach. One mile out and closing fast.',
-    required: ['Destroy 120 pieces of trash'],
-    bonus: ['Destroy 20 pieces of trash above 500 m/s', 'Finish with over 90% shield integrity'],
-  },
-};
+function formatTrashLabel(count) {
+  return `Destroy ${count} ${count === 1 ? 'piece' : 'pieces'} of trash`;
+}
+
+function getBriefing(levelId) {
+  const config = LEVEL_CONFIGS[levelId];
+  const mission = config?.mission;
+  const primary = mission?.primary ?? {};
+  const bonus = mission?.bonus ?? {};
+  const required = [];
+  const bonusItems = [];
+
+  if (primary.reachTrashteroid) {
+    required.push('Reach Trashteroid');
+  }
+  if (primary.trashRequired) {
+    required.push(formatTrashLabel(primary.trashRequired));
+  }
+  if (primary.destroyTrashteroid) {
+    required.push('Destroy Trashteroid');
+  }
+
+  if (bonus.fastTrashRequired && bonus.fastSpeedDisplay) {
+    bonusItems.push(
+      `Destroy ${bonus.fastTrashRequired} pieces of trash above ${bonus.fastSpeedDisplay} m/s`
+    );
+  }
+  if (bonus.shieldThreshold != null) {
+    bonusItems.push(`Finish with over ${bonus.shieldThreshold}% shield integrity`);
+  }
+
+  return {
+    tagline: config?.briefingTagline ?? '',
+    required,
+    bonus: bonusItems,
+  };
+}
 
 // Smooth ease-in-out (cubic)
 function easeInOut(t) {
@@ -70,7 +91,7 @@ export class LevelSelect {
 
     /* ── lights ── */
     this.scene.add(new THREE.AmbientLight(0x334466, 1.2));
-    const sun = new THREE.DirectionalLight(0xffffff, 2);4
+    const sun = new THREE.DirectionalLight(0xffffff, 2);
     sun.position.set(10, 15, 10);
     this.scene.add(sun);
 
@@ -405,7 +426,7 @@ export class LevelSelect {
 
   _showBriefing(id) {
     const levelData = LEVEL_DATA.find(l => l.id === id);
-    const brief = LEVEL_BRIEFINGS[id];
+    const brief = getBriefing(id);
     this._pendingLevelId = id;
 
     this._briefingLevel.textContent = levelData ? levelData.label : `LEVEL ${id}`;
