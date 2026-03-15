@@ -29,6 +29,12 @@
     <ul id="objectives-list"></ul>
   </div>
 
+  <div id="tutorial-callout" class="hidden" aria-live="polite" aria-atomic="true">
+    <div id="tutorial-callout-kicker">TUTORIAL MODE</div>
+    <div id="tutorial-callout-title">Flight Controls</div>
+    <div id="tutorial-callout-text"></div>
+  </div>
+
   <div id="boss-indicator" class="hidden">
     <div id="boss-indicator-arrow">^</div>
     <div id="boss-indicator-dist">0 mi</div>
@@ -112,6 +118,15 @@
         <ul id="briefing-required-list"></ul>
         <div class="briefing-section-title briefing-bonus-title">BONUS OBJECTIVES</div>
         <ul id="briefing-bonus-list"></ul>
+      </div>
+      <div id="briefing-options" class="hidden">
+        <label id="briefing-tutorial-toggle" for="briefing-tutorial-mode">
+          <input id="briefing-tutorial-mode" type="checkbox" />
+          <span class="briefing-toggle-copy">
+            <span class="briefing-toggle-title">Tutorial Mode</span>
+            <span class="briefing-toggle-subtitle">Level 1 only. Adds guided slow-motion prompts.</span>
+          </span>
+        </label>
       </div>
       <button id="briefing-start-btn">START</button>
     </div>

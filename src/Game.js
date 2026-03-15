@@ -43,9 +43,27 @@ const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
 const PLAYER_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
 const DISPLAY_SPEED_MAX = 100;
+const TUTORIAL_TIME_SCALE = 0.35;
+const TUTORIAL_BEATS = {
+  controls: {
+    title: 'Flight Controls',
+    message: 'Move the mouse, hold W, tap A or D, and fire once to continue.',
+    placement: 'center',
+  },
+  target: {
+    title: 'Clear the Lane',
+    message: 'Shoot one piece of trash to continue.',
+    placement: 'center',
+  },
+  hud: {
+    title: 'Watch Your HUD',
+    message: 'Top-left shows objectives, top-center is the timer, and the bottom HUD tracks shield, speed, and boost. Hold Space with W to boost and continue.',
+    placement: 'center',
+  },
+};
 
 export class Game {
-  constructor(canvas, startLevel = 1) {
+  constructor(canvas, startLevel = 1, options = {}) {
     this.canvas = canvas;
     this.running = false;
     this._elapsed = 0;
@@ -61,6 +79,9 @@ export class Game {
     this._averageSpeedTime = 0;
     this._pauseUnlockArmed = false;
     this._startLevel = startLevel;
+    this._tutorialMode = this._startLevel === 1 && !!options.tutorialMode;
+    this._timeScale = 1;
+    this._tutorial = this._createTutorialState();
 
     // Level objectives & timer
     this._levelTimer = 180; // 3 minutes for level 1
@@ -171,6 +192,7 @@ export class Game {
     this.projectiles = new ProjectileManager(this.scene);
     this.levels = new LevelManager();
     this.hud = new HUD();
+    this.hud.hideTutorialCallout();
     this.starfield = new Starfield(this.scene);
     this._applySavedSensitivity();
     this._bindPauseControls();
@@ -205,6 +227,7 @@ export class Game {
     this.running = true;
     this.clock.start();
     this.levels.setLevel(this._startLevel);
+    this._resetTutorialState();
     this.hud.update(this.score, this.levels.current, this.lives);
     this._levelTimerRunning = true;
     this._loop();
@@ -269,12 +292,148 @@ export class Game {
     return this._averageSpeedSum / this._averageSpeedTime;
   }
 
+  _createTutorialState() {
+    return {
+      activePlayTime: 0,
+      firstShotSeen: false,
+      firstTrashDestroyedSeen: false,
+      controlsShown: false,
+      targetShown: false,
+      hudShown: false,
+      activeBeatId: null,
+      activeBeatProgress: null,
+    };
+  }
+
+  _resetTutorialState() {
+    this._timeScale = 1;
+    this._tutorial = this._createTutorialState();
+    this.hud.hideTutorialCallout();
+  }
+
+  _isTutorialActiveForCurrentLevel() {
+    return this._tutorialMode && this.levels.current === 1;
+  }
+
+  _clearActiveTutorialBeat() {
+    this._timeScale = 1;
+    if (this._tutorial.activeBeatId) {
+      this._tutorial.activeBeatId = null;
+      this._tutorial.activeBeatProgress = null;
+    }
+    this.hud.hideTutorialCallout();
+  }
+
+  _startTutorialBeat(beatId) {
+    const beat = TUTORIAL_BEATS[beatId];
+    if (!beat) return;
+
+    this._tutorial.activeBeatId = beatId;
+    this._tutorial.activeBeatProgress =
+      beatId === 'controls'
+        ? { mouseTravel: 0, thrustHeld: false, rollSeen: false, fired: false }
+        : beatId === 'target'
+          ? { armed: false, trashDestroyed: false }
+          : {};
+    this._timeScale = TUTORIAL_TIME_SCALE;
+    this.hud.showTutorialCallout(beat.title, beat.message, {
+      placement: beat.placement,
+    });
+  }
+
+  _completeActiveTutorialBeat() {
+    if (!this._tutorial.activeBeatId) return;
+    this._clearActiveTutorialBeat();
+    this._maybeStartTutorialBeat();
+  }
+
+  _maybeStartTutorialBeat() {
+    if (!this._isTutorialActiveForCurrentLevel() || this._tutorial.activeBeatId) return;
+
+    if (!this._tutorial.controlsShown && this._tutorial.activePlayTime >= 1.5) {
+      this._tutorial.controlsShown = true;
+      this._startTutorialBeat('controls');
+      return;
+    }
+
+    if (!this._tutorial.targetShown && this._tutorial.controlsShown) {
+      this._tutorial.targetShown = true;
+      this._startTutorialBeat('target');
+      return;
+    }
+
+    if (!this._tutorial.hudShown && this._tutorial.targetShown) {
+      this._tutorial.hudShown = true;
+      this._startTutorialBeat('hud');
+    }
+  }
+
+  _updateTutorial(rawDelta, hasPointerLock) {
+    if (this.paused) return;
+
+    if (!this._isTutorialActiveForCurrentLevel()) {
+      this._clearActiveTutorialBeat();
+      return;
+    }
+
+    if (hasPointerLock) {
+      this._tutorial.activePlayTime += rawDelta;
+    }
+
+    this._maybeStartTutorialBeat();
+  }
+
+  _noteTutorialShot() {
+    if (!this._isTutorialActiveForCurrentLevel()) return;
+    this._tutorial.firstShotSeen = true;
+    this._maybeStartTutorialBeat();
+  }
+
+  _noteTutorialTrashDestroyed() {
+    if (!this._isTutorialActiveForCurrentLevel()) return;
+    this._tutorial.firstTrashDestroyedSeen = true;
+    if (this._tutorial.activeBeatId === 'target') {
+      if (!this._tutorial.activeBeatProgress.armed) return;
+      this._tutorial.activeBeatProgress.trashDestroyed = true;
+      this._completeActiveTutorialBeat();
+      return;
+    }
+    this._maybeStartTutorialBeat();
+  }
+
+  _updateActiveTutorialProgress({ dx, dy, thrustHeld, rollSeen, fired, wantsBoost }) {
+    if (!this._isTutorialActiveForCurrentLevel() || !this._tutorial.activeBeatId) return;
+
+    if (this._tutorial.activeBeatId === 'controls') {
+      const progress = this._tutorial.activeBeatProgress;
+      progress.mouseTravel += Math.abs(dx) + Math.abs(dy);
+      progress.thrustHeld = progress.thrustHeld || thrustHeld;
+      progress.rollSeen = progress.rollSeen || rollSeen;
+      progress.fired = progress.fired || fired > 0;
+
+      if (progress.mouseTravel >= 14 && progress.thrustHeld && progress.rollSeen && progress.fired) {
+        this._completeActiveTutorialBeat();
+      }
+      return;
+    }
+
+    if (this._tutorial.activeBeatId === 'hud' && wantsBoost) {
+      this._completeActiveTutorialBeat();
+      return;
+    }
+
+    if (this._tutorial.activeBeatId === 'target') {
+      this._tutorial.activeBeatProgress.armed = true;
+    }
+  }
+
   _pauseGame() {
     if (!this.running || this.paused) return;
 
     this.paused = true;
     this.boostActive = false;
     this._pauseUnlockArmed = false;
+    this._clearActiveTutorialBeat();
     this._refreshPauseMenu();
     this.hud.setPauseVisible(true);
     if (this.crosshair) {
@@ -303,7 +462,7 @@ export class Game {
     if (!this.running) return;
     requestAnimationFrame(() => this._loop());
 
-    const delta = this.clock.getDelta();
+    const rawDelta = this.clock.getDelta();
     const hadPointerLock = this._pauseUnlockArmed;
     const hasPointerLock = this.input.pointerLocked;
 
@@ -323,6 +482,9 @@ export class Game {
       this._pauseUnlockArmed = true;
     }
 
+    this._updateTutorial(rawDelta, hasPointerLock);
+    const delta = rawDelta * this._timeScale;
+
     if (this.paused) {
       this.hud.updateBoostBar(this.boostCharge, false);
       this.input.resetPressed();
@@ -337,12 +499,13 @@ export class Game {
 
     // Mouse → pitch / yaw
     const { dx, dy } = this.input.consumeMouseDelta();
-    this.player.rotate(dx, dy, delta);
+    this.player.rotate(dx, dy, rawDelta);
+    const thrustHeld = this.input.isDown('w');
 
     // W → forward thrust
-    const wantsBoost = this.input.isDown('w') && this.input.isDown(' ') && this.boostCharge > 0;
+    const wantsBoost = thrustHeld && this.input.isDown(' ') && this.boostCharge > 0;
     this.boostActive = wantsBoost;
-    if (this.input.isDown('w')) {
+    if (thrustHeld) {
       const boostMultiplier = wantsBoost ? this.player.boostMultiplier : 1;
       this.player.thrust(delta, boostMultiplier);
     }
@@ -360,14 +523,17 @@ export class Game {
     let rollInput = 0;
     if (this.input.isDown('a')) rollInput += 1;   // roll left
     if (this.input.isDown('d')) rollInput -= 1;   // roll right
+    const rollSeen = rollInput !== 0 || this.input.wasPressed('a') || this.input.wasPressed('d');
     this.player.manualRollInput = rollInput;
 
     // Fire vaporizer — hold Space or left mouse button for rapid-fire
+    let fired = 0;
     if (this.input.isDown('mouseleft')) {
       const fireDirection = this._getAssistedFireDirection();
-      const fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
+      fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
       if (fired) {
         this.shotsFired += fired;
+        this._noteTutorialShot();
         this._refreshPauseMenu();
         this.player.applyRecoil(this.projectiles.cooldownTime);
         // spawn a very short muzzle particle burst attached to the player
@@ -375,11 +541,13 @@ export class Game {
       }
     }
 
+    this._updateActiveTutorialProgress({ dx, dy, thrustHeld, rollSeen, fired, wantsBoost });
+
     // Update subsystems
     this.player.update(delta);
     this.projectiles.update(delta);
-    this._averageSpeedSum += this.player.velocity.length() * delta;
-    this._averageSpeedTime += delta;
+    this._averageSpeedSum += this.player.velocity.length() * rawDelta;
+    this._averageSpeedTime += rawDelta;
     const playerPos = this.player.mesh.position;
     const playerQuat = this.player.baseQuaternion;
     this.asteroidField.update(delta, playerPos);
@@ -504,6 +672,7 @@ export class Game {
           this.score += points;
           this.trashHits++;
           this._trashDestroyedRequired++;
+          this._noteTutorialTrashDestroyed();
           if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
             this._trashDestroyedFast++;
           }
