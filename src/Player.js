@@ -25,8 +25,8 @@ export class Player {
     this.rollReturnSpeed = 3.0;
     this.pitchOnPitch = 0.3;       // cosmetic pitch from pitch input (subtle)
     this.dampening = 0.98;
-    this.manualRollSpeed = 3.0;     // how fast A/D rolls the ship
-    this.maxRoll = Math.PI / 3;     // ~25 degrees max roll either way
+    this.manualRollSpeed = 5.0;     // how fast A/D rolls the ship
+    this.maxRoll = Math.PI / 2.1;     // ~25 degrees max roll either way
     this.rollLiftPower = 180;       // lift force when rolled (swoop strength)
     this.rollYawCoupling = 1;     // how much roll induces yaw (banking turn)
 
