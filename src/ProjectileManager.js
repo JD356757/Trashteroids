@@ -105,6 +105,14 @@ export class ProjectileManager {
     return this.active;
   }
 
+  clear() {
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      this.scene.remove(this.active[i].mesh);
+    }
+    this.active.length = 0;
+    this.cooldown = 0;
+  }
+
   remove(index) {
     const p = this.active[index];
     if (p) {

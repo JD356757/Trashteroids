@@ -277,6 +277,7 @@ body::before {
 
 #level-cutscene {
   flex: 1;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -284,19 +285,84 @@ body::before {
     radial-gradient(ellipse at 50% 40%, rgba(80, 160, 255, 0.08), transparent 60%),
     #010614;
   border-bottom: 1px solid rgba(184, 237, 255, 0.15);
+  overflow: hidden;
 }
 
 #cutscene-placeholder {
-  font-size: 14px;
-  letter-spacing: 0.4em;
-  color: rgba(184, 237, 255, 0.35);
-  text-transform: uppercase;
-  animation: cutscenePulse 2.4s ease-in-out infinite alternate;
+  display: none;
 }
 
-@keyframes cutscenePulse {
-  from { opacity: 0.4; }
-  to   { opacity: 0.9; }
+.cutscene-fade {
+  position: absolute;
+  inset: -12%;
+  pointer-events: none;
+  opacity: 0.4;
+}
+
+.cutscene-fade-a {
+  background:
+    radial-gradient(circle at 26% 42%, rgba(128, 219, 255, 0.32), transparent 26%),
+    radial-gradient(circle at 72% 58%, rgba(255, 193, 145, 0.22), transparent 28%),
+    linear-gradient(135deg, rgba(11, 24, 58, 0.92), rgba(3, 8, 20, 0.8));
+  animation: cutsceneCrossFadeA 2.8s ease-in-out infinite alternate;
+}
+
+.cutscene-fade-b {
+  background:
+    radial-gradient(circle at 74% 34%, rgba(255, 164, 116, 0.32), transparent 24%),
+    radial-gradient(circle at 38% 70%, rgba(128, 219, 255, 0.2), transparent 30%),
+    linear-gradient(215deg, rgba(7, 16, 40, 0.86), rgba(1, 4, 12, 0.96));
+  animation: cutsceneCrossFadeB 2.8s ease-in-out infinite alternate;
+}
+
+#cutscene-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+}
+
+#cutscene-kicker {
+  font-size: 12px;
+  letter-spacing: 0.42em;
+  color: rgba(184, 237, 255, 0.62);
+}
+
+#cutscene-route {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: clamp(28px, 4vw, 52px);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #f6fbff;
+  text-shadow:
+    0 0 24px rgba(184, 237, 255, 0.4),
+    0 0 56px rgba(184, 237, 255, 0.16);
+}
+
+#cutscene-route-arrow {
+  color: rgba(255, 213, 176, 0.92);
+  animation: cutsceneArrowPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cutsceneCrossFadeA {
+  from { opacity: 0.22; transform: scale(1); }
+  to   { opacity: 0.6; transform: scale(1.06); }
+}
+
+@keyframes cutsceneCrossFadeB {
+  from { opacity: 0.58; transform: scale(1.05); }
+  to   { opacity: 0.18; transform: scale(1); }
+}
+
+@keyframes cutsceneArrowPulse {
+  from { opacity: 0.42; transform: translateX(-3px); }
+  to   { opacity: 1; transform: translateX(3px); }
 }
 
 #level-complete-menu {
@@ -1072,7 +1138,7 @@ body::before {
 .pause-grid {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   margin-bottom: 24px;
 }
@@ -1271,6 +1337,27 @@ body::before {
   #start-btn {
     min-width: min(220px, 100%);
     font-size: 11px;
+  }
+
+  #cutscene-route {
+    flex-direction: column;
+    gap: 12px;
+    font-size: clamp(22px, 7vw, 34px);
+    letter-spacing: 0.14em;
+  }
+
+  #level-complete-menu {
+    padding: 32px 20px 38px;
+  }
+
+  #level-complete-actions {
+    width: 100%;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  #level-complete-actions button {
+    width: 100%;
   }
 
   #hud {

@@ -1,13 +1,25 @@
-import * as THREE from 'three';
-
 /**
  * Manages level configs and current level state.
- * Level progression is driven entirely by objective completion in Game.js.
+ * Objective and boss behavior both key off this shared config.
  */
 
-const LEVEL_CONFIGS = {
+export const LEVEL_CONFIGS = {
   1: {
     label: 'LEVEL 1 - 15,000 mi',
+    briefingTagline: 'Incoming debris field detected near Earth orbit. Clear the threat before time runs out.',
+    timer: 180,
+    mission: {
+      successTitle: 'SECTOR 1 CLEARED',
+      successSubtitle: 'Required objective complete.',
+      primary: {
+        trashRequired: 75,
+      },
+      bonus: {
+        fastTrashRequired: 3,
+        fastSpeedDisplay: 200,
+        shieldThreshold: 90,
+      },
+    },
     spawn: {
       maxActive: 22,
       bootstrapActive: 10,
@@ -30,8 +42,24 @@ const LEVEL_CONFIGS = {
   },
   2: {
     label: 'LEVEL 2 - 5,000 mi',
+    briefingTagline: 'Push through the junk belt, reach Trashteroid, and strip away its outer debris screen.',
+    timer: 240,
+    mission: {
+      successTitle: 'SECTOR 2 CLEARED',
+      successSubtitle: 'Trashteroid reached. Final assault window open.',
+      primary: {
+        trashRequired: 40,
+        reachTrashteroid: true,
+        reachDistanceDisplay: 60,
+      },
+      bonus: {
+        fastTrashRequired: 4,
+        fastSpeedDisplay: 250,
+        shieldThreshold: 90,
+      },
+    },
     spawn: {
-      maxActive: 30,
+      maxActive: 26,
       bootstrapActive: 12,
       forwardSpawnMin: 1025,
       forwardSpawnMax: 1450,
@@ -52,13 +80,38 @@ const LEVEL_CONFIGS = {
   },
   3: {
     label: 'LEVEL 3 - 1 mi [BOSS]',
+    briefingTagline: 'Final approach. Trashteroid is awake now, and it is firing back.',
+    timer: 300,
+    mission: {
+      successTitle: 'TRASHTEROID DESTROYED',
+      successSubtitle: 'Earth orbit is clear.',
+      primary: {
+        destroyTrashteroid: true,
+      },
+      bonus: {
+        fastTrashRequired: 5,
+        fastSpeedDisplay: 300,
+        shieldThreshold: 90,
+      },
+    },
+    boss: {
+      maxHealth: 140,
+      startDistance: 900,
+      strafeAmplitude: 180,
+      verticalAmplitude: 110,
+      moveSharpness: 1.9,
+      shotInterval: 1.35,
+      projectileSpeed: 620,
+      projectileDamage: 12,
+      projectileLifetime: 5.5,
+    },
     spawn: {
-      maxActive: 38,
-      bootstrapActive: 14,
-      forwardSpawnMin: 1080,
-      forwardSpawnMax: 1560,
-      lateralSpread: 320,
-      verticalRange: 160,
+      maxActive: 18,
+      bootstrapActive: 8,
+      forwardSpawnMin: 980,
+      forwardSpawnMax: 1425,
+      lateralSpread: 220,
+      verticalRange: 140,
       minGap: 84,
       modelScale: 16.2,
       scaleMin: 0.88,
@@ -80,14 +133,35 @@ export class LevelManager {
   }
 
   setLevel(n) {
-    this.current = n;
+    this.current = LEVEL_CONFIGS[n] ? n : 1;
+  }
+
+  getConfig(level = this.current) {
+    return LEVEL_CONFIGS[level] ?? LEVEL_CONFIGS[1];
+  }
+
+  getCurrentConfig() {
+    return this.getConfig(this.current);
   }
 
   getSpawnConfig() {
-    return LEVEL_CONFIGS[this.current].spawn;
+    return this.getCurrentConfig().spawn;
+  }
+
+  getMissionConfig() {
+    return this.getCurrentConfig().mission;
+  }
+
+  getTimerSeconds() {
+    return this.getCurrentConfig().timer ?? 0;
   }
 
   getLabel() {
-    return LEVEL_CONFIGS[this.current].label;
+    return this.getCurrentConfig().label;
+  }
+
+  getNextLevel(level = this.current) {
+    const nextLevel = level + 1;
+    return LEVEL_CONFIGS[nextLevel] ? nextLevel : null;
   }
 }
