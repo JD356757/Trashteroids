@@ -116,10 +116,15 @@ export class LevelSelect {
     this._briefingTagline = document.getElementById('briefing-tagline');
     this._briefingRequiredList = document.getElementById('briefing-required-list');
     this._briefingBonusList = document.getElementById('briefing-bonus-list');
+    this._briefingOptions = document.getElementById('briefing-options');
+    this._briefingTutorialToggle = document.getElementById('briefing-tutorial-mode');
     this._pendingLevelId = null;
     document.getElementById('briefing-start-btn').addEventListener('click', () => {
       this._briefingEl.classList.add('hidden');
-      this.onLevelChosen(this._pendingLevelId);
+      this.onLevelChosen({
+        levelId: this._pendingLevelId,
+        tutorialMode: this._pendingLevelId === 1 && !!this._briefingTutorialToggle?.checked,
+      });
     });
 
     /* ── bind events ── */
@@ -143,6 +148,9 @@ export class LevelSelect {
     this._flightProgress = 1;
     this._orbitAngle = 0;
     this._hidePopup();
+    if (this._briefingTutorialToggle) {
+      this._briefingTutorialToggle.checked = false;
+    }
 
     window.addEventListener('click', this._onClick);
     window.addEventListener('resize', this._onResize);
@@ -415,6 +423,13 @@ export class LevelSelect {
       const li = document.createElement('li');
       li.textContent = item;
       this._briefingBonusList.appendChild(li);
+    }
+
+    if (this._briefingOptions) {
+      this._briefingOptions.classList.toggle('hidden', id !== 1);
+    }
+    if (this._briefingTutorialToggle) {
+      this._briefingTutorialToggle.checked = false;
     }
 
     this._briefingEl.classList.remove('hidden');

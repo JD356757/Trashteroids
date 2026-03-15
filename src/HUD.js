@@ -31,6 +31,9 @@ export class HUD {
     this.levelTimerEl = document.getElementById('level-timer');
     this.objectivesPanel = document.getElementById('objectives-panel');
     this.objectivesList = document.getElementById('objectives-list');
+    this.tutorialCallout = document.getElementById('tutorial-callout');
+    this.tutorialCalloutTitle = document.getElementById('tutorial-callout-title');
+    this.tutorialCalloutText = document.getElementById('tutorial-callout-text');
     if (this.minimapCanvas) {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
@@ -294,6 +297,21 @@ export class HUD {
     if (this.boostBarLabel) {
       this.boostBarLabel.textContent = 'BOOST';
     }
+  }
+
+  showTutorialCallout(title, text, options = {}) {
+    if (!this.tutorialCallout || !this.tutorialCalloutTitle || !this.tutorialCalloutText) return;
+    const placement = options.placement ?? 'center';
+    this.tutorialCalloutTitle.textContent = title;
+    this.tutorialCalloutText.textContent = text;
+    this.tutorialCallout.dataset.placement = placement;
+    this.tutorialCallout.classList.remove('hidden');
+  }
+
+  hideTutorialCallout() {
+    if (!this.tutorialCallout) return;
+    this.tutorialCallout.classList.add('hidden');
+    delete this.tutorialCallout.dataset.placement;
   }
 
   setPauseVisible(visible) {

@@ -12,11 +12,11 @@ const introScene = new IntroScene(canvas);
 introScene.show();
 
 /* ── Level Select Screen ── */
-const levelSelect = new LevelSelect(canvas, (levelId) => {
+const levelSelect = new LevelSelect(canvas, ({ levelId, tutorialMode }) => {
   // Player confirmed a level — launch the game
   crosshair.classList.remove('hidden');
   canvas.requestPointerLock();
-  game = new Game(canvas, levelId);
+  game = new Game(canvas, levelId, { tutorialMode });
   game.start();
 });
 
