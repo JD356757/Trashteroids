@@ -885,6 +885,22 @@ body::before {
   display: none !important;
 }
 
+#screen-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(14, 28, 56, 0.2), rgba(0, 0, 0, 0.95) 62%),
+    #000;
+  transition: opacity 420ms ease;
+}
+
+#screen-fade.visible {
+  opacity: 1;
+}
+
 #level-popup {
   position: fixed;
   bottom: 32px;
