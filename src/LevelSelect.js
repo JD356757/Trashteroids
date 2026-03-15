@@ -22,7 +22,7 @@ const LEVEL_BRIEFINGS = {
   1: {
     tagline: 'Incoming debris field detected near Earth orbit. Clear the threat before time runs out.',
     required: ['Destroy 75 pieces of trash'],
-    bonus: ['Destroy 10 pieces of trash above 300 m/s', 'Finish with over 90% shield integrity'],
+    bonus: ['Destroy 10 pieces of trash above 200 m/s', 'Finish with over 90% shield integrity'],
   },
   2: {
     tagline: 'The junk belt is thickening. Push deeper and keep the lanes clear.',
