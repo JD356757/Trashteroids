@@ -7,48 +7,54 @@ export class InputHandler {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.pointerLocked = false;
-
-    window.addEventListener('keydown', (e) => {
+    this._pointerLockCanvas = null;
+    this._onKeyDown = (e) => {
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (!this._held[key]) {
         this._pressed[key] = true;
       }
       this._held[key] = true;
-    });
-
-    window.addEventListener('keyup', (e) => {
+    };
+    this._onKeyUp = (e) => {
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       this._held[key] = false;
-    });
-
-    // Pointer lock state tracking
-    document.addEventListener('pointerlockchange', () => {
+    };
+    this._onPointerLockChange = () => {
       this.pointerLocked = !!document.pointerLockElement;
-    });
-
-    // Accumulate mouse movement while locked
-    document.addEventListener('mousemove', (e) => {
+    };
+    this._onMouseMove = (e) => {
       if (!this.pointerLocked) return;
       this.mouseDX += e.movementX;
       this.mouseDY += e.movementY;
-    });
+    };
+    this._onMouseDown = (e) => {
+      if (e.button === 0) this._held.mouseleft = true;
+    };
+    this._onMouseUp = (e) => {
+      if (e.button === 0) this._held.mouseleft = false;
+    };
+    this._onCanvasClick = () => {
+      if (!this.pointerLocked && this._pointerLockCanvas) {
+        this._pointerLockCanvas.requestPointerLock();
+      }
+    };
 
-    // Track left mouse button
-    document.addEventListener('mousedown', (e) => {
-      if (e.button === 0) this._held['mouseleft'] = true;
-    });
-    document.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this._held['mouseleft'] = false;
-    });
+    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keyup', this._onKeyUp);
+    document.addEventListener('pointerlockchange', this._onPointerLockChange);
+    document.addEventListener('mousemove', this._onMouseMove);
+    document.addEventListener('mousedown', this._onMouseDown);
+    document.addEventListener('mouseup', this._onMouseUp);
   }
 
   /** Request pointer lock on a canvas element */
   requestPointerLock(canvas) {
-    canvas.addEventListener('click', () => {
-      if (!this.pointerLocked) {
-        canvas.requestPointerLock();
-      }
-    });
+    if (this._pointerLockCanvas === canvas) return;
+    if (this._pointerLockCanvas) {
+      this._pointerLockCanvas.removeEventListener('click', this._onCanvasClick);
+    }
+    this._pointerLockCanvas = canvas;
+    canvas.addEventListener('click', this._onCanvasClick);
   }
 
   /** True while key is held */
@@ -80,5 +86,18 @@ export class InputHandler {
   /** Call once per frame after processing input */
   resetPressed() {
     this._pressed = {};
+  }
+
+  dispose() {
+    window.removeEventListener('keydown', this._onKeyDown);
+    window.removeEventListener('keyup', this._onKeyUp);
+    document.removeEventListener('pointerlockchange', this._onPointerLockChange);
+    document.removeEventListener('mousemove', this._onMouseMove);
+    document.removeEventListener('mousedown', this._onMouseDown);
+    document.removeEventListener('mouseup', this._onMouseUp);
+    if (this._pointerLockCanvas) {
+      this._pointerLockCanvas.removeEventListener('click', this._onCanvasClick);
+      this._pointerLockCanvas = null;
+    }
   }
 }
