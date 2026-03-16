@@ -5,8 +5,8 @@
 
 export const LEVEL_CONFIGS = {
   1: {
-    label: 'LEVEL 1 - 15,000 mi',
-    briefingTagline: 'Incoming debris field detected near Earth orbit. Clear the threat before time runs out.',
+    label: 'LEVEL 1 - 15,000 miles to trashteroid',
+    briefingTagline: 'Giant fields of trash detected near Earth orbit. Clear the pollution before time runs out.',
     timer: 180,
     mission: {
       successTitle: 'SECTOR 1 CLEARED',
@@ -41,8 +41,8 @@ export const LEVEL_CONFIGS = {
     },
   },
   2: {
-    label: 'LEVEL 2 - 5,000 mi',
-    briefingTagline: 'Push through the junk belt, reach Trashteroid, and strip away its outer debris screen.',
+    label: 'LEVEL 2 - 5,000 miles to trashteroid',
+    briefingTagline: 'Make your way to the trashteroid. Clear the path by destroying more trash.',
     timer: 240,
     mission: {
       successTitle: 'SECTOR 2 CLEARED',
@@ -79,8 +79,8 @@ export const LEVEL_CONFIGS = {
     },
   },
   3: {
-    label: 'LEVEL 3 - 1 mi [BOSS]',
-    briefingTagline: 'Final approach. Trashteroid is awake now, and it is firing back.',
+    label: 'LEVEL 3 - 0.1 mi from the trashteroid',
+    briefingTagline: 'The trashteroid is heading for Earth, and chunks of trash are flying off of it. Destroy the trashteroid and its byproducts before it reaches Earth. Be quick… TIME IS RUNNING OUT!',
     timer: 300,
     mission: {
       successTitle: 'TRASHTEROID DESTROYED',

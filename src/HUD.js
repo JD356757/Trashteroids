@@ -30,9 +30,13 @@ export class HUD {
     this.levelTimerEl = document.getElementById('level-timer');
     this.objectivesPanel = document.getElementById('objectives-panel');
     this.objectivesList = document.getElementById('objectives-list');
+    this.objectivesRequiredList = document.getElementById('objectives-required-list');
+    this.objectivesOptionalTitle = document.getElementById('objectives-optional-title');
+    this.objectivesOptionalList = document.getElementById('objectives-optional-list');
     this.tutorialCallout = document.getElementById('tutorial-callout');
     this.tutorialCalloutTitle = document.getElementById('tutorial-callout-title');
     this.tutorialCalloutText = document.getElementById('tutorial-callout-text');
+    this.tutorialCalloutRequirements = document.getElementById('tutorial-callout-requirements');
     if (this.minimapCanvas) {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
@@ -41,6 +45,8 @@ export class HUD {
     this._flashTimer = null;
     this._fadeTimer = null;
     this._speedSamples = [];
+    this._tutorialCalloutHideTimer = null;
+    this._tutorialCalloutAnimationFrame = null;
   }
 
   setGameplayVisible(visible) {
@@ -286,8 +292,65 @@ export class HUD {
 
   // objectives: array of { label, current, target, complete, bonus }
   updateObjectives(objectives) {
-    if (!this.objectivesPanel || !this.objectivesList) return;
+    if (!this.objectivesPanel) return;
     this.objectivesPanel.classList.remove('hidden');
+
+    const required = objectives.filter(o => !o.bonus);
+    const optional = objectives.filter(o => o.bonus);
+
+    // If the new split lists exist, render into them. Otherwise fall back to old single list.
+    if (this.objectivesRequiredList && this.objectivesOptionalList && this.objectivesOptionalTitle) {
+      this.objectivesRequiredList.innerHTML = '';
+      this.objectivesOptionalList.innerHTML = '';
+
+      for (const obj of required) {
+        const li = document.createElement('li');
+        if (obj.complete) li.classList.add('complete');
+        if (obj.failed) li.classList.add('failed');
+
+        const check = document.createElement('span');
+        check.className = 'obj-check';
+        check.textContent = obj.complete ? '✓' : (obj.failed ? '✗' : '○');
+
+        const text = document.createElement('span');
+        const progress = obj.target > 1 ? ` (${Math.min(obj.current, obj.target)}/${obj.target})` : '';
+        text.textContent = obj.label + progress;
+
+        li.appendChild(check);
+        li.appendChild(text);
+        this.objectivesRequiredList.appendChild(li);
+      }
+
+      if (optional.length > 0) {
+        this.objectivesOptionalTitle.classList.remove('hidden');
+        this.objectivesOptionalList.classList.remove('hidden');
+        for (const obj of optional) {
+          const li = document.createElement('li');
+          li.classList.add('bonus');
+          if (obj.complete) li.classList.add('complete');
+          if (obj.failed) li.classList.add('failed');
+
+          const check = document.createElement('span');
+          check.className = 'obj-check';
+          check.textContent = obj.complete ? '✓' : (obj.failed ? '✗' : '◇');
+
+          const text = document.createElement('span');
+          const progress = obj.target > 1 ? ` (${Math.min(obj.current, obj.target)}/${obj.target})` : '';
+          text.textContent = obj.label + progress;
+
+          li.appendChild(check);
+          li.appendChild(text);
+          this.objectivesOptionalList.appendChild(li);
+        }
+      } else {
+        this.objectivesOptionalTitle.classList.add('hidden');
+        this.objectivesOptionalList.classList.add('hidden');
+      }
+      return;
+    }
+
+    // Fallback for older markup: render everything into single list
+    if (!this.objectivesList) return;
     this.objectivesList.innerHTML = '';
     for (const obj of objectives) {
       const li = document.createElement('li');
@@ -320,19 +383,92 @@ export class HUD {
     }
   }
 
+  _renderTutorialRequirements(requirements = []) {
+    if (!this.tutorialCalloutRequirements) return;
+
+    this.tutorialCalloutRequirements.textContent = '';
+
+    for (let i = 0; i < requirements.length; i++) {
+      const requirement = requirements[i];
+      const li = document.createElement('li');
+      li.className = 'tutorial-callout-requirement';
+      if (requirement.complete) {
+        li.classList.add('checked');
+      }
+
+      const check = document.createElement('span');
+      check.className = 'tutorial-callout-check';
+      check.textContent = requirement.complete ? '✓' : '';
+
+      const text = document.createElement('span');
+      text.className = 'tutorial-callout-requirement-label';
+      text.textContent = requirement.label;
+
+      li.appendChild(check);
+      li.appendChild(text);
+      this.tutorialCalloutRequirements.appendChild(li);
+    }
+  }
+
   showTutorialCallout(title, text, options = {}) {
     if (!this.tutorialCallout || !this.tutorialCalloutTitle || !this.tutorialCalloutText) return;
     const placement = options.placement ?? 'center';
+    const animate = options.animate ?? false;
+
+    if (this._tutorialCalloutHideTimer) {
+      clearTimeout(this._tutorialCalloutHideTimer);
+      this._tutorialCalloutHideTimer = null;
+    }
+    if (this._tutorialCalloutAnimationFrame) {
+      cancelAnimationFrame(this._tutorialCalloutAnimationFrame);
+      this._tutorialCalloutAnimationFrame = null;
+    }
+
     this.tutorialCalloutTitle.textContent = title;
     this.tutorialCalloutText.textContent = text;
+    this._renderTutorialRequirements(options.requirements ?? []);
     this.tutorialCallout.dataset.placement = placement;
+    this.tutorialCallout.classList.remove('hidden', 'tutorial-callout-leaving', 'tutorial-callout-entering');
+
+    if (animate) {
+      this.tutorialCallout.classList.add('tutorial-callout-entering');
+      this._tutorialCalloutAnimationFrame = window.requestAnimationFrame(() => {
+        this.tutorialCallout.classList.remove('tutorial-callout-entering');
+        this._tutorialCalloutAnimationFrame = null;
+      });
+    }
+
     this.tutorialCallout.classList.remove('hidden');
   }
 
-  hideTutorialCallout() {
+  hideTutorialCallout(options = {}) {
     if (!this.tutorialCallout) return;
-    this.tutorialCallout.classList.add('hidden');
-    delete this.tutorialCallout.dataset.placement;
+    const animated = options.animated ?? false;
+
+    if (this._tutorialCalloutHideTimer) {
+      clearTimeout(this._tutorialCalloutHideTimer);
+      this._tutorialCalloutHideTimer = null;
+    }
+    if (this._tutorialCalloutAnimationFrame) {
+      cancelAnimationFrame(this._tutorialCalloutAnimationFrame);
+      this._tutorialCalloutAnimationFrame = null;
+    }
+
+    if (!animated) {
+      this.tutorialCallout.classList.remove('tutorial-callout-entering', 'tutorial-callout-leaving');
+      this.tutorialCallout.classList.add('hidden');
+      delete this.tutorialCallout.dataset.placement;
+      return;
+    }
+
+    this.tutorialCallout.classList.remove('tutorial-callout-entering');
+    this.tutorialCallout.classList.add('tutorial-callout-leaving');
+    this._tutorialCalloutHideTimer = window.setTimeout(() => {
+      this.tutorialCallout.classList.add('hidden');
+      this.tutorialCallout.classList.remove('tutorial-callout-leaving');
+      delete this.tutorialCallout.dataset.placement;
+      this._tutorialCalloutHideTimer = null;
+    }, 220);
   }
 
   setPauseVisible(visible) {
@@ -345,7 +481,7 @@ export class HUD {
     if (!this.pauseAccuracyValue || !this.pauseAccuracyDetail) return;
     const percent = shotsFired > 0 ? Math.round(((trashHits / shotsFired) * 100) * 4) : 0;
     this.pauseAccuracyValue.textContent = `${percent.toFixed(shotsFired > 0 ? 1 : 0)}%`;
-    this.pauseAccuracyDetail.textContent = `${trashHits} trash hits / ${shotsFired} shots`;
+    this.pauseAccuracyDetail.textContent = `${trashHits} trash cleared / ${shotsFired} vaporize bursts`;
   }
 
   setPauseSensitivity(rawSensitivity) {
