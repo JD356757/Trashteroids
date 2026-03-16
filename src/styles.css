@@ -24,6 +24,7 @@
 
 body {
   overflow: hidden;
+  cursor: url('/cursor.png'), auto;
   background:
     radial-gradient(circle at 18% 18%, rgba(151, 214, 255, 0.22), transparent 28%),
     radial-gradient(circle at 82% 14%, rgba(255, 194, 174, 0.18), transparent 24%),
@@ -164,7 +165,7 @@ body::before {
   padding: 16px 18px;
   border: 1px solid rgba(184, 237, 255, 0.2);
   background: rgba(8, 20, 46, 0.82);
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
 }
 
 #briefing-tutorial-mode {
@@ -172,7 +173,7 @@ body::before {
   height: 18px;
   margin: 0;
   accent-color: #8ff7ef;
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
   flex-shrink: 0;
 }
 
@@ -248,7 +249,7 @@ body::before {
   border-radius: 3px;
   background: rgba(10, 26, 60, 0.95);
   color: var(--hud-cyan);
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
   animation: briefing-pulse 2s ease-in-out infinite;
   transition: background 0.15s;
   margin-top: 8px;
@@ -413,7 +414,7 @@ body::before {
   border-radius: 4px;
   background: rgba(12, 24, 50, 0.9);
   color: var(--hud-cyan);
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
   transition: background 0.15s, box-shadow 0.15s;
 }
 
@@ -760,7 +761,7 @@ body::before {
   background: rgba(9, 18, 28, 0.9);
   border: 2px solid rgba(124, 232, 255, 0.42);
   border-radius: 3px;
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
   letter-spacing: 2px;
   box-shadow:
     0 0 0 1px rgba(8, 14, 22, 0.9) inset,
@@ -946,7 +947,7 @@ body::before {
   font-size: 12px;
   padding: 10px 24px;
   border: none;
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
   letter-spacing: 1px;
   border-radius: 4px;
   transition: background 0.2s, transform 0.1s;
@@ -1210,7 +1211,7 @@ body::before {
 #pause-sensitivity {
   width: 100%;
   accent-color: #8ff7ef;
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
 }
 
 .pause-sensitivity-value {
@@ -1242,7 +1243,7 @@ body::before {
   font-weight: 700;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  cursor: pointer;
+  cursor: url('/cursor.png'), pointer;
   box-shadow:
     0 16px 34px rgba(5, 11, 22, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.14);

@@ -71,6 +71,9 @@ const levelSelect = new LevelSelect(canvas, launchGame);
 function showLevelSelect() {
   if (overlay.classList.contains('hidden')) return;
   introScene.hide();
+  // Ensure any pointer lock is released so the cursor is visible on the level-select UI
+  if (document.pointerLockElement) document.exitPointerLock();
+  if (crosshair) crosshair.classList.add('hidden');
   overlay.classList.add('hidden');
   levelSelect.show();
 }
