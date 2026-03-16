@@ -52,26 +52,52 @@ const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
 const PLAYER_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
 const DISPLAY_DISTANCE_SCALE = 0.45;
-const TUTORIAL_TIME_SCALE = 0.35;
+const TUTORIAL_TIME_SCALE = 1.0;
+const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
+const TUTORIAL_OBJECTIVES_HINT_DURATION = 3.2;
 const TRASHTEROID_APPROACH_DISTANCE_WORLD = 5000 / DISPLAY_DISTANCE_SCALE;
 const TRASHTEROID_HIT_RADIUS = 72;
 const TRASHTEROID_SURFACE_OFFSET = 58;
 const TRASHTEROID_SCORE_PER_HIT = 35;
 const TRASHTEROID_SCORE_ON_DESTROY = 5000;
 const TUTORIAL_BEATS = {
-  controls: {
-    title: 'Flight Controls',
-    message: 'Move the mouse, hold W, tap A or D, and fire once to continue.',
+  move: {
+    title: 'Move & Look',
+    message: 'Move the mouse to look around. Hold W to fly forward.',
     placement: 'center',
+    requirements: [
+      { id: 'look', label: 'Look around with the mouse' },
+      { id: 'thrust', label: 'Hold W to fly forward' },
+    ],
   },
-  target: {
-    title: 'Clear the Lane',
-    message: 'Shoot one piece of trash to continue.',
+  roll: {
+    title: 'Roll',
+    message: 'Press A or D to roll your ship to the side.',
     placement: 'center',
+    requirements: [
+      { id: 'roll', label: 'Press A or D to roll' },
+    ],
   },
-  hud: {
-    title: 'Watch Your HUD',
-    message: 'Top-left shows objectives, top-center is the timer, and the bottom HUD tracks shield, speed, and boost. Hold Space with W to boost and continue.',
+  boost: {
+    title: 'Boost',
+    message: 'Hold Space while flying forward to boost. Use it wisely — it drains while active, and recharges when not in use.',
+    placement: 'center',
+    requirements: [
+      { id: 'boost', label: 'Hold Space while moving forward' },
+    ],
+  },
+  fire: {
+    title: 'Vaporize',
+    message: 'Hold left click to vaporize trash!',
+    placement: 'center',
+    requirements: [
+      { id: 'fire', label: 'Hold left click to use your vaporizer' },
+      { id: 'trash', label: 'Destroy a piece of trash' },
+    ],
+  },
+  objectives: {
+    title: 'Objectives',
+    message: 'Look at the top-left to view your objectives. That\'s it for the tutorial... you\'re on your own now!.',
     placement: 'center',
   },
 };
@@ -1077,7 +1103,7 @@ export class Game {
     const fastDone = fastRequired > 0 ? this._trashDestroyedFast >= fastRequired : false;
     if (fastRequired > 0 && fastSpeedDisplay > 0) {
       objectives.push({
-        label: `Destroy ${fastRequired} trash above ${fastSpeedDisplay} m/s`,
+        label: `Destroy ${fastRequired} trash while flying at ${fastSpeedDisplay}+ m/s`,
         current: this._trashDestroyedFast,
         target: fastRequired,
         complete: fastDone,
@@ -1125,11 +1151,12 @@ export class Game {
   _createTutorialState() {
     return {
       activePlayTime: 0,
-      firstShotSeen: false,
-      firstTrashDestroyedSeen: false,
-      controlsShown: false,
-      targetShown: false,
-      hudShown: false,
+      moveShown: false,
+      rollShown: false,
+      boostShown: false,
+      fireShown: false,
+      objectivesShown: false,
+      transitionRemaining: 0,
       activeBeatId: null,
       activeBeatProgress: null,
     };
@@ -1147,6 +1174,7 @@ export class Game {
 
   _clearActiveTutorialBeat() {
     this._timeScale = 1;
+    this._tutorial.transitionRemaining = 0;
     if (this._tutorial.activeBeatId) {
       this._tutorial.activeBeatId = null;
       this._tutorial.activeBeatProgress = null;
@@ -1154,47 +1182,107 @@ export class Game {
     this.hud.hideTutorialCallout();
   }
 
+  _getTutorialBeatProgress(beatId) {
+    if (beatId === 'move') return { mouseTravel: 0, thrustHeld: false };
+    if (beatId === 'roll') return { rollSeen: false };
+    if (beatId === 'boost') return { boosted: false };
+    if (beatId === 'fire') return { fired: false, trashDestroyed: false };
+    if (beatId === 'objectives') return { remaining: TUTORIAL_OBJECTIVES_HINT_DURATION };
+    return {};
+  }
+
+  _getTutorialRequirementStates(beatId = this._tutorial.activeBeatId, progress = this._tutorial.activeBeatProgress) {
+    if (!beatId || !progress) return [];
+
+    if (beatId === 'move') {
+      return [
+        { id: 'look', label: 'Look around with the mouse', complete: progress.mouseTravel >= 14 },
+        { id: 'thrust', label: 'Hold W to fly forward', complete: !!progress.thrustHeld },
+      ];
+    }
+
+    if (beatId === 'roll') {
+      return [
+        { id: 'roll', label: 'Press A or D to roll', complete: !!progress.rollSeen },
+      ];
+    }
+
+    if (beatId === 'boost') {
+      return [
+        { id: 'boost', label: 'Hold Space while moving forward', complete: !!progress.boosted },
+      ];
+    }
+
+    if (beatId === 'fire') {
+      return [
+        { id: 'fire', label: 'Hold left click to use your vaporizer', complete: !!progress.fired },
+        { id: 'trash', label: 'Destroy a piece of trash', complete: !!progress.trashDestroyed },
+      ];
+    }
+
+    return [];
+  }
+
+  _renderTutorialBeat(beatId, { animate = false } = {}) {
+    const beat = TUTORIAL_BEATS[beatId];
+    if (!beat) return;
+
+    this.hud.showTutorialCallout(beat.title, beat.message, {
+      placement: beat.placement,
+      requirements: this._getTutorialRequirementStates(beatId, this._tutorial.activeBeatProgress),
+      animate,
+    });
+  }
+
   _startTutorialBeat(beatId) {
     const beat = TUTORIAL_BEATS[beatId];
     if (!beat) return;
 
     this._tutorial.activeBeatId = beatId;
-    this._tutorial.activeBeatProgress =
-      beatId === 'controls'
-        ? { mouseTravel: 0, thrustHeld: false, rollSeen: false, fired: false }
-        : beatId === 'target'
-          ? { armed: false, trashDestroyed: false }
-          : {};
+    this._tutorial.activeBeatProgress = this._getTutorialBeatProgress(beatId);
     this._timeScale = TUTORIAL_TIME_SCALE;
-    this.hud.showTutorialCallout(beat.title, beat.message, {
-      placement: beat.placement,
-    });
+    this._renderTutorialBeat(beatId, { animate: true });
   }
 
   _completeActiveTutorialBeat() {
     if (!this._tutorial.activeBeatId) return;
-    this._clearActiveTutorialBeat();
-    this._maybeStartTutorialBeat();
+    this._renderTutorialBeat(this._tutorial.activeBeatId);
+    this._tutorial.activeBeatId = null;
+    this._tutorial.activeBeatProgress = null;
+    this._tutorial.transitionRemaining = TUTORIAL_BEAT_TRANSITION_DELAY;
+    this.hud.hideTutorialCallout({ animated: true });
   }
 
   _maybeStartTutorialBeat() {
-    if (!this._isTutorialActiveForCurrentLevel() || this._tutorial.activeBeatId) return;
+    if (!this._isTutorialActiveForCurrentLevel() || this._tutorial.activeBeatId || this._tutorial.transitionRemaining > 0) return;
 
-    if (!this._tutorial.controlsShown && this._tutorial.activePlayTime >= 1.5) {
-      this._tutorial.controlsShown = true;
-      this._startTutorialBeat('controls');
+    if (!this._tutorial.moveShown && this._tutorial.activePlayTime >= 1.5) {
+      this._tutorial.moveShown = true;
+      this._startTutorialBeat('move');
       return;
     }
 
-    if (!this._tutorial.targetShown && this._tutorial.controlsShown) {
-      this._tutorial.targetShown = true;
-      this._startTutorialBeat('target');
+    if (!this._tutorial.rollShown && this._tutorial.moveShown) {
+      this._tutorial.rollShown = true;
+      this._startTutorialBeat('roll');
       return;
     }
 
-    if (!this._tutorial.hudShown && this._tutorial.targetShown) {
-      this._tutorial.hudShown = true;
-      this._startTutorialBeat('hud');
+    if (!this._tutorial.boostShown && this._tutorial.rollShown) {
+      this._tutorial.boostShown = true;
+      this._startTutorialBeat('boost');
+      return;
+    }
+
+    if (!this._tutorial.fireShown && this._tutorial.boostShown) {
+      this._tutorial.fireShown = true;
+      this._startTutorialBeat('fire');
+      return;
+    }
+
+    if (!this._tutorial.objectivesShown && this._tutorial.fireShown) {
+      this._tutorial.objectivesShown = true;
+      this._startTutorialBeat('objectives');
     }
   }
 
@@ -1210,50 +1298,105 @@ export class Game {
       this._tutorial.activePlayTime += rawDelta;
     }
 
+    if (this._tutorial.transitionRemaining > 0) {
+      this._tutorial.transitionRemaining = Math.max(0, this._tutorial.transitionRemaining - rawDelta);
+    }
+
+    if (this._tutorial.activeBeatId === 'objectives' && this._tutorial.activeBeatProgress) {
+      this._tutorial.activeBeatProgress.remaining -= rawDelta;
+      if (this._tutorial.activeBeatProgress.remaining <= 0) {
+        this._completeActiveTutorialBeat();
+        return;
+      }
+    }
+
     this._maybeStartTutorialBeat();
   }
 
   _noteTutorialShot() {
     if (!this._isTutorialActiveForCurrentLevel()) return;
-    this._tutorial.firstShotSeen = true;
-    this._maybeStartTutorialBeat();
+    if (this._tutorial.activeBeatId !== 'fire' || !this._tutorial.activeBeatProgress) return;
+
+    if (!this._tutorial.activeBeatProgress.fired) {
+      this._tutorial.activeBeatProgress.fired = true;
+      this._renderTutorialBeat('fire');
+    }
   }
 
   _noteTutorialTrashDestroyed() {
     if (!this._isTutorialActiveForCurrentLevel()) return;
-    this._tutorial.firstTrashDestroyedSeen = true;
-    if (this._tutorial.activeBeatId === 'target') {
-      if (!this._tutorial.activeBeatProgress.armed) return;
+    if (this._tutorial.activeBeatId === 'fire' && this._tutorial.activeBeatProgress) {
       this._tutorial.activeBeatProgress.trashDestroyed = true;
-      this._completeActiveTutorialBeat();
-      return;
+      this._renderTutorialBeat('fire');
+
+      if (this._tutorial.activeBeatProgress.fired) {
+        this._completeActiveTutorialBeat();
+      }
     }
-    this._maybeStartTutorialBeat();
+  }
+
+  _updateTutorialBeatDisplay() {
+    if (!this._tutorial.activeBeatId) return;
+    this._renderTutorialBeat(this._tutorial.activeBeatId);
   }
 
   _updateActiveTutorialProgress({ dx, dy, thrustHeld, rollSeen, fired, wantsBoost }) {
     if (!this._isTutorialActiveForCurrentLevel() || !this._tutorial.activeBeatId) return;
 
-    if (this._tutorial.activeBeatId === 'controls') {
-      const progress = this._tutorial.activeBeatProgress;
-      progress.mouseTravel += Math.abs(dx) + Math.abs(dy);
-      progress.thrustHeld = progress.thrustHeld || thrustHeld;
-      progress.rollSeen = progress.rollSeen || rollSeen;
-      progress.fired = progress.fired || fired > 0;
+    const progress = this._tutorial.activeBeatProgress;
+    let changed = false;
 
-      if (progress.mouseTravel >= 14 && progress.thrustHeld && progress.rollSeen && progress.fired) {
+    if (this._tutorial.activeBeatId === 'move') {
+      const nextMouseTravel = progress.mouseTravel + Math.abs(dx) + Math.abs(dy);
+      const nextThrustHeld = progress.thrustHeld || thrustHeld;
+      changed = (progress.mouseTravel < 14 && nextMouseTravel >= 14) || (!progress.thrustHeld && nextThrustHeld);
+      progress.mouseTravel = nextMouseTravel;
+      progress.thrustHeld = nextThrustHeld;
+
+      if (changed) {
+        this._updateTutorialBeatDisplay();
+      }
+
+      if (progress.mouseTravel >= 14 && progress.thrustHeld) {
         this._completeActiveTutorialBeat();
       }
       return;
     }
 
-    if (this._tutorial.activeBeatId === 'hud' && wantsBoost) {
-      this._completeActiveTutorialBeat();
+    if (this._tutorial.activeBeatId === 'roll') {
+      if (!progress.rollSeen && rollSeen) {
+        progress.rollSeen = true;
+        this._updateTutorialBeatDisplay();
+      }
+
+      if (rollSeen) {
+        this._completeActiveTutorialBeat();
+      }
       return;
     }
 
-    if (this._tutorial.activeBeatId === 'target') {
-      this._tutorial.activeBeatProgress.armed = true;
+    if (this._tutorial.activeBeatId === 'boost') {
+      if (!progress.boosted && wantsBoost) {
+        progress.boosted = true;
+        this._updateTutorialBeatDisplay();
+      }
+
+      if (wantsBoost) {
+        this._completeActiveTutorialBeat();
+      }
+      return;
+    }
+
+    if (this._tutorial.activeBeatId === 'fire') {
+      if (!progress.fired && fired > 0) {
+        progress.fired = true;
+        this._updateTutorialBeatDisplay();
+      }
+
+      if (progress.fired && progress.trashDestroyed) {
+        this._completeActiveTutorialBeat();
+      }
+      return;
     }
   }
 

@@ -26,13 +26,16 @@
 
   <div id="objectives-panel" class="hidden">
     <div id="objectives-title">OBJECTIVES</div>
-    <ul id="objectives-list"></ul>
+    <ul id="objectives-required-list"></ul>
+    <div id="objectives-optional-title" class="hidden">OPTIONAL</div>
+    <ul id="objectives-optional-list" class="hidden"></ul>
   </div>
 
   <div id="tutorial-callout" class="hidden" aria-live="polite" aria-atomic="true">
     <div id="tutorial-callout-kicker">TUTORIAL MODE</div>
     <div id="tutorial-callout-title">Flight Controls</div>
     <div id="tutorial-callout-text"></div>
+    <ul id="tutorial-callout-requirements"></ul>
   </div>
 
   <div id="boss-indicator" class="hidden">
@@ -80,7 +83,7 @@
         <section class="pause-card pause-card-emphasis">
           <div class="pause-label">Trash Accuracy</div>
           <div id="pause-accuracy-value" class="pause-stat-value">0%</div>
-          <div id="pause-accuracy-detail" class="pause-stat-detail">0 trash hits / 0 shots</div>
+          <div id="pause-accuracy-detail" class="pause-stat-detail">0 trash cleared / 0 vaporize bursts</div>
         </section>
 
         <section class="pause-card">
@@ -116,10 +119,7 @@
       <div id="briefing-options" class="hidden">
         <label id="briefing-tutorial-toggle" for="briefing-tutorial-mode">
           <input id="briefing-tutorial-mode" type="checkbox" />
-          <span class="briefing-toggle-copy">
-            <span class="briefing-toggle-title">Tutorial Mode</span>
-            <span class="briefing-toggle-subtitle">Level 1 only. Adds guided slow-motion prompts.</span>
-          </span>
+          <span class="briefing-toggle-title">Tutorial Mode</span>
         </label>
       </div>
       <button id="briefing-start-btn">START</button>
