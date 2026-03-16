@@ -583,12 +583,9 @@ export class Game {
     trashteroid.group.position.copy(this.player.mesh.position).addScaledVector(_shipForward, startDistance);
     trashteroid.anchor.copy(trashteroid.group.position);
     trashteroid.prevPosition.copy(trashteroid.group.position);
-    trashteroid.velocity.set(0, 0, 0);
     trashteroid.group.rotation.set(0, 0, 0);
     trashteroid.health = bossConfig?.maxHealth ?? 1;
     trashteroid.maxHealth = bossConfig?.maxHealth ?? 1;
-    trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS;
-    trashteroid.collisionRadius = bossConfig?.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6);
     trashteroid.active = true;
     trashteroid.mode = bossConfig ? 'boss' : 'approach';
     trashteroid.time = 0;
@@ -596,7 +593,23 @@ export class Game {
     trashteroid.group.visible = true;
 
     if (bossConfig) {
+      const BOSS_SCALE = 5;
+      trashteroid.group.scale.setScalar(BOSS_SCALE);
+      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * BOSS_SCALE;
+      trashteroid.collisionRadius = (bossConfig.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6)) * BOSS_SCALE;
+      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * BOSS_SCALE;
+      // Start the trashteroid already moving towards Earth
+      _bossMoveDelta.set(-1200, -600, -3500).normalize();
+      trashteroid.velocity.copy(_bossMoveDelta).multiplyScalar(
+        toWorldSpeed(150)
+      );
       this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
+    } else {
+      trashteroid.group.scale.setScalar(1);
+      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS;
+      trashteroid.collisionRadius = TRASHTEROID_HIT_RADIUS - 6;
+      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET;
+      trashteroid.velocity.set(0, 0, 0);
     }
   }
 
@@ -667,17 +680,21 @@ export class Game {
     _bossRight.normalize();
     _bossUp.crossVectors(_bossRight, _bossAim).normalize();
 
-    const sideOffsets = [-22, 0, 22];
+    const surfaceOffset = trashteroid.surfaceOffset ?? TRASHTEROID_SURFACE_OFFSET;
+    const sideSpread = surfaceOffset * (22 / TRASHTEROID_SURFACE_OFFSET);
+    const upOffset = surfaceOffset * (8 / TRASHTEROID_SURFACE_OFFSET);
+    const sideOffsets = [-sideSpread, 0, sideSpread];
+    const dirSpreads = [-22, 0, 22]; // keep angular spread consistent regardless of scale
     for (let i = 0; i < sideOffsets.length; i++) {
       _bossMuzzle
         .copy(trashteroid.group.position)
-        .addScaledVector(_bossAim, TRASHTEROID_SURFACE_OFFSET)
+        .addScaledVector(_bossAim, surfaceOffset)
         .addScaledVector(_bossRight, sideOffsets[i])
-        .addScaledVector(_bossUp, 8);
+        .addScaledVector(_bossUp, upOffset);
 
       const spreadDirection = _bossAim
         .clone()
-        .addScaledVector(_bossRight, sideOffsets[i] * 0.0015)
+        .addScaledVector(_bossRight, dirSpreads[i] * 0.0015)
         .addScaledVector(_bossUp, (Math.random() - 0.5) * 0.03)
         .normalize();
 
@@ -734,47 +751,34 @@ export class Game {
       return;
     }
 
-    _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize();
-    _bossRight.set(1, 0, 0).applyQuaternion(this.player.baseQuaternion).normalize();
-    _bossUp.set(0, 1, 0).applyQuaternion(this.player.baseQuaternion).normalize();
-
-    _bossDesiredPos
-      .copy(this.player.mesh.position)
-      .addScaledVector(_shipForward, bossConfig.startDistance)
-      .addScaledVector(
-        _bossRight,
-        Math.sin(trashteroid.time * (bossConfig.strafeFrequency ?? 0.38)) * bossConfig.strafeAmplitude
-      )
-      .addScaledVector(
-        _bossUp,
-        Math.sin(trashteroid.time * (bossConfig.verticalFrequency ?? 0.24) + 0.8) * bossConfig.verticalAmplitude
+    // Earth is kept at a fixed offset from the camera; use planet position when available
+    if (this.planet) {
+      _bossDesiredPos.copy(this.planet.position);
+    } else {
+      _bossDesiredPos.set(
+        this.player.mesh.position.x - 1200,
+        this.player.mesh.position.y - 600,
+        this.player.mesh.position.z - 3500
       );
-
-    _bossMoveDelta.copy(_bossDesiredPos).sub(trashteroid.group.position);
-    const desiredDistance = _bossMoveDelta.length();
-    if (desiredDistance > 1e-5) {
-      const playerSpeed = this.player.velocity.length();
-      const chaseSpeed = Math.max(
-        playerSpeed * (bossConfig.speedRatio ?? 1.015),
-        toWorldSpeed(140)
-      );
-      const response = 1 - Math.exp(-bossConfig.moveSharpness * delta);
-      const desiredStep = desiredDistance * response;
-      const maxStep = chaseSpeed * delta;
-      const actualStep = Math.min(desiredStep, maxStep);
-
-      if (actualStep > 0) {
-        trashteroid.group.position.addScaledVector(
-          _bossMoveDelta.multiplyScalar(1 / desiredDistance),
-          actualStep
-        );
-      }
     }
-    trashteroid.velocity.set(
-      delta > 0 ? (trashteroid.group.position.x - prevX) / delta : 0,
-      delta > 0 ? (trashteroid.group.position.y - prevY) / delta : 0,
-      delta > 0 ? (trashteroid.group.position.z - prevZ) / delta : 0
-    );
+
+    // Direction from trashteroid towards Earth
+    _bossMoveDelta.copy(_bossDesiredPos).sub(trashteroid.group.position);
+    const distToEarth = _bossMoveDelta.length();
+    if (distToEarth > 1e-5) {
+      _bossMoveDelta.multiplyScalar(1 / distToEarth);
+    }
+
+    // Desired velocity towards Earth; after asteroid bounces, steer back towards Earth
+    const earthSpeed = bossConfig.earthSpeed != null
+      ? toWorldSpeed(bossConfig.earthSpeed)
+      : toWorldSpeed(220);
+    const steerRate = bossConfig.steerRate ?? 2.5;
+    _bossDesiredPos.copy(_bossMoveDelta).multiplyScalar(earthSpeed);
+    trashteroid.velocity.lerp(_bossDesiredPos, 1 - Math.exp(-steerRate * delta));
+
+    // Integrate position
+    trashteroid.group.position.addScaledVector(trashteroid.velocity, delta);
 
     trashteroid.shotCooldown -= delta;
     if (trashteroid.shotCooldown <= 0) {
@@ -819,10 +823,10 @@ export class Game {
     if (!trashteroid?.active || !asteroids?.length) return;
 
     const collisionRadius = trashteroid.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6);
-    let collided = false;
 
     for (let i = 0; i < asteroids.length; i++) {
-      const sphere = asteroids[i].boundingSphere;
+      const ast = asteroids[i];
+      const sphere = ast.boundingSphere;
       const minDistance = collisionRadius + sphere.radius;
 
       _targetOffset.copy(trashteroid.group.position).sub(sphere.center);
@@ -841,22 +845,24 @@ export class Game {
         _collisionNormal.copy(_targetOffset).multiplyScalar(1 / distance);
       }
 
+      // _collisionNormal points FROM asteroid TOWARD trashteroid.
+      // Trashteroid has enormous mass — push the asteroid entirely, trashteroid barely moves.
       const overlap = minDistance - distance;
-      trashteroid.group.position.addScaledVector(_collisionNormal, overlap + 0.08);
+      ast.mesh.position.addScaledVector(_collisionNormal, -(overlap + 0.08));
+      sphere.center.addScaledVector(_collisionNormal, -(overlap + 0.08));
 
-      const inwardSpeed = trashteroid.velocity.dot(_collisionNormal);
-      if (inwardSpeed < 0) {
-        trashteroid.velocity.addScaledVector(_collisionNormal, -inwardSpeed * (1 + ASTEROID_BOUNCE));
+      // Bounce the asteroid off the trashteroid as if it were an immovable wall.
+      // relApproach > 0 means asteroid is closing in on the trashteroid.
+      const relApproach = ast.velocity.dot(_collisionNormal) - trashteroid.velocity.dot(_collisionNormal);
+      if (relApproach > 0) {
+        ast.velocity.addScaledVector(_collisionNormal, -relApproach * (1 + ASTEROID_BOUNCE));
       }
 
-      collided = true;
-    }
-
-    if (collided && delta > 0) {
-      trashteroid.velocity
-        .copy(trashteroid.group.position)
-        .sub(trashteroid.prevPosition)
-        .multiplyScalar(1 / delta);
+      // Trashteroid barely deflects — 0.1% mass-ratio impulse
+      const inwardSpeed = trashteroid.velocity.dot(_collisionNormal);
+      if (inwardSpeed < 0) {
+        trashteroid.velocity.addScaledVector(_collisionNormal, -inwardSpeed * 0.03);
+      }
     }
   }
 
