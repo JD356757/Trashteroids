@@ -1999,15 +1999,6 @@ export class Game {
       }
     }
 
-    const asteroids = this.asteroidField.getColliders();
-    for (let i = 0; i < asteroids.length; i++) {
-      const sphere = asteroids[i].boundingSphere;
-      const distance = this._intersectAimSphere(sphere.center, sphere.radius);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-      }
-    }
-
     // Ignore intersections that are extremely close to the camera (they indicate
     // the camera is inside or grazing the collider). Treat those as no-hit so the
     // fallback aim distance is used instead.

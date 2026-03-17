@@ -67,18 +67,16 @@ export class LevelSelect {
    * @param {HTMLCanvasElement} canvas  – the same canvas the game uses
    * @param {Function} onLevelChosen   – called with level id when user confirms
    */
-  constructor(canvas, onLevelChosen) {
+  constructor(canvas, onLevelChosen, sharedRenderer, introScene) {
     this.canvas = canvas;
     this.onLevelChosen = onLevelChosen;
     this.active = false;
     this._selectedLevel = null;
     this._shipArrived = false;
+    this._introScene = introScene;
 
-    /* ── renderer (reuse the game canvas) ── */
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x000011);
+    /* ── renderer (shared with IntroScene) ── */
+    this.renderer = sharedRenderer;
 
     /* ── scene ── */
     this.scene = new THREE.Scene();
@@ -87,16 +85,13 @@ export class LevelSelect {
     this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 500);
     this.camera.position.set(0, 8, 22);
     this.camera.lookAt(0, 0, -2);
-    this._orbitAngle = 0; // radians, slowly incremented
+    this._orbitAngle = 0;
 
     /* ── lights ── */
     this.scene.add(new THREE.AmbientLight(0x334466, 1.2));
     const sun = new THREE.DirectionalLight(0xffffff, 2);
     sun.position.set(10, 15, 10);
     this.scene.add(sun);
-
-    /* ── starfield background (simple random points) ── */
-    this._buildStars();
 
     /* ── level nodes ── */
     this.nodes = [];              // { mesh, ring, label3d, data }
@@ -190,7 +185,7 @@ export class LevelSelect {
 
   dispose() {
     this.hide();
-    this.renderer.dispose();
+    // Don't dispose the shared renderer here
   }
 
   /* ════════════════  internals  ════════════════ */
@@ -202,10 +197,12 @@ export class LevelSelect {
 
     this._animateShip(delta);
     this._animateNodes(delta);
-    this._animateStars(delta);
     this._animateCamera(delta);
 
+    // IntroScene renders the starfield in its own RAF loop; render level-select scene on top
+    this.renderer.autoClear = false;
     this.renderer.render(this.scene, this.camera);
+    this.renderer.autoClear = true;
   }
 
   /* ── ship ── */
@@ -329,28 +326,6 @@ export class LevelSelect {
         node.mesh.material.emissiveIntensity = 0.5;
       }
     }
-  }
-
-  /* ── stars ── */
-
-  _buildStars() {
-    const count = 1500;
-    const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      positions[i * 3 + 0] = (Math.random() - 0.5) * 300;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 300;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 300;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.25, sizeAttenuation: true });
-    this._stars = new THREE.Points(geo, mat);
-    this.scene.add(this._stars);
-  }
-
-  _animateStars(delta) {
-    this._stars.rotation.y += delta * 0.01;
-    this._stars.rotation.x += delta * 0.005;
   }
 
   /* ── click / raycasting ── */

@@ -17,9 +17,9 @@ export class Player {
     this.boostMultiplier = 2.0;
     this.recoilAcceleration = 42;
     this.mouseSensitivity = 0.024;
-    this.turnAcceleration = 5.0;
+    this.turnAcceleration = 5.0;   // unused
     this.maxTurnRate = 2.9;
-    this.turnDamping = 4;
+    this.turnSmoothing = 18;        // how quickly rate tracks input (higher = snappier)
     this.rollOnYaw = -0.4;
     this.rollReturnSpeed = 3.0;
     this.pitchOnPitch = 0.3;
@@ -160,8 +160,8 @@ export class Player {
     const dt = Math.max(delta, 1 / 240);
 
     // Convert mouse delta into normalized turn intent.
-    this.turnInputYaw = THREE.MathUtils.clamp((-dx * this.mouseSensitivity) / dt, -1, 1);
-    this.turnInputPitch = THREE.MathUtils.clamp((-dy * this.mouseSensitivity) / dt, -1, 1);
+    this.turnInputYaw = THREE.MathUtils.clamp((-dx * this.mouseSensitivity / 8) / dt, -1, 1);
+    this.turnInputPitch = THREE.MathUtils.clamp((-dy * this.mouseSensitivity / 8) / dt, -1, 1);
   }
 
   thrust(delta, boostMultiplier = 1) {
@@ -181,12 +181,14 @@ export class Player {
 
 
   update(delta) {
-    // --- Angular acceleration and rotation ---
-    this.yawRate += this.turnInputYaw * this.turnAcceleration * delta;
-    this.pitchRate += this.turnInputPitch * this.turnAcceleration * delta;
-    const turnDecay = Math.exp(-this.turnDamping * delta);
-    this.yawRate *= turnDecay;
-    this.pitchRate *= turnDecay;
+    // --- Smooth turn rate toward capped input target ---
+    const targetYaw   = this.turnInputYaw   * this.maxTurnRate;
+    const targetPitch = this.turnInputPitch * this.maxTurnRate;
+    const follow = 1 - Math.exp(-this.turnSmoothing * delta);
+    this.yawRate   += (targetYaw   - this.yawRate)   * follow;
+    this.pitchRate += (targetPitch - this.pitchRate) * follow;
+
+
     const yawAngle = this.yawRate * delta;
     const pitchAngle = this.pitchRate * delta;
     if (yawAngle !== 0) {
@@ -220,7 +222,7 @@ export class Player {
     if (Math.abs(this.currentRoll) > 0.01) {
       _localUp.set(1, 0, 0).applyQuaternion(this.baseQuaternion);
       this.velocity.addScaledVector(_localUp, -Math.sin(this.currentRoll) * this.rollLiftPower * delta);
-      this.yawRate += Math.sin(this.currentRoll) * this.rollYawCoupling * delta;
+      // yawRate coupling already applied above
     }
     // --- Particle emitter update ---
     if (this._particlePoints) {
