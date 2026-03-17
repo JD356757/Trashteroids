@@ -5,15 +5,6 @@ const _worldCenter = new THREE.Vector3();
 const _collisionNormal = new THREE.Vector3();
 const _relativeVelocity = new THREE.Vector3();
 const _impulse = new THREE.Vector3();
-const SHOW_BOUNDING_SPHERES = false;
-const BOUNDING_SPHERE_MATERIAL = new THREE.MeshBasicMaterial({
-  color: 0x4dc3ff,
-  wireframe: true,
-  transparent: true,
-  opacity: 0.35,
-  depthWrite: false,
-  fog: false,
-});
 
 // ─── Tunable parameters ──────────────────────────────────────────────────────
 
@@ -45,36 +36,6 @@ const MAX_INSTANCES = 1000;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Glow sprite ─────────────────────────────────────────────────────────────
-const GLOW_RADIUS_MULTIPLIER = 1.2;
-const GLOW_PULSE_SPEED = 1.2;
-const GLOW_PULSE_AMPLITUDE = 0.15;
-const GLOW_BRIGHTNESS = 0;
-
-function makeGlowTexture(size = 256) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const half = size / 2;
-  const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
-  const b = GLOW_BRIGHTNESS;
-  grad.addColorStop(0,    `rgba(255, 220, 140, ${0.55 * b})`);
-  grad.addColorStop(0.35, `rgba(220, 150,  60, ${0.22 * b})`);
-  grad.addColorStop(0.7,  `rgba(180, 100,  30, ${0.07 * b})`);
-  grad.addColorStop(1,    'rgba(160,  80,  20, 0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
-}
-
-const GLOW_TEXTURE  = makeGlowTexture();
-const GLOW_MATERIAL = new THREE.SpriteMaterial({
-  map: GLOW_TEXTURE,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false,
-  transparent: true,
-  fog: false,
-});
-
 const ASTEROID_COLOR_LIT = new THREE.Color(0xd8ced9);
 const ASTEROID_COLOR_SHADE = new THREE.Color(0xb19bb3);
 const ASTEROID_OUTLINE_COLOR = 0x211626;
@@ -198,9 +159,6 @@ export class AsteroidField {
     if (ast.fadeMats) {
       for (const m of ast.fadeMats) m.dispose();
     }
-    if (ast.glowSprite) {
-      ast.glowSprite.material.dispose();
-    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -304,26 +262,6 @@ export class AsteroidField {
       (MIN_DRIFT_SPEED + Math.random() * (MAX_DRIFT_SPEED - MIN_DRIFT_SPEED)) * scale
     );
 
-    let glowSprite = null;
-    if (GLOW_BRIGHTNESS > 0) {
-      glowSprite = new THREE.Sprite(GLOW_MATERIAL.clone());
-      const glowSize = colliderRadius * 2 * GLOW_RADIUS_MULTIPLIER;
-      glowSprite.scale.setScalar(glowSize);
-      glowSprite.position.copy(localCenter);
-      glowSprite.userData.glowBaseScale = glowSize;
-      glowSprite.userData.glowPhase = Math.random() * Math.PI * 2;
-      instance.add(glowSprite);
-    }
-
-    if (SHOW_BOUNDING_SPHERES) {
-      const boundsMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(colliderRadius, 16, 12),
-        BOUNDING_SPHERE_MATERIAL
-      );
-      boundsMesh.position.copy(localCenter);
-      instance.add(boundsMesh);
-    }
-
     this.scene.add(instance);
     this.instances.push({
       mesh: instance,
@@ -331,7 +269,6 @@ export class AsteroidField {
       localCenter,
       velocity,
       mass: Math.max(colliderRadius * colliderRadius * colliderRadius, 0.001),
-      glowSprite,
       fadeMats,
     });
 
@@ -414,19 +351,6 @@ export class AsteroidField {
           }
           mat.depthWrite = opacity > 0.5;
         }
-        if (ast.glowSprite) {
-          ast.glowSprite.material.opacity = opacity;
-        }
-      }
-      // ────────────────────────────────────────────────────────────────────
-
-      // ── Animate glow pulse ───────────────────────────────────────────────
-      if (ast.glowSprite) {
-        const phase = ast.glowSprite.userData.glowPhase;
-        const baseSize = ast.glowSprite.userData.glowBaseScale;
-        const pulse = 1 + GLOW_PULSE_AMPLITUDE *
-          Math.sin(this._elapsed * GLOW_PULSE_SPEED + phase);
-        ast.glowSprite.scale.setScalar(baseSize * pulse);
       }
       // ────────────────────────────────────────────────────────────────────
     }

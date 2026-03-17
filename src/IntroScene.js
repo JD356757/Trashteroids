@@ -1,8 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-const _lookTarget = new THREE.Vector3();
-const _orbitCenter = new THREE.Vector3();
 const _trashBoundsCenter = new THREE.Vector3();
 const _trashBoundsSize = new THREE.Vector3();
 const _trashDummy = new THREE.Object3D();

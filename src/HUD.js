@@ -54,6 +54,8 @@ export class HUD {
 
     if (visible) return;
 
+    this.clearDamageIndicators();
+
     if (this.levelTimerEl) this.levelTimerEl.classList.add('hidden');
     if (this.objectivesPanel) this.objectivesPanel.classList.add('hidden');
     if (this.boostBarContainer) this.boostBarContainer.classList.add('hidden');
@@ -214,6 +216,13 @@ export class HUD {
     const el = this.damageVignette;
     el.classList.toggle('low', !!enabled);
     el.classList.toggle('pulsing', !!enabled);
+  }
+
+  clearDamageIndicators() {
+    if (!this.damageVignette) return;
+    this._lowHealth = false;
+    this.damageVignette.classList.remove('low', 'pulsing', 'flashing', 'flash');
+    this.damageVignette.style.opacity = '0';
   }
 
   updateBossBar(health, maxHealth) {
@@ -452,6 +461,7 @@ export class HUD {
   }
 
   showMessage(text) {
+    this.clearDamageIndicators();
     this.setGameplayVisible(false);
     this.setPauseVisible(false);
     this.overlay.classList.remove('hidden');

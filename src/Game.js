@@ -14,7 +14,6 @@ import { AsteroidField } from './AsteroidField.js';
 const _camOffset = new THREE.Vector3(0, 6, 22);
 const _camTarget = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
-const _smoothForward = new THREE.Vector3(0, 0, -1);
 const _shipForward = new THREE.Vector3();
 const _cameraForward = new THREE.Vector3();
 const _cameraDown = new THREE.Vector3();
@@ -40,8 +39,9 @@ const _bossUp = new THREE.Vector3();
 const _bossAim = new THREE.Vector3();
 const _bossMuzzle = new THREE.Vector3();
 const _worldUp = new THREE.Vector3(0, 1, 0);
-// Debug flag: when true the camera will not follow the ship (helps observe movement)
-const DEBUG_FREEZE_CAMERA = false;
+const _muzzleBurstLocal = new THREE.Vector3(0, 0.2, -1.5);
+const _debrisAway = new THREE.Vector3();
+const _popupScreenPos = new THREE.Vector3();
 const PLAYER_COLLISION_RADIUS = 1.1;
 const ASTEROID_BOUNCE = 0.35;
 const ASTEROID_SURFACE_FRICTION = 0.92;
@@ -171,7 +171,7 @@ export class Game {
     this.cameraFollowSpeed = 18.0;
 
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000011);
@@ -1270,11 +1270,23 @@ export class Game {
 
   _completeActiveTutorialBeat() {
     if (!this._tutorial.activeBeatId) return;
-    this._renderTutorialBeat(this._tutorial.activeBeatId);
+    const completedBeatId = this._tutorial.activeBeatId;
+    this._renderTutorialBeat(completedBeatId);
     this._tutorial.activeBeatId = null;
     this._tutorial.activeBeatProgress = null;
     this._tutorial.transitionRemaining = TUTORIAL_BEAT_TRANSITION_DELAY;
     this.hud.hideTutorialCallout({ animated: true });
+
+    // Keep the mission timer frozen during tutorial and only start it after
+    // the final tutorial beat has completed.
+    if (
+      completedBeatId === 'objectives' &&
+      this._isTutorialActiveForCurrentLevel() &&
+      !this._levelComplete &&
+      this._levelTimer > 0
+    ) {
+      this._levelTimerRunning = true;
+    }
   }
 
   _maybeStartTutorialBeat() {
@@ -1456,6 +1468,26 @@ export class Game {
     }
   }
 
+  _firePlayerBeam(type) {
+    const fireDirection = this._getAssistedFireDirection();
+    const fired = this.projectiles.fire(
+      this.player.mesh.position,
+      fireDirection,
+      this.player.velocity,
+      this.player.mesh.quaternion,
+      type
+    );
+
+    if (!fired) return 0;
+
+    this.shotsFired += fired;
+    this._noteTutorialShot();
+    this._refreshPauseMenu();
+    this.player.applyRecoil(this.projectiles.cooldownTime);
+    this._spawnMuzzleParticles(_muzzleBurstLocal, { count: 18, ttl: 0.08 });
+    return fired;
+  }
+
   _pauseGame() {
     if (!this.running || this.paused) return;
 
@@ -1557,35 +1589,9 @@ export class Game {
     const rollSeen = rollInput !== 0 || this.input.wasPressed('a') || this.input.wasPressed('d');
     this.player.manualRollInput = rollInput;
 
-    // Fire vaporizer — hold Space or left mouse button for rapid-fire
-    let fired = 0;
-    if (this.input.isDown('mouseleft')) {
-      const fireDirection = this._getAssistedFireDirection();
-      fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion, 'normal');
-      if (fired) {
-        this.shotsFired += fired;
-        this._noteTutorialShot();
-        this._refreshPauseMenu();
-        this.player.applyRecoil(this.projectiles.cooldownTime);
-        // spawn a very short muzzle particle burst attached to the player
-        this._spawnMuzzleParticles(new THREE.Vector3(0, 0.2, -1.5), { count: 18, ttl: 0.08 });
-      }
-    }
-
-    // Fire vaporizer with Shift
-    let vaporizerFired = 0;
-    if (this.input.isDown('shift')) {
-      const fireDirection = this._getAssistedFireDirection();
-      vaporizerFired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion, 'vaporizer');
-      if (vaporizerFired) {
-        this.shotsFired += vaporizerFired;
-        this._noteTutorialShot();
-        this._refreshPauseMenu();
-        this.player.applyRecoil(this.projectiles.cooldownTime);
-        // spawn a very short muzzle particle burst attached to the player
-        this._spawnMuzzleParticles(new THREE.Vector3(0, 0.2, -1.5), { count: 18, ttl: 0.08 });
-      }
-    }
+    // Fire regular beam with mouse-left and vaporizer beam with Shift.
+    const fired = this.input.isDown('mouseleft') ? this._firePlayerBeam('normal') : 0;
+    const vaporizerFired = this.input.isDown('shift') ? this._firePlayerBeam('vaporizer') : 0;
 
     this._updateActiveTutorialProgress({
       dx,
@@ -1674,21 +1680,20 @@ export class Game {
   }
 
   _segmentIntersectsSphere(start, end, center, radius) {
-    const seg = new THREE.Vector3().copy(end).sub(start);
-    const segLenSq = seg.lengthSq();
+    _segment.copy(end).sub(start);
+    const segLenSq = _segment.lengthSq();
+    const radiusSq = radius * radius;
 
     if (segLenSq === 0) {
-      const inside = end.distanceTo(center) <= radius;
-      return inside ? { hit: true, t: 1, point: end.clone() } : { hit: false };
+      const inside = end.distanceToSquared(center) <= radiusSq;
+      if (inside) _closestPoint.copy(end);
+      return inside;
     }
 
-    const toCenter = new THREE.Vector3().copy(center).sub(start);
-    const t = THREE.MathUtils.clamp(toCenter.dot(seg) / segLenSq, 0, 1);
-    const closest = new THREE.Vector3().copy(start).addScaledVector(seg, t);
-    if (closest.distanceTo(center) <= radius) {
-      return { hit: true, t, point: closest };
-    }
-    return { hit: false };
+    _toCenter.copy(center).sub(start);
+    const t = THREE.MathUtils.clamp(_toCenter.dot(_segment) / segLenSq, 0, 1);
+    _closestPoint.copy(start).addScaledVector(_segment, t);
+    return _closestPoint.distanceToSquared(center) <= radiusSq;
   }
 
   _checkProjectileDebrisCollisions(debrisManager = this.debris, projectileTypeFilter = null) {
@@ -1751,61 +1756,61 @@ export class Game {
     for (let i = debrisList.length - 1; i >= 0; i--) {
       const d = debrisList[i];
       const hitRadius = d.hitRadius || 1;
-      // Increase the effective collision radius so trash reacts earlier
+      // Slightly larger effective radius makes collisions feel less late.
       const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 1.0;
-      // Increase pass distance so misses are detected from farther out
+      // Count a miss a bit earlier once debris slips behind the ship.
       const passDistance = hitRadius + 20;
-      // Reaction radius (nearby but not colliding): debris will be pushed away
+      // Nearby debris gets pushed away even without direct contact.
       const reactDistance = Math.max(hitRadius * 3, 6);
 
-      // continuous collision check: sweep player from previous to current position
+      // Sweep from previous to current player position for stable hit checks.
       const segStart = this._prevPlayerPos;
       const segEnd = playerPos;
-      const swept = this._segmentIntersectsSphere(segStart, segEnd, d.position, hitDistance);
+      const sweptHit = this._segmentIntersectsSphere(segStart, segEnd, d.position, hitDistance);
 
-      if (swept.hit) {
-        // collision at swept.point — move only the debris, not the player
-        const collisionPoint = swept.point;
-        const collisionNormal = new THREE.Vector3().copy(collisionPoint).sub(d.position).normalize();
+      if (sweptHit) {
+        // Resolve by moving debris only; player motion stays smooth.
+        _debrisAway.copy(d.position).sub(playerPos);
+        if (_debrisAway.lengthSq() < 1e-6) {
+          _debrisAway.copy(_closestPoint).sub(d.position);
+        }
+        if (_debrisAway.lengthSq() < 1e-6) {
+          _debrisAway.copy(_shipForward).negate();
+        }
+        _debrisAway.normalize();
 
-        // compute overlap but do NOT move or reflect the player; only affect debris
-        const distNow = playerPos.distanceTo(d.position);
-        const overlap = Math.max(0, hitDistance - distNow);
-
-        // apply reduced damage based on player speed
+        // Scale damage by current player speed.
         const playerSpeed = this.player.velocity.length();
         const damage = THREE.MathUtils.clamp(Math.round(6 + (playerSpeed / 120) * 12), 5, 20);
         this._damagePlayer(damage);
 
-        // robust separation: place debris fully outside player's collision sphere and give impulse
-        const away = d.position.clone().sub(playerPos).normalize();
-        if (d.position) d.position.copy(playerPos).addScaledVector(away, hitDistance + 0.06);
-        if (d.velocity) d.velocity.copy(away).multiplyScalar(Math.max(4, d.velocity.length() + 2));
-        else d.velocity = away.clone().multiplyScalar(3 + Math.random() * 2);
+        // Push debris outside the collision shell and give it a kick.
+        if (d.position) d.position.copy(playerPos).addScaledVector(_debrisAway, hitDistance + 0.06);
+        if (d.velocity) d.velocity.copy(_debrisAway).multiplyScalar(Math.max(4, d.velocity.length() + 2));
+        else d.velocity = _debrisAway.clone().multiplyScalar(3 + Math.random() * 2);
 
         continue;
       }
 
-      // compute distance for passive reactions
+      // Passive near-miss behavior.
       _toDebris.copy(d.position).sub(playerPos);
       const distSq = _toDebris.lengthSq();
       const forwardOffset = _toDebris.dot(_shipForward);
 
-      // Nearby reaction: if within reactDistance but not colliding, push debris away
+      // Nudge nearby debris away to reduce frustrating glancing overlaps.
       if (distSq < reactDistance * reactDistance && distSq > hitDistance * hitDistance) {
         const dist = Math.sqrt(distSq) || 0.0001;
-        const away = _toDebris.clone().multiplyScalar(1 / dist); // from player to debris
-        // robust passive reaction: push debris to just outside reaction radius and give small impulse
-        const pushAway = d.position.clone().sub(playerPos).normalize();
-        if (d.position) d.position.copy(playerPos).addScaledVector(pushAway, Math.max(reactDistance, hitRadius + PLAYER_COLLISION_RADIUS) + 0.1);
+        _debrisAway.copy(_toDebris).multiplyScalar(1 / dist); // from player to debris
+        // Keep it just outside the reaction radius and add a small impulse.
+        if (d.position) d.position.copy(playerPos).addScaledVector(_debrisAway, Math.max(reactDistance, hitRadius + PLAYER_COLLISION_RADIUS) + 0.1);
         if (d.velocity) {
-          d.velocity.addScaledVector(pushAway, 1.5 + Math.random() * 1.5);
+          d.velocity.addScaledVector(_debrisAway, 1.5 + Math.random() * 1.5);
         } else {
-          d.velocity = pushAway.multiplyScalar(1.5 + Math.random() * 1.5);
+          d.velocity = _debrisAway.clone().multiplyScalar(1.5 + Math.random() * 1.5);
         }
       }
 
-      // Trash that slips behind the player counts as a miss.
+      // Debris that gets behind the ship counts as a miss.
       if (distSq < passDistance * passDistance && forwardOffset < -hitRadius) {
         this.score = Math.max(0, this.score - 50);
         debrisManager.remove(i);
@@ -2031,8 +2036,6 @@ export class Game {
   }
 
   _updateCamera(delta) {
-    if (DEBUG_FREEZE_CAMERA) return;
-
     const shipPos = this.player.mesh.position;
     // Use the ship's base quaternion (yaw + pitch) so the camera does not
     // inherit the ship's cosmetic roll (visual tilt).
@@ -2336,14 +2339,8 @@ export class Game {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-    // Try to reuse the player's thrust sprite if available
-    let spriteTex = null;
-    try {
-      spriteTex = this.player && this.player._particlePoints && this.player._particlePoints.material && this.player._particlePoints.material.uniforms && this.player._particlePoints.material.uniforms.map ? this.player._particlePoints.material.uniforms.map.value : null;
-    } catch (e) {
-      spriteTex = null;
-    }
-    if (!spriteTex) spriteTex = new THREE.TextureLoader().load('fireparticle.png');
+    // Reuse the player's thrust sprite when available; otherwise use the shared particle texture.
+    const spriteTex = this.player?._particlePoints?.material?.uniforms?.map?.value || this._particleTexture;
 
     const mat = new THREE.PointsMaterial({ map: spriteTex, color: 0xffffff, size: options.size || 0.4, sizeAttenuation: true, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending });
     const points = new THREE.Points(geom, mat);
@@ -2418,16 +2415,18 @@ export class Game {
     }
 
     // Update screen popups
+    const canvas = this.renderer.domElement;
+    const halfW = canvas.clientWidth / 2;
+    const halfH = canvas.clientHeight / 2;
+    const rect = canvas.getBoundingClientRect();
     for (let i = this._popups.length - 1; i >= 0; i--) {
       const pop = this._popups[i];
       pop.life += delta;
       const t = pop.life / pop.ttl;
       // Project world pos to screen
-      const vec = pop.worldPos.clone().project(this.camera);
-      const halfW = this.renderer.domElement.clientWidth / 2;
-      const halfH = this.renderer.domElement.clientHeight / 2;
-      const x = (vec.x * halfW) + halfW + this.renderer.domElement.getBoundingClientRect().left;
-      const y = (-vec.y * halfH) + halfH + this.renderer.domElement.getBoundingClientRect().top;
+      _popupScreenPos.copy(pop.worldPos).project(this.camera);
+      const x = (_popupScreenPos.x * halfW) + halfW + rect.left;
+      const y = (-_popupScreenPos.y * halfH) + halfH + rect.top;
       pop.el.style.left = `${x}px`;
       pop.el.style.top = `${y - t * 40}px`;
       pop.el.style.opacity = `${Math.max(0, 1 - t)}`;

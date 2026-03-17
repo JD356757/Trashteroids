@@ -1,0 +1,47 @@
+Date : 2026-03-17 10:30:46
+Directory : c:\Users\dhruv\trashteroidzip
+Total : 17 files,  1255 codes, -30 comments, 165 blanks, all 1390 lines
+
+Languages
++------------+------------+------------+------------+------------+------------+
+| language   | files      | code       | comment    | blank      | total      |
++------------+------------+------------+------------+------------+------------+
+| JavaScript |         13 |        840 |        -32 |        102 |        910 |
+| PostCSS    |          1 |        215 |          0 |         35 |        250 |
+| HTML       |          1 |        152 |          2 |         19 |        173 |
+| Markdown   |          1 |         28 |          0 |          8 |         36 |
+| JSON       |          1 |         20 |          0 |          1 |         21 |
++------------+------------+------------+------------+------------+------------+
+
+Directories
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                      | files      | code       | comment    | blank      | total      |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                         |         17 |      1,255 |        -30 |        165 |      1,390 |
+| . (Files)                                                 |          4 |        211 |          2 |         30 |        243 |
+| src                                                       |         13 |      1,044 |        -32 |        135 |      1,147 |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| filename                                                  | language   | code       | comment    | blank      | total      |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| c:\Users\dhruv\trashteroidzip\README.md                   | Markdown   |         28 |          0 |          8 |         36 |
+| c:\Users\dhruv\trashteroidzip\index.html                  | HTML       |        152 |          2 |         19 |        173 |
+| c:\Users\dhruv\trashteroidzip\package.json                | JSON       |         20 |          0 |          1 |         21 |
+| c:\Users\dhruv\trashteroidzip\src\AsteroidField.js        | JavaScript |        -68 |         -2 |         -6 |        -76 |
+| c:\Users\dhruv\trashteroidzip\src\DebrisManager.js        | JavaScript |          5 |          0 |          1 |          6 |
+| c:\Users\dhruv\trashteroidzip\src\Game.js                 | JavaScript |        456 |         11 |         61 |        528 |
+| c:\Users\dhruv\trashteroidzip\src\HUD.js                  | JavaScript |        110 |        -11 |         25 |        124 |
+| c:\Users\dhruv\trashteroidzip\src\InputHandler.js         | JavaScript |         28 |         -3 |         -2 |         23 |
+| c:\Users\dhruv\trashteroidzip\src\IntroScene.js           | JavaScript |        -40 |          3 |          0 |        -37 |
+| c:\Users\dhruv\trashteroidzip\src\LevelManager.js         | JavaScript |          5 |          0 |          0 |          5 |
+| c:\Users\dhruv\trashteroidzip\src\LevelSelect.js          | JavaScript |        -21 |          0 |         -4 |        -25 |
+| c:\Users\dhruv\trashteroidzip\src\Player.js               | JavaScript |          0 |        -32 |        -24 |        -56 |
+| c:\Users\dhruv\trashteroidzip\src\ProjectileManager.js    | JavaScript |         18 |         -4 |          0 |         14 |
+| c:\Users\dhruv\trashteroidzip\src\SpecialDebrisManager.js | JavaScript |        284 |          1 |         44 |        329 |
+| c:\Users\dhruv\trashteroidzip\src\main.js                 | JavaScript |         52 |          5 |          5 |         62 |
+| c:\Users\dhruv\trashteroidzip\src\styles.css              | PostCSS    |        215 |          0 |         35 |        250 |
+| c:\Users\dhruv\trashteroidzip\vite.config.js              | JavaScript |         11 |          0 |          2 |         13 |
+| Total                                                     |            |      1,255 |        -30 |        165 |      1,390 |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
