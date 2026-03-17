@@ -1107,7 +1107,7 @@ body::before {
 
 #crosshair {
   position: fixed;
-  top: 55%;
+  top: 53%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: 48px;

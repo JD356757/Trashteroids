@@ -34,6 +34,7 @@ export class IntroScene {
   constructor(canvas) {
     this.canvas = canvas;
     this.active = false;
+    this._bgOnly = false; // when true, only renders starfield (no overlay animation)
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x040816, 0.016);
 
@@ -52,7 +53,6 @@ export class IntroScene {
     this.overlayPanel = this.overlay?.querySelector('.overlay-panel') ?? null;
     this.startButton = document.getElementById('start-btn');
 
-    // Only build the star backdrop for a minimal intro scene.
     this._buildBackdrop();
 
     this._onResize = this._onResize.bind(this);
@@ -62,13 +62,26 @@ export class IntroScene {
   show() {
     if (this.active) return;
     this.active = true;
+    this._bgOnly = false;
     this.clock.start();
     window.addEventListener('resize', this._onResize);
     this._frame();
   }
 
+  /** Switch to background-only mode: keeps the RAF loop running so stars never freeze. */
+  showBackground() {
+    this._bgOnly = true;
+    if (!this.active) {
+      this.active = true;
+      this.clock.start();
+      window.addEventListener('resize', this._onResize);
+      this._frame();
+    }
+  }
+
   hide() {
     this.active = false;
+    this._bgOnly = false;
     if (this.overlay) {
       this.overlay.style.removeProperty('--overlay-shift-x');
       this.overlay.style.removeProperty('--overlay-shift-y');
@@ -360,6 +373,23 @@ export class IntroScene {
     });
   }
 
+  /** Render just the starfield (called externally when bgOnly). */
+  renderStarfield() {
+    const delta = this.clock.getDelta();
+    this._elapsed += delta;
+    const t = this._elapsed;
+
+    this.camera.position.set(Math.cos(t * 0.08) * 1.2, 1.6 + Math.sin(t * 0.12) * 0.25, 16);
+    this.camera.lookAt(0, 0, -9);
+
+    if (this.starfield) {
+      this.starfield.rotation.y += delta * 0.006;
+      this.starfield.rotation.x = Math.sin(t * 0.12) * 0.02;
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
   _frame() {
     if (!this.active) return;
     this._rafId = requestAnimationFrame(this._frame);
@@ -377,7 +407,9 @@ export class IntroScene {
       this.starfield.rotation.x = Math.sin(t * 0.12) * 0.02;
     }
 
-    this._animateOverlay(t);
+    if (!this._bgOnly) {
+      this._animateOverlay(t);
+    }
 
     this.renderer.render(this.scene, this.camera);
   }
