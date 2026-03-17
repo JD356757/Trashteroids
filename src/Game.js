@@ -57,7 +57,7 @@ const DISPLAY_DISTANCE_SCALE = 0.45;
 const TUTORIAL_TIME_SCALE = 1.0;
 const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
 const TUTORIAL_OBJECTIVES_HINT_DURATION = 3.2;
-const TRASHTEROID_APPROACH_DISTANCE_WORLD = 5000 / DISPLAY_DISTANCE_SCALE;
+const TRASHTEROID_APPROACH_DISTANCE_WORLD = 15000 / DISPLAY_DISTANCE_SCALE;
 const TRASHTEROID_HIT_RADIUS = 72;
 const TRASHTEROID_SURFACE_OFFSET = 58;
 const TRASHTEROID_SCORE_PER_HIT = 35;
@@ -90,11 +90,20 @@ const TUTORIAL_BEATS = {
   },
   fire: {
     title: 'Vaporize',
-    message: 'Hold left click to vaporize trash!',
+    message: 'Hold left click to vaporize normal trash!',
     placement: 'center',
     requirements: [
-      { id: 'fire', label: 'Hold left click to use your vaporizer' },
+      { id: 'fire', label: 'Hold left click to use your regular beam' },
       { id: 'trash', label: 'Destroy a piece of trash' },
+    ],
+  },
+  special: {
+    title: 'Special Trash',
+    message: 'Special trash has a yellow outline. Hold Shift to fire the vaporizer beam and destroy one.',
+    placement: 'center',
+    requirements: [
+      { id: 'special-fire', label: 'Hold Shift to fire the vaporizer beam' },
+      { id: 'special-trash', label: 'Destroy 1 special trash with the vaporizer' },
     ],
   },
   objectives: {
@@ -565,7 +574,7 @@ export class Game {
     this.paused = false;
     this._levelComplete = false;
     this._levelTimer = levelConfig.timer ?? 0;
-    this._levelTimerRunning = this._levelTimer > 0;
+    this._levelTimerRunning = this._levelTimer > 0 && !this._isTutorialActiveForCurrentLevel();
     this._trashDestroyedRequired = 0;
     this._trashDestroyedFast = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(fastSpeedDisplay);
@@ -588,6 +597,7 @@ export class Game {
     this.hud.setGameplayVisible(true);
     this.hud.setBossBarVisible(!!levelConfig.boss);
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+    this.score = Math.max(0, this.score);
     this.hud.update(this.score, this.levels.current, this.lives);
     this.hud.updateTimer(this._levelTimer);
     this.hud.updateObjectives(this._getMissionObjectiveState(false).objectives);
@@ -1160,6 +1170,7 @@ export class Game {
       rollShown: false,
       boostShown: false,
       fireShown: false,
+      specialShown: false,
       objectivesShown: false,
       transitionRemaining: 0,
       activeBeatId: null,
@@ -1192,6 +1203,7 @@ export class Game {
     if (beatId === 'roll') return { rollSeen: false };
     if (beatId === 'boost') return { boosted: false };
     if (beatId === 'fire') return { fired: false, trashDestroyed: false };
+    if (beatId === 'special') return { vaporizerFired: false, specialDestroyed: false };
     if (beatId === 'objectives') return { remaining: TUTORIAL_OBJECTIVES_HINT_DURATION };
     return {};
   }
@@ -1220,8 +1232,15 @@ export class Game {
 
     if (beatId === 'fire') {
       return [
-        { id: 'fire', label: 'Hold left click to use your vaporizer', complete: !!progress.fired },
+        { id: 'fire', label: 'Hold left click to use your regular beam', complete: !!progress.fired },
         { id: 'trash', label: 'Destroy a piece of trash', complete: !!progress.trashDestroyed },
+      ];
+    }
+
+    if (beatId === 'special') {
+      return [
+        { id: 'special-fire', label: 'Hold Shift to fire the vaporizer beam', complete: !!progress.vaporizerFired },
+        { id: 'special-trash', label: 'Destroy 1 special trash with the vaporizer', complete: !!progress.specialDestroyed },
       ];
     }
 
@@ -1285,7 +1304,13 @@ export class Game {
       return;
     }
 
-    if (!this._tutorial.objectivesShown && this._tutorial.fireShown) {
+    if (!this._tutorial.specialShown && this._tutorial.fireShown) {
+      this._tutorial.specialShown = true;
+      this._startTutorialBeat('special');
+      return;
+    }
+
+    if (!this._tutorial.objectivesShown && this._tutorial.specialShown) {
       this._tutorial.objectivesShown = true;
       this._startTutorialBeat('objectives');
     }
@@ -1340,12 +1365,26 @@ export class Game {
     }
   }
 
+  _noteTutorialSpecialTrashDestroyed() {
+    if (!this._isTutorialActiveForCurrentLevel()) return;
+    if (this._tutorial.activeBeatId !== 'special' || !this._tutorial.activeBeatProgress) return;
+
+    if (!this._tutorial.activeBeatProgress.specialDestroyed) {
+      this._tutorial.activeBeatProgress.specialDestroyed = true;
+      this._renderTutorialBeat('special');
+    }
+
+    if (this._tutorial.activeBeatProgress.vaporizerFired) {
+      this._completeActiveTutorialBeat();
+    }
+  }
+
   _updateTutorialBeatDisplay() {
     if (!this._tutorial.activeBeatId) return;
     this._renderTutorialBeat(this._tutorial.activeBeatId);
   }
 
-  _updateActiveTutorialProgress({ dx, dy, thrustHeld, rollSeen, fired, wantsBoost }) {
+  _updateActiveTutorialProgress({ dx, dy, thrustHeld, rollSeen, fired, vaporizerFired, wantsBoost }) {
     if (!this._isTutorialActiveForCurrentLevel() || !this._tutorial.activeBeatId) return;
 
     const progress = this._tutorial.activeBeatProgress;
@@ -1399,6 +1438,18 @@ export class Game {
       }
 
       if (progress.fired && progress.trashDestroyed) {
+        this._completeActiveTutorialBeat();
+      }
+      return;
+    }
+
+    if (this._tutorial.activeBeatId === 'special') {
+      if (!progress.vaporizerFired && vaporizerFired > 0) {
+        progress.vaporizerFired = true;
+        this._updateTutorialBeatDisplay();
+      }
+
+      if (progress.vaporizerFired && progress.specialDestroyed) {
         this._completeActiveTutorialBeat();
       }
       return;
@@ -1510,7 +1561,7 @@ export class Game {
     let fired = 0;
     if (this.input.isDown('mouseleft')) {
       const fireDirection = this._getAssistedFireDirection();
-      fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion);
+      fired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion, 'normal');
       if (fired) {
         this.shotsFired += fired;
         this._noteTutorialShot();
@@ -1521,7 +1572,30 @@ export class Game {
       }
     }
 
-    this._updateActiveTutorialProgress({ dx, dy, thrustHeld, rollSeen, fired, wantsBoost });
+    // Fire vaporizer with Shift
+    let vaporizerFired = 0;
+    if (this.input.isDown('shift')) {
+      const fireDirection = this._getAssistedFireDirection();
+      vaporizerFired = this.projectiles.fire(this.player.mesh.position, fireDirection, this.player.velocity, this.player.mesh.quaternion, 'vaporizer');
+      if (vaporizerFired) {
+        this.shotsFired += vaporizerFired;
+        this._noteTutorialShot();
+        this._refreshPauseMenu();
+        this.player.applyRecoil(this.projectiles.cooldownTime);
+        // spawn a very short muzzle particle burst attached to the player
+        this._spawnMuzzleParticles(new THREE.Vector3(0, 0.2, -1.5), { count: 18, ttl: 0.08 });
+      }
+    }
+
+    this._updateActiveTutorialProgress({
+      dx,
+      dy,
+      thrustHeld,
+      rollSeen,
+      fired: fired + vaporizerFired,
+      vaporizerFired,
+      wantsBoost,
+    });
 
     // Update subsystems
     this.player.update(delta);
@@ -1531,10 +1605,14 @@ export class Game {
     const playerPos = this.player.mesh.position;
     const playerQuat = this.player.baseQuaternion;
     this.asteroidField.update(delta, playerPos);
-    this.debris.update(delta, this.levels.getSpawnConfig(), playerPos, playerQuat);
+    const spawnConfig = this.levels.getSpawnConfig();
+    this.debris.update(delta, spawnConfig, playerPos, playerQuat);
     const asteroidColliders = this.asteroidField.getColliders();
     this.debris.resolveAsteroidCollisions(asteroidColliders);
-    this.specialDebris.update(delta, this.levels.getSpawnConfig(), playerPos, playerQuat);
+    const specialSpawnConfig = this._isTutorialActiveForCurrentLevel()
+      ? { ...spawnConfig, progressPerSpawn: Math.max(24, (spawnConfig?.progressPerSpawn ?? 140) * 0.33) }
+      : spawnConfig;
+    this.specialDebris.update(delta, specialSpawnConfig, playerPos, playerQuat);
     this.specialDebris.resolveAsteroidCollisions(asteroidColliders);
     this._updateTrashteroid(delta);
     this._resolveTrashteroidAsteroidCollisions(asteroidColliders, delta);
@@ -1559,8 +1637,9 @@ export class Game {
     this._updateEffects(delta);
 
     // Collision: projectiles vs debris (regular + special)
-    this._checkProjectileDebrisCollisions();
-    this._checkProjectileDebrisCollisions(this.specialDebris);
+    this._checkProjectileDebrisCollisions(this.debris, 'normal');
+    this._checkProjectileDebrisCollisions(this.specialDebris, 'vaporizer');
+    this._checkProjectileSpecialPenaltyCollisions();
 
     // Collision: trash vs player (hits / misses)
     this._checkDebrisPlayerCollisions(playerPos, playerQuat);
@@ -1569,6 +1648,7 @@ export class Game {
     this._updateMissionTargetIndicator();
     this._updateMinimap();
 
+    this.score = Math.max(0, this.score);
     this.hud.update(this.score, this.levels.current, this.lives);
     this.hud.updateBoostBar(this.boostCharge, this.boostActive);
     this.hud.updateSpeedometer(this.player.velocity.length());
@@ -1611,11 +1691,12 @@ export class Game {
     return { hit: false };
   }
 
-  _checkProjectileDebrisCollisions(debrisManager = this.debris) {
+  _checkProjectileDebrisCollisions(debrisManager = this.debris, projectileTypeFilter = null) {
     const projectiles = this.projectiles.getActive();
     const debrisList = debrisManager.getActive();
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
+      if (projectileTypeFilter && projectiles[i].type !== projectileTypeFilter) continue;
       for (let j = debrisList.length - 1; j >= 0; j--) {
         const hitRadius = debrisList[j].hitRadius || 1;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
@@ -1624,6 +1705,9 @@ export class Game {
           this.trashHits++;
           this._trashDestroyedRequired++;
           this._noteTutorialTrashDestroyed();
+          if (debrisManager === this.specialDebris && projectiles[i].type === 'vaporizer') {
+            this._noteTutorialSpecialTrashDestroyed();
+          }
           if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
             this._trashDestroyedFast++;
           }
@@ -1632,6 +1716,28 @@ export class Game {
           this._spawnScorePopup(_closestPoint.clone(), points);
           this.projectiles.remove(i);
           debrisManager.remove(j);
+          break;
+        }
+      }
+    }
+  }
+
+  _checkProjectileSpecialPenaltyCollisions() {
+    const projectiles = this.projectiles.getActive();
+    const debrisList = this.specialDebris.getActive();
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      if (projectiles[i].type !== 'normal') continue;
+      for (let j = debrisList.length - 1; j >= 0; j--) {
+        const hitRadius = debrisList[j].hitRadius || 1;
+        if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
+          const penalty = debrisList[j].points || 5000;
+          this.score = Math.max(0, this.score - penalty);
+          this._refreshPauseMenu();
+          this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          this._spawnScorePopup(_closestPoint.clone(), -penalty, { color: '#ff3b30' });
+          this.projectiles.remove(i);
+          this.specialDebris.remove(j);
           break;
         }
       }
@@ -2248,15 +2354,16 @@ export class Game {
     this._muzzles.push({ mesh: points, velocities, life: 0, ttl: options.ttl || 0.08 });
   }
 
-  // Spawn a small screen-space score popup at world `pos` with +amount.
-  _spawnScorePopup(pos, amount) {
+  // Spawn a small screen-space score popup at world `pos` with signed amount.
+  _spawnScorePopup(pos, amount, options = {}) {
     const el = document.createElement('div');
-    el.textContent = `+${amount}`;
+    const textColor = options.color || (amount < 0 ? '#ff3b30' : '#ffd966');
+    el.textContent = `${amount > 0 ? '+' : ''}${amount}`;
     Object.assign(el.style, {
       position: 'absolute',
       left: '0px',
       top: '0px',
-      color: '#ffd966',
+      color: textColor,
       fontWeight: '700',
       pointerEvents: 'none',
       transform: 'translate(-50%, -50%)',

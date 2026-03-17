@@ -13,7 +13,7 @@ export class ProjectileManager {
     this.cooldownTime = 0.065; // seconds between shots (rapid-fire)
   }
 
-  fire(origin, direction, playerVelocity, playerQuat) {
+  fire(origin, direction, playerVelocity, playerQuat, type = 'normal') {
     if (this.cooldown > 0) return 0;
     this.cooldown = this.cooldownTime;
 
@@ -39,15 +39,22 @@ export class ProjectileManager {
 
     const lateralOffset = 0.28; // how far apart the two bullets spawn
 
+    // Colors based on type
+    const colors = {
+      normal: { core: 0x00ff44, glow: 0x66ff88 },
+      vaporizer: { core: 0xffe600, glow: 0xfff27a }
+    };
+    const color = colors[type] || colors.normal;
+
     // Reusable geometries/materials per-shot (small, cheap)
     const coreGeo = new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6);
     coreGeo.rotateX(Math.PI / 2);
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
+    const coreMat = new THREE.MeshBasicMaterial({ color: color.core });
 
     const glowGeo = new THREE.CylinderGeometry(0.22, 0.22, 2.0, 6);
     glowGeo.rotateX(Math.PI / 2);
     const glowMat = new THREE.MeshBasicMaterial({
-      color: 0x66ff88,
+      color: color.glow,
       transparent: true,
       opacity: 0.55,
       blending: THREE.AdditiveBlending,
@@ -74,6 +81,7 @@ export class ProjectileManager {
         position: core.position,
         prevPosition: core.position.clone(),
         travelled: 0,
+        type: type,
       });
       spawnedCount++;
     }

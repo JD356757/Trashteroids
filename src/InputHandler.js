@@ -9,14 +9,14 @@ export class InputHandler {
     this.pointerLocked = false;
     this._pointerLockCanvas = null;
     this._onKeyDown = (e) => {
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      const key = this._normalizeKey(e.key);
       if (!this._held[key]) {
         this._pressed[key] = true;
       }
       this._held[key] = true;
     };
     this._onKeyUp = (e) => {
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      const key = this._normalizeKey(e.key);
       this._held[key] = false;
     };
     this._onPointerLockChange = () => {
@@ -59,12 +59,16 @@ export class InputHandler {
 
   /** True while key is held */
   isDown(key) {
-    return !!this._held[key];
+    return !!this._held[this._normalizeKey(key)];
   }
 
   /** True only on the frame the key was first pressed */
   wasPressed(key) {
-    return !!this._pressed[key];
+    return !!this._pressed[this._normalizeKey(key)];
+  }
+
+  _normalizeKey(key) {
+    return typeof key === 'string' ? key.toLowerCase() : key;
   }
 
   /** Get mouse delta since last reset and clear it */
