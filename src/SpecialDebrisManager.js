@@ -14,7 +14,7 @@ const SPECIAL_COL_RADIUS   = 8.5;
 const SPECIAL_OUTLINE_COLOR = 0xffe600;   // yellow
 const SPECIAL_OUTLINE_SCALE = 1.07;
 const SPECIAL_MAX_ACTIVE   = 3;
-const SPECIAL_SPAWN_RATIO  = 50;          // 1 special per 50 normal-trash progress ticks
+const SPECIAL_SPAWN_RATIO  = 30;          // 1 special per 30 normal-trash progress ticks
 const ASTEROID_BOUNCE      = 0.24;
 
 const _playerForward   = new THREE.Vector3();

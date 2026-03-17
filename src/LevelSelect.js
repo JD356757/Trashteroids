@@ -15,7 +15,7 @@ const SHIP_START = new THREE.Vector3(EARTH_POS.x, EARTH_POS.y + 2, EARTH_POS.z +
 
 const LEVEL_DATA = [
   { id: 1, label: 'LEVEL 1', sub: '15,000 mi — Debris Field', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
-  { id: 2, label: 'LEVEL 2', sub: '5,000 mi — Junk Belt',    color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
+  { id: 2, label: 'LEVEL 2', sub: '15,000 mi — Junk Belt',   color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
   { id: 3, label: 'LEVEL 3', sub: '1 mi — BOSS',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
 ];
 

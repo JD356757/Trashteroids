@@ -41,7 +41,7 @@ export const LEVEL_CONFIGS = {
     },
   },
   2: {
-    label: 'LEVEL 2 - 5,000 miles to trashteroid',
+    label: 'LEVEL 2 - 15,000 miles to trashteroid',
     briefingTagline: 'Make your way to the trashteroid. Clear the path by destroying more trash.',
     timer: 240,
     mission: {
