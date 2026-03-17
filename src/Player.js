@@ -32,14 +32,15 @@ export class Player {
     this.modelScale = 1;
     this.velocity = new THREE.Vector3();
     this.currentRoll = 0;
+    this._smoothCosmeticPitch = 0;
     this.manualRollInput = 0;
     this.baseQuaternion = new THREE.Quaternion();
     this.yawRate = 0;
     this.pitchRate = 0;
     this.turnInputYaw = 0;
     this.turnInputPitch = 0;
-    this.flashTimer = 0;
     this.thrustActive = false;
+    this._flashIntervalId = null;
 
     this.mesh = new THREE.Group();
     this.mesh.position.set(0, 0, 10);
@@ -160,8 +161,8 @@ export class Player {
     const dt = Math.max(delta, 1 / 240);
 
     // Convert mouse delta into normalized turn intent.
-    this.turnInputYaw = THREE.MathUtils.clamp((-dx * this.mouseSensitivity / 8) / dt, -1, 1);
-    this.turnInputPitch = THREE.MathUtils.clamp((-dy * this.mouseSensitivity / 8) / dt, -1, 1);
+    this.turnInputYaw = THREE.MathUtils.clamp((-dx * this.mouseSensitivity / 10) / dt, -1, 1);
+    this.turnInputPitch = THREE.MathUtils.clamp((-dy * this.mouseSensitivity / 10) / dt, -1, 1);
   }
 
   thrust(delta, boostMultiplier = 1) {
@@ -176,6 +177,54 @@ export class Player {
   applyRecoil(duration) {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
     this.velocity.addScaledVector(_forward, -this.recoilAcceleration * duration);
+  }
+
+  flashDamage(duration = 1.0) {
+    // Collect current mesh materials
+    const mats = [];
+    this.mesh.traverse(child => {
+      if (!child.isMesh) return;
+      const arr = Array.isArray(child.material) ? child.material : [child.material];
+      arr.forEach(m => { if (m) mats.push(m); });
+    });
+    if (mats.length === 0) return;
+
+    // Cancel any previous flash
+    if (this._flashIntervalId) {
+      clearInterval(this._flashIntervalId);
+      this._flashIntervalId = null;
+    }
+
+    const INTERVAL_MS = 110;
+    let elapsed = 0;
+    let flashOn = false;
+
+    const restore = () => mats.forEach(m => {
+      if (m.userData.originalColor) m.color.copy(m.userData.originalColor);
+      m.map = m.userData.originalMap || null;
+      m.needsUpdate = true;
+    });
+
+    this._flashIntervalId = setInterval(() => {
+      elapsed += INTERVAL_MS;
+      flashOn = !flashOn;
+      mats.forEach(m => {
+        if (flashOn) {
+          m.color.setRGB(1, 0.08, 0.08);
+          m.map = null;
+        } else {
+          if (m.userData.originalColor) m.color.copy(m.userData.originalColor);
+          m.map = m.userData.originalMap || null;
+        }
+        m.needsUpdate = true;
+      });
+
+      if (elapsed >= duration * 1000) {
+        clearInterval(this._flashIntervalId);
+        this._flashIntervalId = null;
+        restore();
+      }
+    }, INTERVAL_MS);
   }
 
 
@@ -210,8 +259,9 @@ export class Player {
     this.currentRoll = THREE.MathUtils.lerp(this.currentRoll, targetRoll, Math.min(1, this.rollReturnSpeed * delta));
     const rollVisualPitch = Math.abs(this.currentRoll) * 0.3;
     const inputPitch = (this.pitchRate / this.maxTurnRate) * this.pitchOnPitch;
-    let cosmeticPitch = rollVisualPitch + inputPitch;
-    cosmeticPitch = THREE.MathUtils.clamp(cosmeticPitch, -0.6, 0.6);
+    const targetCosmeticPitch = THREE.MathUtils.clamp(rollVisualPitch + inputPitch, -0.6, 0.6);
+    this._smoothCosmeticPitch = THREE.MathUtils.lerp(this._smoothCosmeticPitch, targetCosmeticPitch, Math.min(1, 8 * delta));
+    const cosmeticPitch = this._smoothCosmeticPitch;
     _rollQ.setFromAxisAngle(_zAxis, this.currentRoll);
     _pitchQ.setFromAxisAngle(_xAxis, cosmeticPitch);
     _pitchQ.premultiply(_rollQ);

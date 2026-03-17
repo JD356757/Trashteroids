@@ -768,8 +768,25 @@ body::before {
 }
 
 #damage-vignette.low {
-  opacity: 0.28;
-  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(160,0,0,0.32) 100%);
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(160,0,0,1) 90%);
+}
+
+@keyframes low-health-pulse {
+  0%, 100% { opacity: 0.1; }
+  50%       { opacity: 0.45; }
+}
+
+#damage-vignette.pulsing {
+  animation: low-health-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes damage-flash {
+  0%   { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+#damage-vignette.flashing {
+  animation: damage-flash 900ms ease-out forwards;
 }
 
 #overlay {

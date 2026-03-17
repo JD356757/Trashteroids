@@ -42,8 +42,6 @@ export class HUD {
     }
     this.damageVignette = document.getElementById('damage-vignette');
     this._lowHealth = false;
-    this._flashTimer = null;
-    this._fadeTimer = null;
     this._speedSamples = [];
     this._tutorialCalloutHideTimer = null;
     this._tutorialCalloutAnimationFrame = null;
@@ -200,60 +198,22 @@ export class HUD {
     }
   }
 
-  flashDamage(amount = 1) {
+  flashDamage() {
     if (!this.damageVignette) return;
-    // clear any existing fade timers so repeated hits stack correctly
-    if (this._fadeTimer) {
-      clearTimeout(this._fadeTimer);
-      this._fadeTimer = null;
-    }
-
     const el = this.damageVignette;
-    const lowOpacity = this._lowHealth ? 0.28 : 0;
-    const flashOpacity = Math.min(0.95, 0.4 + Math.min(amount, 4) * 0.15);
-
-    // Immediately show at full flash opacity (no CSS transition)
-    el.style.transition = 'none';
-    el.style.opacity = `${flashOpacity}`;
-    // force reflow so the immediate style takes effect
-    // eslint-disable-next-line no-unused-expressions
-    el.offsetWidth;
-
-    // then schedule a slow fade back down to the lowOpacity
-    // use a CSS transition only for the fade-out controlled here
-    el.style.transition = 'opacity 900ms cubic-bezier(.22,.9,.3,1)';
-    // small timeout to ensure transition is applied
-    setTimeout(() => {
-      el.style.opacity = `${lowOpacity}`;
-    }, 20);
-
-    // clear transition after fade completes to keep future flashes instant
-    this._fadeTimer = setTimeout(() => {
-      el.style.transition = '';
-      // if low health is enabled, keep the lowOpacity; otherwise ensure fully hidden
-      el.style.opacity = `${lowOpacity}`;
-      this._fadeTimer = null;
-    }, 950);
+    // Restart the flash animation by toggling the class
+    el.classList.remove('flashing');
+    void el.offsetWidth; // force reflow so the animation restarts
+    el.classList.add('flashing');
+    el.addEventListener('animationend', () => el.classList.remove('flashing'), { once: true });
   }
 
   setLowHealth(enabled) {
     if (!this.damageVignette) return;
     this._lowHealth = !!enabled;
-    this.damageVignette.classList.toggle('low', !!enabled);
-    // Cancel any ongoing fade so low-health state appears immediately
-    if (this._fadeTimer) {
-      clearTimeout(this._fadeTimer);
-      this._fadeTimer = null;
-    }
-    // Apply low-health opacity immediately (no transition)
     const el = this.damageVignette;
-    el.style.transition = 'none';
-    el.style.opacity = enabled ? '0.28' : '0';
-    // ensure the style takes effect
-    // eslint-disable-next-line no-unused-expressions
-    el.offsetWidth;
-    // clear inline transition so future flashes can set their own
-    el.style.transition = '';
+    el.classList.toggle('low', !!enabled);
+    el.classList.toggle('pulsing', !!enabled);
   }
 
   updateBossBar(health, maxHealth) {
