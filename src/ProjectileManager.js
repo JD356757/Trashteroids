@@ -18,9 +18,11 @@ export class ProjectileManager {
     this.cooldown = this.cooldownTime;
 
     const dir = direction.clone().normalize();
-    // Combine bullet speed along aim direction with the player's current velocity
+    // Combine bullet speed along aim direction with the player's full velocity
     const vel = dir.clone().multiplyScalar(this.speed);
-    if (playerVelocity) vel.add(playerVelocity);
+    if (playerVelocity) {
+      vel.add(playerVelocity);
+    }
 
     // Determine lateral right vector for dual-shot offsets.
     // Prefer the ship's local right (includes roll) if available, otherwise
@@ -60,7 +62,7 @@ export class ProjectileManager {
       core.add(glow);
 
       // Position: forward from origin, then apply lateral offset
-      core.position.copy(origin).addScaledVector(dir, 1.5).addScaledVector(right, offsets[i]);
+      core.position.copy(origin).addScaledVector(dir, 0.5).addScaledVector(right, offsets[i]);
 
       // Orient beam along its travel direction
       core.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
