@@ -12,7 +12,7 @@ export const LEVEL_CONFIGS = {
       successTitle: 'SECTOR 1 CLEARED',
       successSubtitle: 'Required objective complete.',
       primary: {
-        trashRequired: 75,
+        trashRequired: 30,
       },
       bonus: {
         fastTrashRequired: 3,

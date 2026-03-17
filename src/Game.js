@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Player } from './Player.js';
 import { DebrisManager } from './DebrisManager.js';
+import { SpecialDebrisManager } from './SpecialDebrisManager.js';
 import { ProjectileManager } from './ProjectileManager.js';
 import { LevelManager } from './LevelManager.js';
 import { InputHandler } from './InputHandler.js';
@@ -253,6 +254,7 @@ export class Game {
     this.player = new Player(this.scene);
     this._prevPlayerPos = this.player.mesh.position.clone();
     this.debris = new DebrisManager(this.scene);
+    this.specialDebris = new SpecialDebrisManager(this.scene);
     this.projectiles = new ProjectileManager(this.scene);
     this.levels = new LevelManager();
     this.hud = new HUD();
@@ -312,6 +314,7 @@ export class Game {
     this._clearScheduledReturnToLevelSelect();
     this.projectiles.clear();
     this.debris.clear();
+    this.specialDebris.clear();
     this._clearTrashteroidProjectiles();
     this._clearTransientEffects();
     this.input?.dispose?.();
@@ -578,6 +581,7 @@ export class Game {
 
     this.projectiles.clear();
     this.debris.clear();
+    this.specialDebris.clear();
     this._clearTransientEffects();
     this._resetPlayerState(resetPlayerPosition);
     this._configureTrashteroidForLevel(levelConfig);
@@ -1530,6 +1534,8 @@ export class Game {
     this.debris.update(delta, this.levels.getSpawnConfig(), playerPos, playerQuat);
     const asteroidColliders = this.asteroidField.getColliders();
     this.debris.resolveAsteroidCollisions(asteroidColliders);
+    this.specialDebris.update(delta, this.levels.getSpawnConfig(), playerPos, playerQuat);
+    this.specialDebris.resolveAsteroidCollisions(asteroidColliders);
     this._updateTrashteroid(delta);
     this._resolveTrashteroidAsteroidCollisions(asteroidColliders, delta);
     this._updateTrashteroidProjectiles(delta);
@@ -1552,11 +1558,13 @@ export class Game {
     // Update transient effects (particles + screen popups)
     this._updateEffects(delta);
 
-    // Collision: projectiles vs debris
+    // Collision: projectiles vs debris (regular + special)
     this._checkProjectileDebrisCollisions();
+    this._checkProjectileDebrisCollisions(this.specialDebris);
 
     // Collision: trash vs player (hits / misses)
     this._checkDebrisPlayerCollisions(playerPos, playerQuat);
+    this._checkDebrisPlayerCollisions(playerPos, playerQuat, this.specialDebris);
 
     this._updateMissionTargetIndicator();
     this._updateMinimap();
@@ -1603,9 +1611,9 @@ export class Game {
     return { hit: false };
   }
 
-  _checkProjectileDebrisCollisions() {
+  _checkProjectileDebrisCollisions(debrisManager = this.debris) {
     const projectiles = this.projectiles.getActive();
-    const debrisList = this.debris.getActive();
+    const debrisList = debrisManager.getActive();
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
       for (let j = debrisList.length - 1; j >= 0; j--) {
@@ -1623,15 +1631,15 @@ export class Game {
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
           this._spawnScorePopup(_closestPoint.clone(), points);
           this.projectiles.remove(i);
-          this.debris.remove(j);
+          debrisManager.remove(j);
           break;
         }
       }
     }
   }
 
-  _checkDebrisPlayerCollisions(playerPos = this.player.mesh.position, playerQuat = this.player.baseQuaternion) {
-    const debrisList = this.debris.getActive();
+  _checkDebrisPlayerCollisions(playerPos = this.player.mesh.position, playerQuat = this.player.baseQuaternion, debrisManager = this.debris) {
+    const debrisList = debrisManager.getActive();
     _shipForward.set(0, 0, -1).applyQuaternion(playerQuat);
 
     for (let i = debrisList.length - 1; i >= 0; i--) {
@@ -1694,7 +1702,7 @@ export class Game {
       // Trash that slips behind the player counts as a miss.
       if (distSq < passDistance * passDistance && forwardOffset < -hitRadius) {
         this.score = Math.max(0, this.score - 50);
-        this.debris.remove(i);
+        debrisManager.remove(i);
       }
     }
   }
@@ -1769,14 +1777,12 @@ export class Game {
 
     this.lives = Math.max(0, this.lives - damage);
     this.playerHitCooldown = PLAYER_HIT_COOLDOWN;
-    this.player.flashWhite();
+    this.player.flashDamage(PLAYER_HIT_COOLDOWN);
 
     // trigger HUD damage flash and low-health indicator
-    try {
-      if (this.hud && typeof this.hud.flashDamage === 'function') this.hud.flashDamage(damage);
-      if (this.hud && typeof this.hud.setLowHealth === 'function') this.hud.setLowHealth(this.lives <= 20);
-    } catch (e) {
-      // ignore HUD errors
+    if (this.hud) {
+      if (typeof this.hud.flashDamage === 'function') this.hud.flashDamage();
+      if (typeof this.hud.setLowHealth === 'function') this.hud.setLowHealth(this.lives <= 20);
     }
 
     if (this.lives <= 0) {
@@ -1947,7 +1953,7 @@ export class Game {
     const fovMin = 50;
     const fovMax = 75;
     const speedForMinFov = 400; // max non-boost speed (no FOV widening below this)
-    const speedForMaxFov = speedForMinFov * this.player.boostMultiplier * 0.8; // max boosted speed
+    const speedForMaxFov = speedForMinFov * this.player.boostMultiplier * 0.65; // max boosted speed
 
     let t = 0;
     if (this.boostActive) {
@@ -1997,6 +2003,12 @@ export class Game {
       if (distance < bestDistance) {
         bestDistance = distance;
       }
+    }
+
+    const specialList = this.specialDebris.getActive();
+    for (let i = 0; i < specialList.length; i++) {
+      const distance = this._intersectAimSphere(specialList[i].position, specialList[i].hitRadius || 1.0);
+      if (distance < bestDistance) bestDistance = distance;
     }
 
     // Ignore intersections that are extremely close to the camera (they indicate
