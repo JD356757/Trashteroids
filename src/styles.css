@@ -859,11 +859,11 @@ body::before {
   --button-float: 0px;
   position: relative;
   display: inline-block;
-  min-width: 216px;
+  min-width: 260px;
   min-height: 0;
-  padding: 14px 20px 12px;
+  padding: 16px 28px 14px;
   font-family: 'Press Start 2P', monospace;
-  font-size: 12px;
+  font-size: 14px;
   color: #dff8ff;
   background: rgba(9, 18, 28, 0.9);
   border: 2px solid rgba(124, 232, 255, 0.42);

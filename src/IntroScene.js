@@ -52,12 +52,8 @@ export class IntroScene {
     this.overlayPanel = this.overlay?.querySelector('.overlay-panel') ?? null;
     this.startButton = document.getElementById('start-btn');
 
-    this._buildLights();
+    // Only build the star backdrop for a minimal intro scene.
     this._buildBackdrop();
-    this._buildPlanet();
-    this._buildAsteroids();
-    this._buildTrashHalo();
-    this._buildShip();
 
     this._onResize = this._onResize.bind(this);
     this._frame = this._frame.bind(this);
@@ -371,72 +367,17 @@ export class IntroScene {
     this._elapsed += delta;
 
     const t = this._elapsed;
-    this.camera.position.set(
-      Math.cos(t * 0.16) * 2.8,
-      1.8 + Math.sin(t * 0.27) * 0.45,
-      15 + Math.sin(t * 0.2) * 1.1
-    );
+
+    // Gentle camera motion for a simple star-only intro.
+    this.camera.position.set(Math.cos(t * 0.08) * 1.2, 1.6 + Math.sin(t * 0.12) * 0.25, 16);
     this.camera.lookAt(0, 0, -9);
-
-    if (this.shipRig) {
-      _orbitCenter.copy(this.planetGroup?.position || new THREE.Vector3(-8.5, -2.2, -14));
-      const orbitAngle = t * 0.46;
-      const orbitRadiusX = 7.8;
-      const orbitRadiusZ = 5.4;
-      const shipX = _orbitCenter.x + Math.cos(orbitAngle) * orbitRadiusX;
-      const shipY = _orbitCenter.y + 1.8 + Math.sin(t * 1.15) * 1.1;
-      const shipZ = _orbitCenter.z + Math.sin(orbitAngle) * orbitRadiusZ;
-      this.shipRig.position.set(shipX, shipY, shipZ);
-
-      _lookTarget.set(
-        _orbitCenter.x + Math.cos(orbitAngle + 0.55) * orbitRadiusX,
-        _orbitCenter.y + Math.sin(t * 1.15 + 0.4) * 0.9 + 1.2,
-        _orbitCenter.z + Math.sin(orbitAngle + 0.55) * orbitRadiusZ
-      );
-      this.shipRig.lookAt(_lookTarget);
-      this.shipRig.rotateY(Math.PI / 2);
-    }
-
-    this._animateOverlay(t);
-
-    if (this.planetGroup) {
-      this.planetGroup.rotation.y += delta * 0.08;
-      this.planetGroup.rotation.z = Math.sin(t * 0.18) * 0.05;
-    }
-
-    if (this.asteroidField) {
-      for (let i = 0; i < this.asteroidField.children.length; i++) {
-        const asteroid = this.asteroidField.children[i];
-        asteroid.rotation.x += asteroid.userData.spin.x * delta;
-        asteroid.rotation.y += asteroid.userData.spin.y * delta;
-        asteroid.rotation.z += asteroid.userData.spin.z * delta;
-        asteroid.position.z += asteroid.userData.drift * delta;
-        if (asteroid.position.z > 8) {
-          asteroid.position.z = -26 - Math.random() * 10;
-          asteroid.position.x = (Math.random() - 0.5) * 18;
-          asteroid.position.y = (Math.random() - 0.5) * 7;
-        }
-      }
-    }
-
-    if (this.trashField) {
-      for (let i = 0; i < this._trashOrbiters.length; i++) {
-        const piece = this._trashOrbiters[i];
-        piece.rotation.x += piece.spin.x * delta;
-        piece.rotation.y += piece.spin.y * delta;
-        piece.rotation.z += piece.spin.z * delta;
-        piece.orbitAngle += delta * (0.08 + i * 0.0008);
-        piece.position.x = Math.cos(piece.orbitAngle) * piece.orbitRadius;
-        piece.position.z = Math.sin(piece.orbitAngle) * piece.orbitRadius - 10;
-        piece.position.y = piece.orbitHeight + Math.sin(t * 0.7 + piece.bobPhase) * 0.16;
-      }
-      this._syncTrashHaloInstances();
-    }
 
     if (this.starfield) {
       this.starfield.rotation.y += delta * 0.006;
-      this.starfield.rotation.x = Math.sin(t * 0.12) * 0.05;
+      this.starfield.rotation.x = Math.sin(t * 0.12) * 0.02;
     }
+
+    this._animateOverlay(t);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -450,27 +391,19 @@ export class IntroScene {
   _animateOverlay(t) {
     if (!this.overlay) return;
 
-    let shiftX = Math.sin(t * 0.62) * 6;
-    let shiftY = Math.cos(t * 0.78) * 4;
-    let tiltX = Math.sin(t * 0.31) * 2.4;
-    let tiltY = Math.cos(t * 0.43) * 3.4;
-
-    if (this.shipRig) {
-      const projected = this.shipRig.position.clone().project(this.camera);
-      shiftX += projected.x * 10;
-      shiftY += projected.y * -8;
-      tiltY += projected.x * 2.8;
-      tiltX += projected.y * -2.2;
-    }
+    const shiftX = Math.sin(t * 0.48) * 4;
+    const shiftY = Math.cos(t * 0.56) * 3;
+    const tiltX = Math.sin(t * 0.24) * 1.8;
+    const tiltY = Math.cos(t * 0.34) * 2.6;
 
     this.overlay.style.setProperty('--overlay-shift-x', `${shiftX.toFixed(2)}px`);
     this.overlay.style.setProperty('--overlay-shift-y', `${shiftY.toFixed(2)}px`);
     this.overlay.style.setProperty('--overlay-tilt-x', `${tiltX.toFixed(2)}deg`);
     this.overlay.style.setProperty('--overlay-tilt-y', `${tiltY.toFixed(2)}deg`);
-    this.overlay.style.setProperty('--overlay-glow', `${(0.22 + Math.sin(t * 1.4) * 0.08).toFixed(3)}`);
+    this.overlay.style.setProperty('--overlay-glow', `${(0.22 + Math.sin(t * 1.4) * 0.06).toFixed(3)}`);
 
     if (this.startButton) {
-      this.startButton.style.setProperty('--button-float', `${(Math.sin(t * 1.2) * 3).toFixed(2)}px`);
+      this.startButton.style.setProperty('--button-float', `${(Math.sin(t * 1.1) * 4).toFixed(2)}px`);
     }
   }
 }

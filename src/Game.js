@@ -48,6 +48,7 @@ const PLAYER_HIT_COOLDOWN = 1.0;
 const PROJECTILE_HIT_PADDING = 0.45;
 const AIM_FALLBACK_DISTANCE = 800;
 const AIM_LOWERING = 0.035;
+const MIN_AIM_DISTANCE = 1.0; // ignore intersections closer than this to the camera
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
 const PLAYER_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
@@ -2005,6 +2006,13 @@ export class Game {
       if (distance < bestDistance) {
         bestDistance = distance;
       }
+    }
+
+    // Ignore intersections that are extremely close to the camera (they indicate
+    // the camera is inside or grazing the collider). Treat those as no-hit so the
+    // fallback aim distance is used instead.
+    if (bestDistance < MIN_AIM_DISTANCE) {
+      bestDistance = Infinity;
     }
 
     if (bestDistance < Infinity) {
