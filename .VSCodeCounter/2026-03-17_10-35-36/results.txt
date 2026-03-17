@@ -1,0 +1,39 @@
+Date : 2026-03-17 10:35:36
+Directory : c:\Users\dhruv\trashteroidzip\src
+Total : 14 files,  6468 codes, 286 comments, 1038 blanks, all 7792 lines
+
+Languages
++------------+------------+------------+------------+------------+------------+
+| language   | files      | code       | comment    | blank      | total      |
++------------+------------+------------+------------+------------+------------+
+| JavaScript |         13 |      5,066 |        273 |        842 |      6,181 |
+| PostCSS    |          1 |      1,402 |         13 |        196 |      1,611 |
++------------+------------+------------+------------+------------+------------+
+
+Directories
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                      | files      | code       | comment    | blank      | total      |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                         |         14 |      6,468 |        286 |      1,038 |      7,792 |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| filename                                                  | language   | code       | comment    | blank      | total      |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+
+| c:\Users\dhruv\trashteroidzip\src\AsteroidField.js        | JavaScript |        311 |         38 |         64 |        413 |
+| c:\Users\dhruv\trashteroidzip\src\DebrisManager.js        | JavaScript |        438 |          3 |         83 |        524 |
+| c:\Users\dhruv\trashteroidzip\src\Game.js                 | JavaScript |      2,077 |        115 |        347 |      2,539 |
+| c:\Users\dhruv\trashteroidzip\src\HUD.js                  | JavaScript |        398 |          7 |         69 |        474 |
+| c:\Users\dhruv\trashteroidzip\src\InputHandler.js         | JavaScript |         91 |          6 |         11 |        108 |
+| c:\Users\dhruv\trashteroidzip\src\IntroScene.js           | JavaScript |        375 |          3 |         62 |        440 |
+| c:\Users\dhruv\trashteroidzip\src\LevelManager.js         | JavaScript |        158 |          4 |         11 |        173 |
+| c:\Users\dhruv\trashteroidzip\src\LevelSelect.js          | JavaScript |        401 |         59 |         82 |        542 |
+| c:\Users\dhruv\trashteroidzip\src\Player.js               | JavaScript |        316 |         15 |         30 |        361 |
+| c:\Users\dhruv\trashteroidzip\src\ProjectileManager.js    | JavaScript |        105 |          6 |         19 |        130 |
+| c:\Users\dhruv\trashteroidzip\src\SpecialDebrisManager.js | JavaScript |        284 |          1 |         44 |        329 |
+| c:\Users\dhruv\trashteroidzip\src\Starfield.js            | JavaScript |         32 |          8 |          8 |         48 |
+| c:\Users\dhruv\trashteroidzip\src\main.js                 | JavaScript |         80 |          8 |         12 |        100 |
+| c:\Users\dhruv\trashteroidzip\src\styles.css              | PostCSS    |      1,402 |         13 |        196 |      1,611 |
+| Total                                                     |            |      6,468 |        286 |      1,038 |      7,792 |
++-----------------------------------------------------------+------------+------------+------------+------------+------------+

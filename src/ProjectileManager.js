@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 
-// Debug flag: when true projectiles will not move (helpful to verify ship movement)
-const DEBUG_FREEZE_PROJECTILES = false;
+const _dirForward = new THREE.Vector3(0, 0, -1);
+const _fallbackUp = new THREE.Vector3(0, 1, 0);
+const _right = new THREE.Vector3();
+const _fireDirection = new THREE.Vector3();
+const _baseVelocity = new THREE.Vector3();
+const _offsets = [0.28, -0.28];
+const PROJECTILE_COLORS = {
+  normal: { core: 0x00ff44, glow: 0x66ff88 },
+  vaporizer: { core: 0xffe600, glow: 0xfff27a },
+};
 
 export class ProjectileManager {
   constructor(scene) {
@@ -11,73 +19,67 @@ export class ProjectileManager {
     this.maxDist = 2000;  // despawn after this travel distance
     this.cooldown = 0;
     this.cooldownTime = 0.065; // seconds between shots (rapid-fire)
+
+    this._coreGeometry = new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6);
+    this._coreGeometry.rotateX(Math.PI / 2);
+    this._glowGeometry = new THREE.CylinderGeometry(0.22, 0.22, 2.0, 6);
+    this._glowGeometry.rotateX(Math.PI / 2);
+
+    this._styles = {};
+    for (const [type, colors] of Object.entries(PROJECTILE_COLORS)) {
+      this._styles[type] = {
+        coreMat: new THREE.MeshBasicMaterial({ color: colors.core }),
+        glowMat: new THREE.MeshBasicMaterial({
+          color: colors.glow,
+          transparent: true,
+          opacity: 0.55,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      };
+    }
   }
 
   fire(origin, direction, playerVelocity, playerQuat, type = 'normal') {
     if (this.cooldown > 0) return 0;
     this.cooldown = this.cooldownTime;
 
-    const dir = direction.clone().normalize();
+    _fireDirection.copy(direction).normalize();
     // Combine bullet speed along aim direction with the player's full velocity
-    const vel = dir.clone().multiplyScalar(this.speed);
+    _baseVelocity.copy(_fireDirection).multiplyScalar(this.speed);
     if (playerVelocity) {
-      vel.add(playerVelocity);
+      _baseVelocity.add(playerVelocity);
     }
 
     // Determine lateral right vector for dual-shot offsets.
     // Prefer the ship's local right (includes roll) if available, otherwise
     // fall back to cross(dir, worldUp).
-    const right = new THREE.Vector3();
     if (playerQuat) {
-      right.set(1, 0, 0).applyQuaternion(playerQuat).normalize();
+      _right.set(1, 0, 0).applyQuaternion(playerQuat).normalize();
     } else {
-      const up = new THREE.Vector3(0, 1, 0);
-      right.crossVectors(dir, up);
-      if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
-      right.normalize();
+      _right.crossVectors(_fireDirection, _fallbackUp);
+      if (_right.lengthSq() < 1e-6) _right.set(1, 0, 0);
+      _right.normalize();
     }
 
-    const lateralOffset = 0.28; // how far apart the two bullets spawn
-
-    // Colors based on type
-    const colors = {
-      normal: { core: 0x00ff44, glow: 0x66ff88 },
-      vaporizer: { core: 0xffe600, glow: 0xfff27a }
-    };
-    const color = colors[type] || colors.normal;
-
-    // Reusable geometries/materials per-shot (small, cheap)
-    const coreGeo = new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6);
-    coreGeo.rotateX(Math.PI / 2);
-    const coreMat = new THREE.MeshBasicMaterial({ color: color.core });
-
-    const glowGeo = new THREE.CylinderGeometry(0.22, 0.22, 2.0, 6);
-    glowGeo.rotateX(Math.PI / 2);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: color.glow,
-      transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
+    const style = this._styles[type] || this._styles.normal;
 
     let spawnedCount = 0;
-    const offsets = [lateralOffset, -lateralOffset];
-    for (let i = 0; i < offsets.length; i++) {
-      const core = new THREE.Mesh(coreGeo, coreMat);
-      const glow = new THREE.Mesh(glowGeo, glowMat);
+    for (let i = 0; i < _offsets.length; i++) {
+      const core = new THREE.Mesh(this._coreGeometry, style.coreMat);
+      const glow = new THREE.Mesh(this._glowGeometry, style.glowMat);
       core.add(glow);
 
       // Position: forward from origin, then apply lateral offset
-      core.position.copy(origin).addScaledVector(dir, 0.5).addScaledVector(right, offsets[i]);
+      core.position.copy(origin).addScaledVector(_fireDirection, 0.5).addScaledVector(_right, _offsets[i]);
 
       // Orient beam along its travel direction
-      core.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
+      core.quaternion.setFromUnitVectors(_dirForward, _fireDirection);
 
       this.scene.add(core);
       this.active.push({
         mesh: core,
-        velocity: vel.clone(),
+        velocity: _baseVelocity.clone(),
         position: core.position,
         prevPosition: core.position.clone(),
         travelled: 0,
@@ -91,12 +93,6 @@ export class ProjectileManager {
 
   update(delta) {
     this.cooldown -= delta;
-
-    if (DEBUG_FREEZE_PROJECTILES) {
-      // Don't move projectiles — leave them where they spawned so
-      // it's easy to observe ship movement independently.
-      return;
-    }
 
     for (let i = this.active.length - 1; i >= 0; i--) {
       const p = this.active[i];

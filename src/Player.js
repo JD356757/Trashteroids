@@ -17,7 +17,6 @@ export class Player {
     this.boostMultiplier = 2.0;
     this.recoilAcceleration = 42;
     this.mouseSensitivity = 0.024;
-    this.turnAcceleration = 5.0;   // unused
     this.maxTurnRate = 2.9;
     this.turnSmoothing = 18;        // how quickly rate tracks input (higher = snappier)
     this.rollOnYaw = -0.4;
@@ -155,12 +154,10 @@ export class Player {
     });
   }
 
-
-
   rotate(dx, dy, delta) {
     const dt = Math.max(delta, 1 / 240);
 
-    // Convert mouse delta into normalized turn intent.
+    // Turn raw mouse movement into normalized pitch/yaw intent.
     this.turnInputYaw = THREE.MathUtils.clamp((-dx * this.mouseSensitivity / 10) / dt, -1, 1);
     this.turnInputPitch = THREE.MathUtils.clamp((-dy * this.mouseSensitivity / 10) / dt, -1, 1);
   }
@@ -168,11 +165,10 @@ export class Player {
   thrust(delta, boostMultiplier = 1) {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
     this.velocity.addScaledVector(_forward, this.thrustPower * boostMultiplier * delta);
-    // mark thrust active for exhaust visuals
+    // Keep exhaust effects active while thrust is applied.
     this.thrustActive = true;
     this.thrustLevel = Math.min(1.35, boostMultiplier);
   }
-
 
   applyRecoil(duration) {
     _forward.set(0, 0, -1).applyQuaternion(this.baseQuaternion);
@@ -189,7 +185,7 @@ export class Player {
     });
     if (mats.length === 0) return;
 
-    // Cancel any previous flash
+    // If one flash is already running, restart it cleanly.
     if (this._flashIntervalId) {
       clearInterval(this._flashIntervalId);
       this._flashIntervalId = null;
@@ -227,16 +223,13 @@ export class Player {
     }, INTERVAL_MS);
   }
 
-
-
   update(delta) {
-    // --- Smooth turn rate toward capped input target ---
+    // Smoothly approach target turn rates for stable control.
     const targetYaw   = this.turnInputYaw   * this.maxTurnRate;
     const targetPitch = this.turnInputPitch * this.maxTurnRate;
     const follow = 1 - Math.exp(-this.turnSmoothing * delta);
     this.yawRate   += (targetYaw   - this.yawRate)   * follow;
     this.pitchRate += (targetPitch - this.pitchRate) * follow;
-
 
     const yawAngle = this.yawRate * delta;
     const pitchAngle = this.pitchRate * delta;
@@ -249,10 +242,10 @@ export class Player {
       this.baseQuaternion.multiply(_pitchQ);
     }
     this.baseQuaternion.normalize();
-    // --- Drag and position integration ---
+    // Integrate movement with framerate-independent damping.
     this.velocity.multiplyScalar(Math.pow(this.dampening, delta * 60));
     this.mesh.position.addScaledVector(this.velocity, delta);
-    // --- Roll and visual orientation ---
+    // Blend visual roll from both turn input and manual roll.
     const turnRoll = -(this.yawRate / this.maxTurnRate) * this.rollOnYaw;
     const manualRoll = this.manualRollInput * this.maxRoll;
     const targetRoll = THREE.MathUtils.clamp(turnRoll + manualRoll, -this.maxRoll, this.maxRoll);
