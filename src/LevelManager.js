@@ -6,7 +6,7 @@
 export const LEVEL_CONFIGS = {
   1: {
     label: 'LEVEL 1 - 15,000 miles to trashteroid',
-    briefingTagline: 'Giant fields of trash detected near Earth orbit. Clear the pollution before time runs out.',
+    briefingTagline: 'To get closer to the trashteroid, you must clear out the giant trash fields surrounding Earth. Destroy enough of the pollution before time runs out.',
     timer: 180,
     mission: {
       successTitle: 'SECTOR 1 CLEARED',
@@ -43,7 +43,7 @@ export const LEVEL_CONFIGS = {
   },
   2: {
     label: 'LEVEL 2 - 15,000 miles to trashteroid',
-    briefingTagline: 'Make your way to the trashteroid. Clear the path by destroying more trash.',
+    briefingTagline: 'Get to the trashteroid. Clear the path by destroying more trash.',
     timer: 240,
     mission: {
       successTitle: 'SECTOR 2 CLEARED',
@@ -105,14 +105,14 @@ export const LEVEL_CONFIGS = {
       verticalFrequency: 0.28,
       moveSharpness: 1.12,
       speedRatio: 1.015,
-      shotInterval: 0.34,
-      projectileSpeed: 1400,
+      shotInterval: 0.55,
+      projectileSpeed: 480,
       projectileDamage: 48,
       projectileLifetime: 5.5,
       collisionRadius: 72,
       contactDamage: 26,
-      bossScale: 7,
-      projectileBurstCount: 5,
+      bossScale: 70,
+      projectileBurstCount: 3,
       projectileSpreadScale: 0.019,
       projectileVerticalSpreadScale: 0.01,
       projectileAimError: 0.01,

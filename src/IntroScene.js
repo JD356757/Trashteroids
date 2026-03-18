@@ -36,7 +36,7 @@ export class IntroScene {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x040816, 0.016);
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(0x040816);

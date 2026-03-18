@@ -208,7 +208,7 @@ export class Game {
     //change fog here 0 is no fog
 
     // Camera — extend far plane for distant planet
-    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 50000);
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 200000);
     this.camera.position.set(0, 3, 20);
 
     // Lighting — replace generic directional with a sun
@@ -324,7 +324,7 @@ export class Game {
     this.asteroidField = new AsteroidField(this.scene);
 
     // Planet — large Earth in the background, unreachable
-    this._loadPlanet();
+    // this._loadPlanet();
 
     // Level complete screen
     this._levelCompleteEl = document.getElementById('level-complete-screen');
@@ -540,6 +540,7 @@ export class Game {
     const group = new THREE.Group();
     group.name = 'Trashteroid';
     group.visible = false;
+    group.frustumCulled = false;
 
     const fallbackShell = new THREE.Mesh(
       new THREE.IcosahedronGeometry(52, 1),
@@ -551,6 +552,7 @@ export class Game {
         emissiveIntensity: 0.42,
       })
     );
+    fallbackShell.frustumCulled = false;
     group.add(fallbackShell);
 
     const modelRoot = new THREE.Group();
@@ -568,6 +570,7 @@ export class Game {
         depthWrite: false,
       })
     );
+    coreGlow.frustumCulled = false;
     group.add(coreGlow);
 
     const orbitDebris = [];
@@ -591,6 +594,8 @@ export class Game {
           emissiveIntensity: 0.2,
         })
       );
+      mesh.scale.setScalar(2.0 + Math.random() * 1.2);
+      mesh.frustumCulled = false;
       mesh.castShadow = true;
       mesh.receiveShadow = false;
       group.add(mesh);
@@ -609,15 +614,16 @@ export class Game {
         mesh,
         tangentA,
         tangentB,
-        radius: 86 + Math.random() * 58,
-        speed: 0.32 + Math.random() * 0.86,
+        radius: 62 + Math.random() * 18,
+        speed: 0.04 + Math.random() * 0.1,
         phase: Math.random() * Math.PI * 2,
         wobble: 0.3 + Math.random() * 0.7,
         spin: new THREE.Vector3(
-          (Math.random() - 0.5) * 1.7,
-          (Math.random() - 0.5) * 1.7,
-          (Math.random() - 0.5) * 1.7
+          (Math.random() - 0.5) * 0.25,
+          (Math.random() - 0.5) * 0.25,
+          (Math.random() - 0.5) * 0.25
         ),
+        worldPosition: new THREE.Vector3(),
       });
     }
 
@@ -651,6 +657,7 @@ export class Game {
         const model = gltf.scene;
 
         model.traverse((child) => {
+          child.frustumCulled = false;
           if (!child.isMesh) return;
           child.castShadow = true;
           child.receiveShadow = true;
@@ -686,6 +693,7 @@ export class Game {
 
         targetRoot.clear();
         targetRoot.add(model);
+        this._disableTrashteroidFrustumCulling();
 
         if (fallbackShell?.parent) {
           fallbackShell.parent.remove(fallbackShell);
@@ -698,6 +706,16 @@ export class Game {
         // Keep fallback shell if model fails to load.
       }
     );
+  }
+
+  _disableTrashteroidFrustumCulling() {
+    const trashteroid = this._trashteroid;
+    const group = trashteroid?.group;
+    if (!group) return;
+
+    group.traverse((child) => {
+      child.frustumCulled = false;
+    });
   }
 
   _updateTrashteroidOrbitDebris(trashteroid, bossConfig, delta) {
@@ -721,6 +739,7 @@ export class Game {
       orbiter.mesh.rotation.x += orbiter.spin.x * delta;
       orbiter.mesh.rotation.y += orbiter.spin.y * delta;
       orbiter.mesh.rotation.z += orbiter.spin.z * delta;
+      orbiter.mesh.getWorldPosition(orbiter.worldPosition);
     }
   }
 
@@ -816,6 +835,7 @@ export class Game {
     trashteroid.time = 0;
     trashteroid.shotCooldown = bossConfig ? bossConfig.shotInterval * 0.8 : 0;
     trashteroid.group.visible = true;
+    this._disableTrashteroidFrustumCulling();
 
     if (bossConfig) {
       const bossScale = bossConfig.bossScale ?? 5;
@@ -895,7 +915,7 @@ export class Game {
     const projectileGroup = new THREE.Group();
     projectileGroup.add(core);
     projectileGroup.position.copy(origin);
-    const projectileScale = 2.2 + Math.random() * 2.2;
+    const projectileScale = 11.0 + Math.random() * 6.0;
     projectileGroup.scale.setScalar(projectileScale);
     projectileGroup.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
     this.scene.add(projectileGroup);
@@ -907,9 +927,9 @@ export class Game {
       velocity: direction.clone().multiplyScalar(speed * (0.92 + Math.random() * 0.16)),
       hitRadius: projectileScale * 0.82,
       spin: new THREE.Vector3(
-        (Math.random() - 0.5) * 2.4,
-        (Math.random() - 0.5) * 2.4,
-        (Math.random() - 0.5) * 2.4
+        (Math.random() - 0.5) * 0.35,
+        (Math.random() - 0.5) * 0.35,
+        (Math.random() - 0.5) * 0.35
       ),
       life: 0,
       ttl,
@@ -1144,6 +1164,41 @@ export class Game {
         trashteroid.velocity.addScaledVector(_collisionNormal, -inwardSpeed * 0.03);
       }
     }
+
+    // Also push asteroids away from orbiting debris
+    const ORBIT_HIT_RADIUS = 60;
+    const orbitDebris = trashteroid.orbitDebris;
+    if (orbitDebris?.length) {
+      for (let j = 0; j < orbitDebris.length; j++) {
+        const orbiter = orbitDebris[j];
+        if (!orbiter.worldPosition) continue;
+        for (let i = 0; i < asteroids.length; i++) {
+          const ast = asteroids[i];
+          const sphere = ast.boundingSphere;
+          const minDist = ORBIT_HIT_RADIUS + sphere.radius;
+
+          _targetOffset.copy(orbiter.worldPosition).sub(sphere.center);
+          const distSq = _targetOffset.lengthSq();
+          if (distSq >= minDist * minDist) continue;
+
+          const dist = Math.sqrt(distSq);
+          if (dist <= 1e-6) {
+            _collisionNormal.set(0, 1, 0);
+          } else {
+            _collisionNormal.copy(_targetOffset).multiplyScalar(1 / dist);
+          }
+
+          const overlap = minDist - dist;
+          ast.mesh.position.addScaledVector(_collisionNormal, -(overlap + 0.08));
+          sphere.center.addScaledVector(_collisionNormal, -(overlap + 0.08));
+
+          const relApproach = ast.velocity.dot(_collisionNormal);
+          if (relApproach > 0) {
+            ast.velocity.addScaledVector(_collisionNormal, -relApproach * (1 + ASTEROID_BOUNCE));
+          }
+        }
+      }
+    }
   }
 
   _checkTrashteroidPlayerCollisions(playerPos = this.player.mesh.position) {
@@ -1265,16 +1320,17 @@ export class Game {
     }
 
     _targetScreenPos.copy(targetPos).project(this.camera);
-    const onScreen =
-      _targetScreenPos.z > -1 &&
-      _targetScreenPos.z < 1 &&
-      Math.abs(_targetScreenPos.x) <= 0.92 &&
-      Math.abs(_targetScreenPos.y) <= 0.88;
-
-    if (onScreen) {
-      this.hud.updateBossIndicator(false, 0, 0, 0, 0);
-      return;
-    }
+    const centerX = window.innerWidth * 0.5;
+    const centerY = window.innerHeight * 0.5;
+    const radiusX = Math.max(120, window.innerWidth * 0.36);
+    const radiusY = Math.max(90, window.innerHeight * 0.26);
+    const projectedX = centerX + _targetScreenPos.x * centerX;
+    const projectedY = centerY - _targetScreenPos.y * centerY;
+    const inFront = _targetScreenPos.z > -1 && _targetScreenPos.z < 1;
+    const ellipseNorm =
+      ((projectedX - centerX) * (projectedX - centerX)) / (radiusX * radiusX) +
+      ((projectedY - centerY) * (projectedY - centerY)) / (radiusY * radiusY);
+    const insideEllipse = inFront && ellipseNorm <= 1;
 
     _targetOffset.copy(targetPos).sub(this.camera.position);
     _targetOffset.applyQuaternion(this.camera.quaternion.clone().invert());
@@ -1284,12 +1340,8 @@ export class Game {
       angle += Math.PI;
     }
 
-    const centerX = window.innerWidth * 0.5;
-    const centerY = window.innerHeight * 0.5;
-    const radiusX = Math.max(120, window.innerWidth * 0.36);
-    const radiusY = Math.max(90, window.innerHeight * 0.26);
-    const x = centerX + Math.sin(angle) * radiusX;
-    const y = centerY - Math.cos(angle) * radiusY;
+    const x = insideEllipse ? projectedX : centerX + Math.sin(angle) * radiusX;
+    const y = insideEllipse ? projectedY : centerY - Math.cos(angle) * radiusY;
     const distance = toDisplayDistance(targetPos.distanceTo(this.player.mesh.position));
 
     this.hud.updateBossIndicator(true, x, y, angle, Math.max(1, distance));
