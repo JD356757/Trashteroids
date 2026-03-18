@@ -5,7 +5,7 @@ import { DebrisManager } from './DebrisManager.js';
 import { SpecialDebrisManager } from './SpecialDebrisManager.js';
 import { RecycleDebrisManager } from './RecycleDebrisManager.js';
 import { ProjectileManager } from './ProjectileManager.js';
-import { LevelManager, unlockLevel } from './LevelManager.js';
+import { LevelManager, unlockLevel, recordLevelStars } from './LevelManager.js';
 import { InputHandler } from './InputHandler.js';
 import { HUD } from './HUD.js';
 import { Starfield } from './Starfield.js';
@@ -80,6 +80,8 @@ const WRONG_BEAM_PENALTY = 2000;
 const PLAYER_SHOOT_HITSCAN = true;
 const LEVEL_ENTRY_FADE_HOLD_MS = 280;
 const LEVEL_ENTRY_FADE_MS = 420;
+const LEVEL_COMPLETE_FADE_HOLD_MS = 220;
+const LEVEL_COMPLETE_FADE_MS = 1000;
 const TUTORIAL_BEATS = {
   move: {
     title: 'Move & Look',
@@ -173,6 +175,9 @@ export class Game {
     this._levelEntryFadeToken = 0;
     this._levelEntryFadeHoldTimeout = null;
     this._levelEntryFadeSafetyTimeout = null;
+    this._levelCompleteFadeToken = 0;
+    this._levelCompleteFadeHoldTimeout = null;
+    this._levelCompleteFadeSafetyTimeout = null;
     this._timeScale = 1;
     this._tutorial = this._createTutorialState();
     this._handleLevelNextClick = () => this._onLevelNext();
@@ -365,6 +370,7 @@ export class Game {
     this.paused = true;
     this.boostActive = false;
     this._cancelLevelEntryFade();
+    this._cancelLevelCompleteTransition();
     this._clearScheduledReturnToLevelSelect();
     this.projectiles.clear();
     this.debris.clear();
@@ -480,10 +486,28 @@ export class Game {
     }
   }
 
+  _setScreenFadeDuration(durationMs) {
+    if (!this._screenFadeEl) return;
+    const clamped = Math.max(0, Math.floor(durationMs));
+    this._screenFadeEl.style.setProperty('--screen-fade-duration', `${clamped}ms`);
+  }
+
+  _cancelLevelCompleteTransition() {
+    if (this._levelCompleteFadeHoldTimeout != null) {
+      window.clearTimeout(this._levelCompleteFadeHoldTimeout);
+      this._levelCompleteFadeHoldTimeout = null;
+    }
+    if (this._levelCompleteFadeSafetyTimeout != null) {
+      window.clearTimeout(this._levelCompleteFadeSafetyTimeout);
+      this._levelCompleteFadeSafetyTimeout = null;
+    }
+  }
+
   _showLevelEntryFade() {
     if (!this._screenFadeEl) return;
 
     this._cancelLevelEntryFade();
+    this._setScreenFadeDuration(LEVEL_ENTRY_FADE_MS);
     this._levelEntryFadeToken += 1;
     const token = this._levelEntryFadeToken;
 
@@ -737,6 +761,7 @@ export class Game {
     const fastSpeedDisplay = mission.bonus?.fastSpeedDisplay ?? 200;
 
     this._clearScheduledReturnToLevelSelect();
+    this._cancelLevelCompleteTransition();
     this._levelCompleteEl?.classList.add('hidden');
     this.levels.setLevel(levelNumber);
     this._resetTutorialState();
@@ -1605,12 +1630,25 @@ export class Game {
       });
     }
 
+    const completedObjectives = objectives.reduce((count, objective) => count + (objective.complete ? 1 : 0), 0);
+    const totalObjectives = objectives.length;
+
     return {
       objectives,
       primaryComplete,
       fastDone,
       shieldBonus,
+      completedObjectives,
+      totalObjectives,
     };
+  }
+
+  _calculateMissionStars(primaryComplete, completedObjectives, totalObjectives) {
+    if (!primaryComplete) return 0;
+    if (totalObjectives <= 0) return 3;
+    if (completedObjectives >= totalObjectives) return 3;
+    if (completedObjectives >= Math.ceil((totalObjectives * 2) / 3)) return 2;
+    return 1;
   }
 
   _finalizeLevel(primaryComplete) {
@@ -1626,7 +1664,16 @@ export class Game {
     this.hud.setBossBarVisible(false);
     this.hud.setBossVulnerabilityStatus('shielded', 0, false);
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
-    this._showLevelCompleteScreen(primaryComplete, state.fastDone, state.shieldBonus);
+    const earnedStars = this._calculateMissionStars(
+      primaryComplete,
+      state.completedObjectives,
+      state.totalObjectives
+    );
+    this._showLevelCompleteScreen(primaryComplete, state.fastDone, state.shieldBonus, {
+      stars: earnedStars,
+      completedObjectives: state.completedObjectives,
+      totalObjectives: state.totalObjectives,
+    });
   }
 
   _createTutorialState() {
@@ -2756,7 +2803,7 @@ export class Game {
     return true;
   }
 
-  _showLevelCompleteScreen(reqDone, fastDone, shieldBonus) {
+  _showLevelCompleteScreen(reqDone, fastDone, shieldBonus, starSummary = {}) {
     this.paused = true;
     this.hud.setGameplayVisible(false);
     this.hud.hideTimer();
@@ -2768,13 +2815,22 @@ export class Game {
 
     const mission = this.levels.getMissionConfig();
     const nextLevel = reqDone ? this.levels.getNextLevel() : null;
+    const stars = Math.min(3, Math.max(0, Math.floor(starSummary.stars ?? 0)));
+    const completedObjectives = Math.max(0, Math.floor(starSummary.completedObjectives ?? 0));
+    const totalObjectives = Math.max(0, Math.floor(starSummary.totalObjectives ?? 0));
+    const starIcons = `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`;
 
     if (reqDone && nextLevel) {
       unlockLevel(nextLevel);
     }
 
+    if (reqDone) {
+      recordLevelStars(this.levels.current, stars);
+    }
+
     const title = el.querySelector('#level-complete-title');
     const sub = el.querySelector('#level-complete-subtitle');
+    const starsEl = el.querySelector('#level-complete-stars');
     const bonuses = el.querySelector('#level-complete-bonuses');
     const nextBtn = el.querySelector('#level-next-btn');
     const retryBtn = el.querySelector('#level-retry-btn');
@@ -2800,6 +2856,9 @@ export class Game {
       sub.textContent = reqDone
         ? `${mission?.successSubtitle ?? 'Primary objectives complete.'}${autoReturn ? ' Returning to the sector map...' : ''}`
         : `You ran out of time before the primary objectives were complete.${autoReturn ? ' Returning to the sector map...' : ''}`;
+    }
+    if (starsEl) {
+      starsEl.textContent = `STAR RATING ${starIcons}  (${completedObjectives}/${totalObjectives} OBJECTIVES)`;
     }
     if (bonuses) {
       const earned = [
@@ -2831,17 +2890,58 @@ export class Game {
     if (cutsceneFrom) cutsceneFrom.textContent = currentSectorLabel;
     if (cutsceneTo) cutsceneTo.textContent = destinationLabel;
 
-    el.classList.remove('hidden');
+    const revealCompleteScreen = () => {
+      el.classList.remove('hidden');
 
-    if (autoReturn) {
-      this._scheduleReturnToLevelSelect(2400, { outcome: reqDone ? 'complete' : 'failed' });
+      if (autoReturn) {
+        this._scheduleReturnToLevelSelect(2400, { outcome: reqDone ? 'complete' : 'failed' });
+      }
+    };
+
+    if (!this._screenFadeEl) {
+      revealCompleteScreen();
+      return;
     }
+
+    this._cancelLevelCompleteTransition();
+    this._setScreenFadeDuration(LEVEL_COMPLETE_FADE_MS);
+    this._levelCompleteFadeToken += 1;
+    const token = this._levelCompleteFadeToken;
+
+    this._screenFadeEl.classList.remove('hidden');
+    this._screenFadeEl.classList.add('visible');
+
+    this._levelCompleteFadeHoldTimeout = window.setTimeout(() => {
+      this._levelCompleteFadeHoldTimeout = null;
+      if (token !== this._levelCompleteFadeToken) return;
+
+      revealCompleteScreen();
+
+      requestAnimationFrame(() => {
+        if (token !== this._levelCompleteFadeToken) return;
+        this._screenFadeEl.classList.remove('visible');
+
+        const finish = () => {
+          if (token !== this._levelCompleteFadeToken) return;
+          if (this._levelCompleteFadeSafetyTimeout != null) {
+            window.clearTimeout(this._levelCompleteFadeSafetyTimeout);
+            this._levelCompleteFadeSafetyTimeout = null;
+          }
+          this._setScreenFadeDuration(LEVEL_ENTRY_FADE_MS);
+          this._screenFadeEl.classList.add('hidden');
+        };
+
+        this._screenFadeEl.addEventListener('transitionend', finish, { once: true });
+        this._levelCompleteFadeSafetyTimeout = window.setTimeout(finish, LEVEL_COMPLETE_FADE_MS + 100);
+      });
+    }, LEVEL_COMPLETE_FADE_HOLD_MS);
   }
 
   _onLevelNext() {
     const nextLevel = this.levels.getNextLevel();
     if (!nextLevel) return;
 
+    this._cancelLevelCompleteTransition();
     this._levelCompleteEl?.classList.add('hidden');
     this._enterLevel(nextLevel);
     if (this.crosshair) this.crosshair.classList.remove('hidden');
@@ -2849,6 +2949,7 @@ export class Game {
   }
 
   _onLevelRetry() {
+    this._cancelLevelCompleteTransition();
     this._levelCompleteEl?.classList.add('hidden');
     this._enterLevel(this.levels.current, {
       resetPlayerPosition: true,
