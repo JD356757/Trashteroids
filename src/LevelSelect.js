@@ -263,6 +263,7 @@ export class LevelSelect {
 
   show() {
     soundtrackManager.start();
+    soundtrackManager.setInLevel(false);
     this.active = true;
     this._unlockedLevel = getUnlockedLevel();
     this._unlockBypass = false;

@@ -5,6 +5,7 @@ const _fallbackUp = new THREE.Vector3(0, 1, 0);
 const _right = new THREE.Vector3();
 const _fireDirection = new THREE.Vector3();
 const _baseVelocity = new THREE.Vector3();
+const _spawnOffset = new THREE.Vector3();
 const _offsets = [0.28, -0.28];
 const PROJECTILE_COLORS = {
   normal: { core: 0x00ff44, glow: 0x66ff88 },
@@ -20,9 +21,9 @@ export class ProjectileManager {
     this.cooldown = 0;
     this.cooldownTime = 0.035; // seconds between shots (rapid-fire)
 
-    this._coreGeometry = new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6);
+    this._coreGeometry = new THREE.CylinderGeometry(0.12, 0.12, 5.0, 6);
     this._coreGeometry.rotateX(Math.PI / 2);
-    this._glowGeometry = new THREE.CylinderGeometry(0.22, 0.22, 2.0, 6);
+    this._glowGeometry = new THREE.CylinderGeometry(0.22, 0.22, 5.5, 6);
     this._glowGeometry.rotateX(Math.PI / 2);
 
     this._styles = {};
@@ -40,7 +41,7 @@ export class ProjectileManager {
     }
   }
 
-  fire(origin, direction, playerVelocity, playerQuat, type = 'normal') {
+  fire(origin, direction, playerVelocity, playerQuat, type = 'normal', frameDelta = 0) {
     if (this.cooldown > 0) return 0;
     this.cooldown = this.cooldownTime;
 
@@ -70,8 +71,19 @@ export class ProjectileManager {
       const glow = new THREE.Mesh(this._glowGeometry, style.glowMat);
       core.add(glow);
 
-      // Position: forward from origin, then apply lateral offset
-      core.position.copy(origin).addScaledVector(_fireDirection, 0.5).addScaledVector(_right, _offsets[i]);
+      // Position from player-local muzzles so visual roll/pitch/yaw all influence shot origin.
+      if (playerQuat) {
+        _spawnOffset.set(_offsets[i], 0, -1.5).applyQuaternion(playerQuat);
+        core.position.copy(origin).add(_spawnOffset).addScaledVector(_fireDirection, 20.5);
+      } else {
+        // Fallback when ship orientation is unavailable.
+        core.position.copy(origin).addScaledVector(_fireDirection, 10.5).addScaledVector(_right, _offsets[i]);
+      }
+
+      // During the one-frame hold, account for player movement so visuals stay aligned.
+      if (frameDelta && playerVelocity) {
+        core.position.addScaledVector(playerVelocity, frameDelta);
+      }
 
       // Orient beam along its travel direction
       core.quaternion.setFromUnitVectors(_dirForward, _fireDirection);
@@ -84,6 +96,7 @@ export class ProjectileManager {
         prevPosition: core.position.clone(),
         travelled: 0,
         type: type,
+        moveDelayFrames: 1,
       });
       spawnedCount++;
     }
@@ -97,6 +110,12 @@ export class ProjectileManager {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const p = this.active[i];
       p.prevPosition.copy(p.mesh.position);
+
+      if (p.moveDelayFrames > 0) {
+        p.moveDelayFrames -= 1;
+        continue;
+      }
+
       const step = p.velocity.length() * delta;
       p.mesh.position.addScaledVector(p.velocity, delta);
       p.travelled += step;
