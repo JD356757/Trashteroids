@@ -144,7 +144,7 @@ export class RecycleDebrisManager {
     this._buildPlayerBasis(playerQuaternion);
     this._accumulateForwardProgress(playerPos);
 
-    if (this._ready && this._freeSlots.length > 0 && this.active.length < RECYCLE_MAX_ACTIVE) {
+    if (!spawnConfig?.disableNaturalSpawn && this._ready && this._freeSlots.length > 0 && this.active.length < RECYCLE_MAX_ACTIVE) {
       const progressPerSpawn = ((spawnConfig?.progressPerSpawn) ?? 140) * RECYCLE_SPAWN_RATIO;
       if (this._forwardProgress >= progressPerSpawn) {
         this._forwardProgress -= progressPerSpawn;
@@ -154,6 +154,9 @@ export class RecycleDebrisManager {
 
     const despawnDistSq = Math.pow((spawnConfig?.despawnDistance) ?? 3000, 2);
     const recycleDist   = (spawnConfig?.recycleBehindDistance) ?? 260;
+    const despawnAnchor = spawnConfig?.despawnAnchor ?? null;
+    const despawnAnchorExtraDistance = Math.max(0, spawnConfig?.despawnAnchorExtraDistance ?? 1000);
+    const playerAnchorDistance = despawnAnchor ? playerPos.distanceTo(despawnAnchor) : 0;
 
     for (let i = this.active.length - 1; i >= 0; i--) {
       const s = this.active[i];
@@ -165,6 +168,13 @@ export class RecycleDebrisManager {
       if (s.mesh) {
         s.mesh.position.copy(s.position);
         s.mesh.rotation.set(s.rotation.x, s.rotation.y, s.rotation.z);
+      }
+
+      if (despawnAnchor) {
+        if (s.position.distanceTo(despawnAnchor) > playerAnchorDistance + despawnAnchorExtraDistance) {
+          this._deactivate(i);
+        }
+        continue;
       }
 
       if (s.position.distanceToSquared(playerPos) > despawnDistSq) {
@@ -202,6 +212,46 @@ export class RecycleDebrisManager {
 
   remove(index) {
     if (index >= 0 && index < this.active.length) this._deactivate(index);
+  }
+
+  spawnDirected(origin, direction, speed, options = {}) {
+    if (!this._ready || this._freeSlots.length === 0 || !this._template) return false;
+
+    const slotId = this._freeSlots.pop();
+    const slot = this._slots[slotId];
+    const dir = _candidateOffset.copy(direction);
+    if (dir.lengthSq() <= 1e-6) {
+      dir.copy(_defaultForward);
+    }
+    dir.normalize();
+
+    const modelScale = options.baseScale ?? 14.4;
+    const scaleMultiplier = Math.max(0.1, options.scaleMultiplier ?? 1);
+
+    slot.active = true;
+    slot.position.copy(origin);
+    slot.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
+    slot.rotSpeed.set(
+      (Math.random() * 2 - 1) * 0.65,
+      (Math.random() * 2 - 1) * 0.65,
+      (Math.random() * 2 - 1) * 0.65,
+    );
+    slot.velocity.copy(dir).multiplyScalar(Math.max(0, speed));
+    slot.scale = modelScale * scaleMultiplier * (0.92 + Math.random() * 0.2);
+    slot.points = options.points ?? RECYCLE_POINTS;
+    slot.hitRadius = RECYCLE_HIT_RADIUS;
+    slot.collisionRadius = RECYCLE_COL_RADIUS;
+
+    const mesh = this._template.clone(true);
+    mesh.scale.setScalar(slot.scale);
+    mesh.position.copy(slot.position);
+    mesh.rotation.set(slot.rotation.x, slot.rotation.y, slot.rotation.z);
+    this.scene.add(mesh);
+    slot.mesh = mesh;
+
+    slot.renderIndex = this.active.length;
+    this.active.push(slot);
+    return true;
   }
 
   clear() {
@@ -243,12 +293,19 @@ export class RecycleDebrisManager {
     const scaleMin   = (spawnConfig?.scaleMin)         ?? 2.5;
     const scaleMax   = (spawnConfig?.scaleMax)         ?? 3.2;
     const minGapSq   = minGap * minGap;
+    const noSpawnCenter = spawnConfig?.noSpawnCenter ?? null;
+    const noSpawnRadius = Math.max(0, spawnConfig?.noSpawnRadius ?? 0);
+    const noSpawnRadiusSq = noSpawnRadius * noSpawnRadius;
 
     for (let attempt = 0; attempt < 14; attempt++) {
       _spawnPos.copy(playerPos)
         .addScaledVector(_playerForward, forwardMin + Math.random() * (forwardMax - forwardMin))
         .addScaledVector(_playerRight,  (Math.random() * 2 - 1) * latSpread)
         .addScaledVector(_playerUp,     (Math.random() * 2 - 1) * vertSpread);
+
+      if (noSpawnCenter && noSpawnRadius > 0 && _spawnPos.distanceToSquared(noSpawnCenter) < noSpawnRadiusSq) {
+        continue;
+      }
 
       let clear = true;
       for (const s of this.active) {

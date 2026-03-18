@@ -459,6 +459,46 @@ body::before {
   animation: timerPulse 0.7s ease-in-out infinite alternate;
 }
 
+#trashteroid-range-alert {
+  position: fixed;
+  top: 156px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ffd5b0;
+  text-shadow: 0 0 12px rgba(255, 182, 132, 0.7);
+  pointer-events: none;
+  z-index: 500;
+}
+
+#boss-vulnerability-status {
+  position: fixed;
+  top: 134px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  pointer-events: none;
+  z-index: 500;
+}
+
+#boss-vulnerability-status.shielded {
+  color: #8fd8ff;
+  text-shadow: 0 0 12px rgba(143, 216, 255, 0.7);
+}
+
+#boss-vulnerability-status.vulnerable {
+  color: #8ff7ef;
+  text-shadow: 0 0 12px rgba(143, 247, 239, 0.8);
+}
+
 @keyframes timerPulse {
   from { opacity: 1; }
   to   { opacity: 0.55; }
@@ -1867,6 +1907,18 @@ body::before {
   #boss-bar-container {
     top: 156px;
     width: calc(100vw - 32px);
+  }
+
+  #trashteroid-range-alert {
+    top: 222px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+
+  #boss-vulnerability-status {
+    top: 196px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
   }
 
   #tutorial-callout {
