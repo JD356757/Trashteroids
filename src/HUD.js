@@ -96,38 +96,63 @@ export class HUD {
     this.musicVisualizer.classList.toggle('hidden', !visible);
     this.musicVisualizer.setAttribute('aria-hidden', visible ? 'false' : 'true');
     this.musicVisualizer.classList.toggle('music-visualizer-gameplay', !!visible);
+    this.musicVisualizer.style.setProperty('--visualizer-energy', visible ? '0.2' : '0');
 
     if (!visible) {
       this._musicVisualizerEnergy = 0;
       for (let i = 0; i < this.musicVisualizerBars.length; i++) {
         const bar = this.musicVisualizerBars[i];
-        bar.style.transform = 'scaleY(0.18)';
-        bar.style.opacity = '0.52';
+        bar.style.transform = 'scaleX(0.12)';
+        bar.style.opacity = '0.44';
       }
     }
   }
 
-  updateMusicVisualizer(intensity = 0, delta = 0) {
+  updateMusicVisualizer(levelsOrIntensity = 0, delta = 0) {
     if (!this._musicVisualizerEnabled || !this._gameplayVisible) return;
     if (!this.musicVisualizerBars.length) return;
 
-    this._musicVisualizerPhase += Math.max(0.005, delta) * 6;
-    const targetEnergy = THREE.MathUtils.clamp(intensity, 0, 1);
-    const smoothing = 1 - Math.exp(-Math.max(0.005, delta) * 9);
+    const dt = Math.max(0.005, delta || 0.016);
+    this._musicVisualizerPhase += dt * 8.4;
+
+    if (Array.isArray(levelsOrIntensity)) {
+      const lastBarIndex = Math.max(1, this.musicVisualizerBars.length - 1);
+      let totalLevel = 0;
+
+      for (let i = 0; i < this.musicVisualizerBars.length; i++) {
+        const bar = this.musicVisualizerBars[i];
+        const rawLevel = THREE.MathUtils.clamp(levelsOrIntensity[i % levelsOrIntensity.length] ?? 0, 0, 1);
+        const bandOffset = (i / lastBarIndex) * Math.PI * 2;
+        const wave = 0.86 + Math.sin(this._musicVisualizerPhase * 2.2 + bandOffset) * 0.14;
+        const level = THREE.MathUtils.clamp((0.04 + Math.pow(rawLevel, 0.9) * 0.9) * wave, 0, 1);
+        totalLevel += level;
+        bar.style.transform = `scaleX(${0.12 + level * 1.1})`;
+        bar.style.opacity = `${0.36 + level * 0.56}`;
+      }
+
+      const avgLevel = totalLevel / this.musicVisualizerBars.length;
+      this.musicVisualizer.style.setProperty('--visualizer-energy', `${avgLevel.toFixed(3)}`);
+      return;
+    }
+
+    const targetEnergy = THREE.MathUtils.clamp(levelsOrIntensity, 0, 1);
+    const smoothing = 1 - Math.exp(-dt * 9);
     this._musicVisualizerEnergy += (targetEnergy - this._musicVisualizerEnergy) * smoothing;
 
     for (let i = 0; i < this.musicVisualizerBars.length; i++) {
       const bar = this.musicVisualizerBars[i];
-      const wave = (Math.sin(this._musicVisualizerPhase * 1.9 + i * 0.7) + 1) * 0.5;
-      const ripple = (Math.sin(this._musicVisualizerPhase * 3.9 + i * 1.04) + 1) * 0.5;
+      const wave = (Math.sin(this._musicVisualizerPhase * 2 + i * 0.58) + 1) * 0.5;
+      const ripple = (Math.sin(this._musicVisualizerPhase * 4.1 + i * 0.92) + 1) * 0.5;
       const level = THREE.MathUtils.clamp(
-        0.14 + this._musicVisualizerEnergy * (0.52 + wave * 0.62) + ripple * 0.16,
-        0.1,
+        0.06 + this._musicVisualizerEnergy * (0.34 + wave * 0.48) + ripple * 0.08,
+        0.08,
         1
       );
-      bar.style.transform = `scaleX(${0.18 + level * 1.45})`;
-      bar.style.opacity = `${0.5 + level * 0.45}`;
+      bar.style.transform = `scaleX(${0.12 + level * 1.1})`;
+      bar.style.opacity = `${0.36 + level * 0.56}`;
     }
+
+    this.musicVisualizer.style.setProperty('--visualizer-energy', `${this._musicVisualizerEnergy.toFixed(3)}`);
   }
 
   updateBossIndicator(visible, x, y, angle, distance) {
