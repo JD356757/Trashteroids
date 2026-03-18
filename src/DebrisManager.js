@@ -120,6 +120,10 @@ function clampConfig(spawnConfig = {}) {
       20,
       spawnConfig.recycleBehindDistance ?? DEFAULT_RECYCLE_BEHIND_DISTANCE
     ),
+    noSpawnCenter: spawnConfig.noSpawnCenter ?? null,
+    noSpawnRadius: Math.max(0, spawnConfig.noSpawnRadius ?? 0),
+    despawnAnchor: spawnConfig.despawnAnchor ?? null,
+    despawnAnchorExtraDistance: Math.max(0, spawnConfig.despawnAnchorExtraDistance ?? 1000),
   };
 }
 
@@ -228,6 +232,45 @@ export class DebrisManager {
     this._syncInstances();
   }
 
+  spawnDirected(origin, direction, speed, options = {}) {
+    if (!this._ready || this._freeSlots.length === 0) return false;
+
+    const slotId = this._freeSlots.pop();
+    const slot = this._slots[slotId];
+    const dir = _candidateOffset.copy(direction);
+    if (dir.lengthSq() <= 1e-6) {
+      dir.copy(_defaultForward);
+    }
+    dir.normalize();
+
+    const scaleMultiplier = Math.max(0.1, options.scaleMultiplier ?? 1);
+    const baseScale = options.baseScale ?? DEFAULT_MODEL_SCALE;
+
+    slot.active = true;
+    slot.position.copy(origin);
+    slot.rotation.set(
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2
+    );
+    slot.rotSpeed.set(
+      randomRange(-DEFAULT_ROTATION_SPEED, DEFAULT_ROTATION_SPEED),
+      randomRange(-DEFAULT_ROTATION_SPEED, DEFAULT_ROTATION_SPEED),
+      randomRange(-DEFAULT_ROTATION_SPEED, DEFAULT_ROTATION_SPEED)
+    );
+    slot.velocity.copy(dir).multiplyScalar(Math.max(0, speed));
+    slot.scale = baseScale * scaleMultiplier * randomRange(0.92, 1.12);
+    slot.points = options.points ?? DEFAULT_POINTS;
+    slot.hitRadius = TRASH_HIT_RADIUS;
+    slot.collisionRadius = TRASH_COLLISION_RADIUS;
+    slot.renderIndex = this.active.length;
+
+    this.active.push(slot);
+    this._renderDirty = true;
+    this._syncInstances();
+    return true;
+  }
+
   _buildPlayerBasis(playerQuaternion) {
     _playerForward.copy(_defaultForward);
     _playerRight.copy(_defaultRight);
@@ -290,7 +333,7 @@ export class DebrisManager {
         .addScaledVector(_playerRight, lateralOffset)
         .addScaledVector(_playerUp, verticalOffset);
 
-      if (!this._isSpawnClear(_spawnPos, config.minGap)) {
+      if (!this._isSpawnClear(_spawnPos, config.minGap, config)) {
         continue;
       }
 
@@ -330,7 +373,16 @@ export class DebrisManager {
     return false;
   }
 
-  _isSpawnClear(position, minGap) {
+  _isSpawnClear(position, minGap, config) {
+    const noSpawnCenter = config?.noSpawnCenter;
+    const noSpawnRadius = config?.noSpawnRadius ?? 0;
+    if (noSpawnCenter && noSpawnRadius > 0) {
+      const noSpawnRadiusSq = noSpawnRadius * noSpawnRadius;
+      if (position.distanceToSquared(noSpawnCenter) < noSpawnRadiusSq) {
+        return false;
+      }
+    }
+
     const minGapSq = minGap * minGap;
 
     for (let i = 0; i < this.active.length; i++) {
@@ -344,6 +396,9 @@ export class DebrisManager {
 
   _updateActiveTrash(delta, config, playerPos) {
     const despawnDistSq = config.despawnDistance * config.despawnDistance;
+    const despawnAnchor = config?.despawnAnchor ?? null;
+    const despawnAnchorExtraDistance = Math.max(0, config?.despawnAnchorExtraDistance ?? 1000);
+    const playerAnchorDistance = despawnAnchor ? playerPos.distanceTo(despawnAnchor) : 0;
 
     for (let i = this.active.length - 1; i >= 0; i--) {
       const trash = this.active[i];
@@ -351,6 +406,15 @@ export class DebrisManager {
       trash.rotation.x += trash.rotSpeed.x * delta;
       trash.rotation.y += trash.rotSpeed.y * delta;
       trash.rotation.z += trash.rotSpeed.z * delta;
+
+      if (despawnAnchor) {
+        if (trash.position.distanceTo(despawnAnchor) > playerAnchorDistance + despawnAnchorExtraDistance) {
+          this._deactivateByActiveIndex(i);
+          continue;
+        }
+        this._renderDirty = true;
+        continue;
+      }
 
       const distanceSq = trash.position.distanceToSquared(playerPos);
       if (distanceSq > despawnDistSq) {

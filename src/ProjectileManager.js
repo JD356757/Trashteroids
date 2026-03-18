@@ -15,10 +15,10 @@ export class ProjectileManager {
   constructor(scene) {
     this.scene = scene;
     this.active = [];    // { mesh, direction, position (ref) }
-    this.speed = 2000;     // units per second along direction
-    this.maxDist = 2000;  // despawn after this travel distance
+    this.speed = 4000;     // units per second along direction
+    this.maxDist = 2500;  // despawn after this travel distance
     this.cooldown = 0;
-    this.cooldownTime = 0.065; // seconds between shots (rapid-fire)
+    this.cooldownTime = 0.035; // seconds between shots (rapid-fire)
 
     this._coreGeometry = new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6);
     this._coreGeometry.rotateX(Math.PI / 2);

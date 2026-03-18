@@ -102,6 +102,7 @@ export class AsteroidField {
     this.scene = scene;
     this.instances = [];
     this._elapsed = 0;
+    this._targetAsteroidCount = TARGET_ASTEROID_COUNT;
 
     // ── Model pool (filled async by _loadModels) ───────────────────────────
     this._modelPool = [];     // { mesh: THREE.Mesh, colliderRadius: number }
@@ -110,6 +111,18 @@ export class AsteroidField {
     this._isInitialLoad = true;
 
     this._loadModels();
+  }
+
+  setTargetCount(count) {
+    const nextTarget = Number.isFinite(count)
+      ? Math.max(0, Math.min(MAX_INSTANCES, Math.floor(count)))
+      : TARGET_ASTEROID_COUNT;
+    this._targetAsteroidCount = nextTarget;
+
+    while (this.instances.length > this._targetAsteroidCount) {
+      const ast = this.instances.pop();
+      this._disposeAsteroid(ast);
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -291,7 +304,7 @@ export class AsteroidField {
   _maintainPopulation(playerPosition, initialLoad = false) {
     if (!this._modelsReady || !playerPosition) return;
 
-    const target = Math.min(TARGET_ASTEROID_COUNT, MAX_INSTANCES);
+    const target = Math.min(this._targetAsteroidCount, MAX_INSTANCES);
     const spawnBudget = initialLoad ? target : SPAWN_BATCH_PER_FRAME;
     const attemptBudget = initialLoad ? target * 8 : MAX_SPAWN_ATTEMPTS_PER_FRAME;
 

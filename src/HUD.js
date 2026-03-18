@@ -45,6 +45,26 @@ export class HUD {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
     this.damageVignette = document.getElementById('damage-vignette');
+    this.bossAttackDebugEl = document.createElement('div');
+    this.bossAttackDebugEl.id = 'boss-attack-debug';
+    this.bossAttackDebugEl.classList.add('hidden');
+    this.bossAttackDebugEl.setAttribute('aria-live', 'polite');
+    this.bossAttackDebugEl.textContent = 'BOSS ATTACK: IDLE';
+    this.trashteroidRangeAlertEl = document.createElement('div');
+    this.trashteroidRangeAlertEl.id = 'trashteroid-range-alert';
+    this.trashteroidRangeAlertEl.classList.add('hidden');
+    this.trashteroidRangeAlertEl.setAttribute('aria-live', 'polite');
+    this.trashteroidRangeAlertEl.textContent = 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.';
+    this.bossVulnerabilityEl = document.createElement('div');
+    this.bossVulnerabilityEl.id = 'boss-vulnerability-status';
+    this.bossVulnerabilityEl.classList.add('hidden');
+    this.bossVulnerabilityEl.setAttribute('aria-live', 'polite');
+    this.bossVulnerabilityEl.textContent = 'SHIELDED - 30S';
+    if (this.hudRoot) {
+      this.hudRoot.appendChild(this.bossAttackDebugEl);
+      this.hudRoot.appendChild(this.trashteroidRangeAlertEl);
+      this.hudRoot.appendChild(this.bossVulnerabilityEl);
+    }
     this._lowHealth = false;
     this._speedSamples = [];
     this._tutorialCalloutHideTimer = null;
@@ -88,7 +108,37 @@ export class HUD {
     if (this.bossContainer) this.bossContainer.classList.add('hidden');
     if (this.minimap) this.minimap.classList.add('hidden');
     if (this.bossIndicator) this.bossIndicator.classList.add('hidden');
+    if (this.bossAttackDebugEl) this.bossAttackDebugEl.classList.add('hidden');
+    if (this.trashteroidRangeAlertEl) this.trashteroidRangeAlertEl.classList.add('hidden');
+    if (this.bossVulnerabilityEl) this.bossVulnerabilityEl.classList.add('hidden');
     if (this.tutorialCallout) this.tutorialCallout.classList.add('hidden');
+  }
+
+  setBossAttackDebug(label = 'IDLE', visible = true) {
+    if (!this.bossAttackDebugEl) return;
+    this.bossAttackDebugEl.textContent = `BOSS ATTACK: ${label}`;
+    this.bossAttackDebugEl.classList.toggle('hidden', !visible);
+  }
+
+  setTrashteroidRangeAlert(visible = false, message = 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.') {
+    if (!this.trashteroidRangeAlertEl) return;
+    this.trashteroidRangeAlertEl.textContent = message;
+    this.trashteroidRangeAlertEl.classList.toggle('hidden', !visible);
+  }
+
+  setBossVulnerabilityStatus(state = 'shielded', secondsRemaining = 0, visible = true) {
+    if (!this.bossVulnerabilityEl) return;
+    const safeSeconds = Math.max(0, Math.ceil(secondsRemaining));
+    if (state === 'vulnerable') {
+      this.bossVulnerabilityEl.textContent = `VULNERABLE! DESTROY THE TRASHTEROID: ${safeSeconds}`;
+      this.bossVulnerabilityEl.classList.add('vulnerable');
+      this.bossVulnerabilityEl.classList.remove('shielded');
+    } else {
+      this.bossVulnerabilityEl.textContent = `SHIELDED. VULNERABLE IN: ${safeSeconds}`;
+      this.bossVulnerabilityEl.classList.add('shielded');
+      this.bossVulnerabilityEl.classList.remove('vulnerable');
+    }
+    this.bossVulnerabilityEl.classList.toggle('hidden', !visible);
   }
 
   _setMusicVisualizerVisible(visible) {
@@ -155,7 +205,7 @@ export class HUD {
     this.musicVisualizer.style.setProperty('--visualizer-energy', `${this._musicVisualizerEnergy.toFixed(3)}`);
   }
 
-  updateBossIndicator(visible, x, y, angle, distance) {
+  updateBossIndicator(visible, x, y, angle, distance, label = 'TRASHTEROID') {
     if (!visible) {
       if (!this.bossIndicator.classList.contains('hidden')) {
         this.bossIndicator.classList.add('hidden');
@@ -167,7 +217,7 @@ export class HUD {
     this.bossIndicator.style.top = `${y}px`;
     this.bossIndicator.style.transform = `translate(-50%, -50%) rotate(${angle}rad)`;
     this.bossIndicatorDist.style.transform = `translateX(-50%) rotate(${-angle}rad)`;
-    this.bossIndicatorDist.textContent = `${distance} mi`;
+    this.bossIndicatorDist.textContent = `${label} ${distance} mi`;
   }
 
   updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids) {
@@ -326,6 +376,9 @@ export class HUD {
   setBossBarVisible(visible) {
     if (!this.bossContainer) return;
     this.bossContainer.classList.toggle('hidden', !visible);
+    if (!visible && this.bossVulnerabilityEl) {
+      this.bossVulnerabilityEl.classList.add('hidden');
+    }
   }
 
   updateSpeedometer(speed) {

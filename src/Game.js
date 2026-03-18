@@ -69,10 +69,15 @@ const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
 const TUTORIAL_OBJECTIVES_HINT_DURATION = 3.2;
 const TRASHTEROID_APPROACH_DISTANCE_WORLD = 15000 / DISPLAY_DISTANCE_SCALE;
 const TRASHTEROID_HIT_RADIUS = 72;
+const TRASHTEROID_COLLISION_RADIUS_SCALE = 0.68;
 const TRASHTEROID_SURFACE_OFFSET = 58;
+const TRASHTEROID_BOSS_SPEED_MULTIPLIER = 0.7;
 const TRASHTEROID_SCORE_PER_HIT = 35;
 const TRASHTEROID_SCORE_ON_DESTROY = 5000;
+const TRASHTEROID_INVULNERABLE_DURATION = 30;
+const TRASHTEROID_VULNERABLE_DURATION = 30;
 const WRONG_BEAM_PENALTY = 2000;
+const PLAYER_SHOOT_HITSCAN = true;
 const LEVEL_ENTRY_FADE_HOLD_MS = 280;
 const LEVEL_ENTRY_FADE_MS = 420;
 const TUTORIAL_BEATS = {
@@ -311,21 +316,30 @@ export class Game {
     this._popups = [];
     this._muzzles = [];
     this._enemyProjectiles = [];
-    this._enemyTrashProjectileGeometries = [
-      new THREE.BoxGeometry(1.25, 0.95, 1.6),
-      new THREE.CylinderGeometry(0.45, 0.7, 1.45, 9),
-      new THREE.ConeGeometry(0.72, 1.75, 7),
-      new THREE.DodecahedronGeometry(0.92, 0),
-      new THREE.TorusGeometry(0.74, 0.24, 8, 14),
-      new THREE.SphereGeometry(0.92, 10, 10),
-    ];
+    this._enemyTrashProjectileGeometriesByType = {
+      normal: [
+        new THREE.BoxGeometry(1.25, 0.95, 1.6),
+        new THREE.CylinderGeometry(0.45, 0.7, 1.45, 9),
+        new THREE.DodecahedronGeometry(0.92, 0),
+      ],
+      special: [
+        new THREE.ConeGeometry(0.72, 1.75, 7),
+        new THREE.SphereGeometry(0.92, 10, 10),
+      ],
+      recycle: [
+        new THREE.TorusGeometry(0.74, 0.24, 8, 14),
+        new THREE.CylinderGeometry(0.5, 0.5, 1.5, 12),
+      ],
+    };
+    this._enemyProjectileTypeCycle = [];
+    this._enemyProjectileTypeCursor = 0;
     this._trashteroid = this._createTrashteroid();
 
     // Large decorative asteroid field around the player zone
     this.asteroidField = new AsteroidField(this.scene);
 
     // Planet — large Earth in the background, unreachable
-    // this._loadPlanet();
+    this._loadPlanet();
 
     // Level complete screen
     this._levelCompleteEl = document.getElementById('level-complete-screen');
@@ -576,58 +590,6 @@ export class Game {
     group.add(coreGlow);
 
     const orbitDebris = [];
-    const debrisGeometries = [
-      new THREE.BoxGeometry(8, 5, 7),
-      new THREE.BoxGeometry(5, 7, 4),
-      new THREE.CylinderGeometry(2.4, 3.2, 7, 8),
-      new THREE.ConeGeometry(3.2, 8, 6),
-      new THREE.TorusGeometry(3.6, 1.0, 8, 12),
-      new THREE.DodecahedronGeometry(3.2, 0),
-    ];
-
-    for (let i = 0; i < 26; i++) {
-      const mesh = new THREE.Mesh(
-        debrisGeometries[i % debrisGeometries.length],
-        new THREE.MeshStandardMaterial({
-          color: [0x665c4a, 0x5f6772, 0x6f726a, 0x5d6b57, 0x725a50][i % 5],
-          roughness: 0.9,
-          metalness: 0.15,
-          emissive: 0x111317,
-          emissiveIntensity: 0.2,
-        })
-      );
-      mesh.scale.setScalar(2.0 + Math.random() * 1.2);
-      mesh.frustumCulled = false;
-      mesh.castShadow = true;
-      mesh.receiveShadow = false;
-      group.add(mesh);
-
-      _targetOffset
-        .set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)
-        .normalize();
-      const axisRef = Math.abs(_targetOffset.dot(_worldUp)) > 0.92
-        ? _bossOrbitA.set(1, 0, 0)
-        : _worldUp;
-
-      const tangentA = new THREE.Vector3().crossVectors(_targetOffset, axisRef).normalize();
-      const tangentB = new THREE.Vector3().crossVectors(_targetOffset, tangentA).normalize();
-
-      orbitDebris.push({
-        mesh,
-        tangentA,
-        tangentB,
-        radius: 62 + Math.random() * 18,
-        speed: 0.04 + Math.random() * 0.1,
-        phase: Math.random() * Math.PI * 2,
-        wobble: 0.3 + Math.random() * 0.7,
-        spin: new THREE.Vector3(
-          (Math.random() - 0.5) * 0.25,
-          (Math.random() - 0.5) * 0.25,
-          (Math.random() - 0.5) * 0.25
-        ),
-        worldPosition: new THREE.Vector3(),
-      });
-    }
 
     this.scene.add(group);
 
@@ -642,12 +604,15 @@ export class Game {
       velocity: new THREE.Vector3(),
       health: 1,
       maxHealth: 1,
-      hitRadius: TRASHTEROID_HIT_RADIUS,
-      collisionRadius: TRASHTEROID_HIT_RADIUS - 6,
+      hitRadius: TRASHTEROID_HIT_RADIUS - 6,
+      collisionRadius: TRASHTEROID_HIT_RADIUS - 10,
       active: false,
       mode: 'approach',
       time: 0,
       shotCooldown: 0,
+      attackType: null,
+      attackStepsRemaining: 0,
+      streamMuzzleDir: null,
     };
   }
 
@@ -813,6 +778,7 @@ export class Game {
     const primary = levelConfig.mission?.primary ?? {};
     const bossConfig = levelConfig.boss ?? null;
     const trashteroid = this._trashteroid;
+    const configuredScale = Math.max(0.1, levelConfig.trashteroidScale ?? bossConfig?.bossScale ?? 1);
 
     this._clearTrashteroidProjectiles();
 
@@ -820,6 +786,8 @@ export class Game {
       trashteroid.active = false;
       trashteroid.group.visible = false;
       this.hud.setBossBarVisible(false);
+      this.hud.setBossAttackDebug('IDLE', false);
+      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       return;
     }
 
@@ -835,28 +803,45 @@ export class Game {
     trashteroid.active = true;
     trashteroid.mode = bossConfig ? 'boss' : 'approach';
     trashteroid.time = 0;
-    trashteroid.shotCooldown = bossConfig ? bossConfig.shotInterval * 0.8 : 0;
+    trashteroid.shotCooldown = bossConfig ? bossConfig.shotInterval * 2.4 : 0;
+    trashteroid.attackType = null;
+    trashteroid.attackStepsRemaining = 0;
+    trashteroid.streamMuzzleDir = null;
     trashteroid.group.visible = true;
     this._disableTrashteroidFrustumCulling();
+    this.hud.setBossAttackDebug('IDLE', !!bossConfig);
 
     if (bossConfig) {
-      const bossScale = bossConfig.bossScale ?? 5;
-      trashteroid.group.scale.setScalar(bossScale);
-      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * bossScale;
-      trashteroid.collisionRadius = (bossConfig.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6)) * bossScale;
-      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * bossScale;
+      trashteroid.group.scale.setScalar(configuredScale);
+      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * configuredScale;
+      trashteroid.collisionRadius =
+        (bossConfig.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6)) *
+        configuredScale *
+        TRASHTEROID_COLLISION_RADIUS_SCALE;
+      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * configuredScale;
       // Start the trashteroid already moving towards Earth
       _bossMoveDelta.set(-1200, -600, -3500).normalize();
       trashteroid.velocity.copy(_bossMoveDelta).multiplyScalar(
         toWorldSpeed(150)
       );
+      trashteroid.vulnerabilityState = 'shielded';
+      trashteroid.vulnerabilityTimer = TRASHTEROID_INVULNERABLE_DURATION;
+      trashteroid.isVulnerable = false;
+      trashteroid.cooldownHalved = false;
       this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
+      this.hud.setBossVulnerabilityStatus('shielded', trashteroid.vulnerabilityTimer, true);
     } else {
-      trashteroid.group.scale.setScalar(1);
-      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS;
-      trashteroid.collisionRadius = TRASHTEROID_HIT_RADIUS - 6;
-      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET;
+      trashteroid.group.scale.setScalar(configuredScale);
+      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * configuredScale;
+      trashteroid.collisionRadius =
+        (TRASHTEROID_HIT_RADIUS - 6) * configuredScale * TRASHTEROID_COLLISION_RADIUS_SCALE;
+      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * configuredScale;
       trashteroid.velocity.set(0, 0, 0);
+      trashteroid.vulnerabilityState = null;
+      trashteroid.vulnerabilityTimer = 0;
+      trashteroid.isVulnerable = true;
+      trashteroid.cooldownHalved = false;
+      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
     }
   }
 
@@ -884,71 +869,73 @@ export class Game {
     this._enemyProjectiles.splice(index, 1);
   }
 
+  _nextEnemyProjectileType() {
+    if (this._enemyProjectileTypeCursor >= this._enemyProjectileTypeCycle.length) {
+      this._enemyProjectileTypeCycle = [];
+      for (let i = 0; i < 50; i++) this._enemyProjectileTypeCycle.push('normal');
+      this._enemyProjectileTypeCycle.push('special');
+      for (let i = 0; i < 5; i++) this._enemyProjectileTypeCycle.push('recycle');
+
+      // Shuffle each cycle so order stays unpredictable while preserving exact ratios.
+      for (let i = this._enemyProjectileTypeCycle.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = this._enemyProjectileTypeCycle[i];
+        this._enemyProjectileTypeCycle[i] = this._enemyProjectileTypeCycle[j];
+        this._enemyProjectileTypeCycle[j] = tmp;
+      }
+      this._enemyProjectileTypeCursor = 0;
+    }
+
+    const type = this._enemyProjectileTypeCycle[this._enemyProjectileTypeCursor];
+    this._enemyProjectileTypeCursor += 1;
+    return type;
+  }
+
   _spawnTrashteroidProjectile(origin, direction, speed, ttl) {
-    const geometryTemplate = this._enemyTrashProjectileGeometries[
-      Math.floor(Math.random() * this._enemyTrashProjectileGeometries.length)
-    ];
-    const geometry = geometryTemplate.clone();
+    const projectileType = this._nextEnemyProjectileType();
+    const launchSpeed = speed * (0.92 + Math.random() * 0.16);
+    const scaleMultiplier = 2.2;
 
-    const trashColors = [0x72654f, 0x4f5a67, 0x656870, 0x6b4f44, 0x5f6d5a, 0x7a7366];
-    const core = new THREE.Mesh(
-      geometry,
-      new THREE.MeshStandardMaterial({
-        color: trashColors[Math.floor(Math.random() * trashColors.length)],
-        roughness: 0.88,
-        metalness: 0.18,
-        emissive: 0x140607,
-        emissiveIntensity: 0.36,
-      })
-    );
+    if (projectileType === 'special') {
+      return this.specialDebris.spawnDirected(origin, direction, launchSpeed, {
+        scaleMultiplier,
+      });
+    }
 
-    const outline = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry, 20),
-      new THREE.LineBasicMaterial({
-        color: 0xff3030,
-        transparent: true,
-        opacity: this._isReducedFlashing() ? 0.65 : 0.95,
-        depthTest: false,
-      })
-    );
-    outline.renderOrder = 4;
-    core.add(outline);
+    if (projectileType === 'recycle') {
+      return this.recycleDebris.spawnDirected(origin, direction, launchSpeed, {
+        scaleMultiplier,
+      });
+    }
 
-    const projectileGroup = new THREE.Group();
-    projectileGroup.add(core);
-    projectileGroup.position.copy(origin);
-    const projectileScale = 11.0 + Math.random() * 6.0;
-    projectileGroup.scale.setScalar(projectileScale);
-    projectileGroup.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    this.scene.add(projectileGroup);
-
-    this._enemyProjectiles.push({
-      mesh: projectileGroup,
-      position: projectileGroup.position,
-      prevPosition: projectileGroup.position.clone(),
-      velocity: direction.clone().multiplyScalar(speed * (0.92 + Math.random() * 0.16)),
-      hitRadius: projectileScale * 0.82,
-      spin: new THREE.Vector3(
-        (Math.random() - 0.5) * 0.35,
-        (Math.random() - 0.5) * 0.35,
-        (Math.random() - 0.5) * 0.35
-      ),
-      life: 0,
-      ttl,
+    return this.debris.spawnDirected(origin, direction, launchSpeed, {
+      scaleMultiplier,
     });
   }
 
-  _fireTrashteroidBurst(bossConfig) {
+  _spawnTrashteroidBreakoffExplosion(muzzleWorldPos, trashteroid, scale = 1) {
+    const localBreakoffPos = muzzleWorldPos.clone();
+    trashteroid.group.worldToLocal(localBreakoffPos);
+    this._spawnExplosion(localBreakoffPos, {
+      count: 220,
+      ttl: 1.4,
+      sizeScale: 10 * scale,
+      smokeSizeMultiplier: 0.12,
+      velocityScale: 0.1 * scale,
+      parent: trashteroid.group,
+      positionIsLocal: true,
+    });
+  }
+
+  _fireTrashteroidBurst(bossConfig, options = {}) {
     const trashteroid = this._trashteroid;
     if (!trashteroid?.active) return;
-
-    const projectileSpeed = Math.max(1, bossConfig.projectileSpeed ?? 1000);
-    const distanceToPlayer = trashteroid.group.position.distanceTo(this.player.mesh.position);
-    const leadTime = THREE.MathUtils.clamp((distanceToPlayer / projectileSpeed) * 0.95, 0.18, 1.18);
+    const lockSpawnPoint = !!options.lockSpawnPoint;
+    const forceDirectTracking = !!options.forceDirectTracking;
+    const predictiveTracking = !!options.predictiveTracking;
 
     _bossAim
       .copy(this.player.mesh.position)
-      .addScaledVector(this.player.velocity, leadTime)
       .sub(trashteroid.group.position);
 
     if (_bossAim.lengthSq() === 0) return;
@@ -962,39 +949,67 @@ export class Game {
     _bossUp.crossVectors(_bossRight, _bossAim).normalize();
 
     const surfaceOffset = trashteroid.surfaceOffset ?? TRASHTEROID_SURFACE_OFFSET;
-    const burstCount = Math.max(3, bossConfig.projectileBurstCount ?? 5);
-    const lateralSpreadScale = bossConfig.projectileSpreadScale ?? 0.024;
-    const verticalSpreadScale = bossConfig.projectileVerticalSpreadScale ?? 0.014;
-    const aimErrorScale = bossConfig.projectileAimError ?? 0.014;
+    const launchRadius = trashteroid.collisionRadius ?? surfaceOffset;
+    const burstCount = Math.max(1, options.burstCount ?? bossConfig.projectileBurstCount ?? 3);
+    const jitterMultiplier = options.jitterMultiplier ?? 1;
+    const aimJitterScale = Math.max(0.00025, (bossConfig.projectileAimError ?? 0.003) * 0.35 * jitterMultiplier);
 
     for (let i = 0; i < burstCount; i++) {
-      const ratio = burstCount === 1 ? 0 : (i / (burstCount - 1)) * 2 - 1;
-      _targetOffset
-        .set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)
-        .normalize();
+      if (lockSpawnPoint) {
+        if (!trashteroid.streamMuzzleDir) {
+          trashteroid.streamMuzzleDir = _bossAim
+            .clone()
+            .addScaledVector(_bossRight, (Math.random() - 0.5) * 0.2)
+            .addScaledVector(_bossUp, (Math.random() - 0.5) * 0.2)
+            .normalize();
+        }
 
-      if (_targetOffset.dot(_bossAim) < -0.12) {
-        _targetOffset.addScaledVector(_bossAim, 0.9).normalize();
+        // Keep stream shots from almost the same spawn point for this volley.
+        trashteroid.streamMuzzleDir
+          .addScaledVector(_bossRight, (Math.random() - 0.5) * 0.006)
+          .addScaledVector(_bossUp, (Math.random() - 0.5) * 0.006)
+          .normalize();
+        _targetOffset.copy(trashteroid.streamMuzzleDir);
+      } else {
+        // Bias emission points to the hemisphere facing the player so the breakoff
+        // and projectile origin are visible from the player's view.
+        _targetOffset
+          .copy(_bossAim)
+          .addScaledVector(_bossRight, (Math.random() - 0.5) * 0.7)
+          .addScaledVector(_bossUp, (Math.random() - 0.5) * 0.7)
+          .normalize();
+
+        if (_targetOffset.dot(_bossAim) < 0.25) {
+          _targetOffset.lerp(_bossAim, 0.7).normalize();
+        }
       }
 
       _bossMuzzle
         .copy(trashteroid.group.position)
-        .addScaledVector(_targetOffset, surfaceOffset * (0.86 + Math.random() * 0.22));
+        .addScaledVector(_targetOffset, launchRadius);
 
       _debrisAway
         .copy(this.player.mesh.position)
-        .addScaledVector(this.player.velocity, leadTime)
+        .addScaledVector(
+          this.player.velocity,
+          predictiveTracking
+            ? 
+              this.player.mesh.position.distanceTo(_bossMuzzle) / Math.max(1, bossConfig.projectileSpeed ?? 1) * 0.5
+            : 0
+        )
         .sub(_bossMuzzle);
       if (_debrisAway.lengthSq() < 1e-5) {
         _debrisAway.copy(_bossAim);
       }
       _debrisAway.normalize();
 
-      const spreadDirection = _debrisAway
-        .clone()
-        .addScaledVector(_bossRight, ratio * lateralSpreadScale + (Math.random() - 0.5) * aimErrorScale)
-        .addScaledVector(_bossUp, (Math.random() - 0.5) * verticalSpreadScale)
-        .normalize();
+      const spreadDirection = forceDirectTracking
+        ? _debrisAway.clone().normalize()
+        : _debrisAway
+          .clone()
+          .addScaledVector(_bossRight, (Math.random() - 0.5) * aimJitterScale)
+          .addScaledVector(_bossUp, (Math.random() - 0.5) * aimJitterScale)
+          .normalize();
 
       this._spawnTrashteroidProjectile(
         _bossMuzzle,
@@ -1002,17 +1017,116 @@ export class Game {
         bossConfig.projectileSpeed,
         bossConfig.projectileLifetime
       );
-      this._spawnSparks(_bossMuzzle.clone(), {
-        count: 8,
-        speed: 18,
-        ttl: 0.24,
-        color: 0xff8855,
-        size: 1.2,
-      });
+      this._spawnTrashteroidBreakoffExplosion(_bossMuzzle, trashteroid, 1);
     }
   }
 
-  _updateTrashteroid(delta) {
+  _fireTrashteroidRing(bossConfig, options = {}) {
+    const trashteroid = this._trashteroid;
+    if (!trashteroid?.active) return;
+    const predictiveTracking = !!options.predictiveTracking;
+
+    _bossAim.copy(this.player.mesh.position).sub(trashteroid.group.position);
+    if (_bossAim.lengthSq() === 0) return;
+    _bossAim.normalize();
+
+    _bossRight.crossVectors(_bossAim, _worldUp);
+    if (_bossRight.lengthSq() < 1e-5) {
+      _bossRight.set(1, 0, 0);
+    }
+    _bossRight.normalize();
+    _bossUp.crossVectors(_bossRight, _bossAim).normalize();
+
+    const launchRadius = trashteroid.collisionRadius ?? (trashteroid.surfaceOffset ?? TRASHTEROID_SURFACE_OFFSET);
+    const ringCount = Math.max(8, bossConfig.projectileRingCount ?? 12);
+    const ringSpread = bossConfig.projectileRingSpread ?? 0.18;
+
+    _bossMuzzle.copy(trashteroid.group.position).addScaledVector(_bossAim, launchRadius);
+
+    for (let i = 0; i < ringCount; i++) {
+      const theta = (i / ringCount) * Math.PI * 2;
+      _debrisAway
+        .copy(this.player.mesh.position)
+        .addScaledVector(
+          this.player.velocity,
+          predictiveTracking
+            ? this.player.mesh.position.distanceTo(_bossMuzzle) / Math.max(1, bossConfig.projectileSpeed ?? 1) * 0.5
+            : 0
+        )
+        .sub(_bossMuzzle)
+        .normalize();
+
+      const dir = _debrisAway
+        .clone()
+        .addScaledVector(_bossRight, Math.cos(theta) * ringSpread)
+        .addScaledVector(_bossUp, Math.sin(theta) * ringSpread)
+        .normalize()
+        .clone();
+
+      this._spawnTrashteroidProjectile(
+        _bossMuzzle,
+        dir,
+        bossConfig.projectileSpeed,
+        bossConfig.projectileLifetime
+      );
+      this._spawnTrashteroidBreakoffExplosion(_bossMuzzle, trashteroid, 0.7);
+    }
+  }
+
+  _stepTrashteroidAttackPattern(bossConfig) {
+    const trashteroid = this._trashteroid;
+    if (!trashteroid?.active) return;
+    const cooldownScale = trashteroid.cooldownHalved ? 0.5 : 1;
+
+    if (!trashteroid.attackType || trashteroid.attackStepsRemaining <= 0) {
+      if (Math.random() < 0.5) {
+        trashteroid.attackType = 'ring';
+        trashteroid.attackStepsRemaining = 2;
+        trashteroid.streamMuzzleDir = null;
+        this.hud.setBossAttackDebug('SMOKE RING', true);
+      } else {
+        trashteroid.attackType = 'stream';
+        trashteroid.attackStepsRemaining = 29;
+        trashteroid.streamMuzzleDir = null;
+        this.hud.setBossAttackDebug('RAPID STREAM', true);
+      }
+    }
+
+    if (trashteroid.attackType === 'ring') {
+      this._fireTrashteroidRing(bossConfig, {
+        predictiveTracking: true,
+      });
+      trashteroid.attackStepsRemaining -= 1;
+      if (trashteroid.attackStepsRemaining > 0) {
+        // Re-evaluate player position for the next ring burst.
+        trashteroid.shotCooldown = 0.28 * cooldownScale;
+      } else {
+        trashteroid.attackType = null;
+        this.hud.setBossAttackDebug('COOLDOWN', true);
+        trashteroid.shotCooldown = bossConfig.shotInterval * 3 * (1.55 + Math.random() * 0.35) * cooldownScale;
+      }
+      return;
+    }
+
+    // stream
+    this._fireTrashteroidBurst(bossConfig, {
+      burstCount: 1,
+      jitterMultiplier: 0.35,
+      lockSpawnPoint: true,
+      forceDirectTracking: true,
+      predictiveTracking: true,
+    });
+    trashteroid.attackStepsRemaining -= 1;
+    if (trashteroid.attackStepsRemaining > 0) {
+      trashteroid.shotCooldown = 0.065 * cooldownScale;
+    } else {
+      trashteroid.attackType = null;
+      this.hud.setBossAttackDebug('COOLDOWN', true);
+      trashteroid.shotCooldown = bossConfig.shotInterval * 3 * (0.85 + Math.random() * 0.28) * cooldownScale;
+    }
+  }
+
+  _updateTrashteroid(delta, rawDelta = delta) {
     const trashteroid = this._trashteroid;
     if (!trashteroid?.active) return;
 
@@ -1047,28 +1161,14 @@ export class Game {
       return;
     }
 
-    // Earth is kept at a fixed offset from the camera; use planet position when available
-    if (this.planet) {
-      _bossDesiredPos.copy(this.planet.position);
-    } else {
-      _bossDesiredPos.set(
-        this.player.mesh.position.x - 1200,
-        this.player.mesh.position.y - 600,
-        this.player.mesh.position.z - 3500
-      );
-    }
-
-    // Direction from trashteroid towards Earth
-    _bossMoveDelta.copy(_bossDesiredPos).sub(trashteroid.group.position);
-    const distToEarth = _bossMoveDelta.length();
-    if (distToEarth > 1e-5) {
-      _bossMoveDelta.multiplyScalar(1 / distToEarth);
-    }
+    // Earth model is camera-anchored in the far background, so drive the boss along
+    // a fixed Earth-bearing vector rather than homing to the visual mesh position.
+    _bossMoveDelta.set(-1200, -600, -3500).normalize();
 
     // Desired velocity towards Earth; after asteroid bounces, steer back towards Earth
-    const earthSpeed = bossConfig.earthSpeed != null
+    const earthSpeed = (bossConfig.earthSpeed != null
       ? toWorldSpeed(bossConfig.earthSpeed)
-      : toWorldSpeed(220);
+      : toWorldSpeed(220)) * TRASHTEROID_BOSS_SPEED_MULTIPLIER;
     const steerRate = bossConfig.steerRate ?? 2.5;
     _bossDesiredPos.copy(_bossMoveDelta).multiplyScalar(earthSpeed);
     trashteroid.velocity.lerp(_bossDesiredPos, 1 - Math.exp(-steerRate * delta));
@@ -1076,10 +1176,37 @@ export class Game {
     // Integrate position
     trashteroid.group.position.addScaledVector(trashteroid.velocity, delta);
 
+    if (!trashteroid.vulnerabilityState) {
+      trashteroid.vulnerabilityState = 'shielded';
+      trashteroid.vulnerabilityTimer = TRASHTEROID_INVULNERABLE_DURATION;
+    }
+
+    const vulnerabilityDelta = Math.max(0, rawDelta || 0);
+    trashteroid.vulnerabilityTimer -= vulnerabilityDelta;
+    while (trashteroid.vulnerabilityTimer <= 0) {
+      if (trashteroid.vulnerabilityState === 'shielded') {
+        trashteroid.vulnerabilityState = 'vulnerable';
+        trashteroid.vulnerabilityTimer += TRASHTEROID_VULNERABLE_DURATION;
+      } else {
+        trashteroid.vulnerabilityState = 'shielded';
+        trashteroid.vulnerabilityTimer += TRASHTEROID_INVULNERABLE_DURATION;
+      }
+    }
+    trashteroid.isVulnerable = trashteroid.vulnerabilityState === 'vulnerable';
+    this.hud.setBossVulnerabilityStatus(
+      trashteroid.vulnerabilityState,
+      trashteroid.vulnerabilityTimer,
+      true
+    );
+
+    if (!trashteroid.cooldownHalved && trashteroid.maxHealth > 0 && trashteroid.health <= trashteroid.maxHealth * 0.5) {
+      trashteroid.cooldownHalved = true;
+      trashteroid.shotCooldown *= 0.5;
+    }
+
     trashteroid.shotCooldown -= delta;
     if (trashteroid.shotCooldown <= 0) {
-      this._fireTrashteroidBurst(bossConfig);
-      trashteroid.shotCooldown = bossConfig.shotInterval * (0.8 + Math.random() * 0.35);
+      this._stepTrashteroidAttackPattern(bossConfig);
     }
 
     this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
@@ -1286,6 +1413,17 @@ export class Game {
         continue;
       }
 
+      if (!trashteroid.isVulnerable) {
+        this._spawnSparks(impactPoint, {
+          count: 16,
+          speed: 14,
+          ttl: 0.35,
+          color: 0x8fd8ff,
+          size: 1.25,
+        });
+        continue;
+      }
+
       trashteroid.health = Math.max(0, trashteroid.health - 1);
       this.score += TRASHTEROID_SCORE_PER_HIT;
       this._spawnSparks(impactPoint, {
@@ -1304,6 +1442,7 @@ export class Game {
       trashteroid.active = false;
       trashteroid.group.visible = false;
       this.hud.setBossBarVisible(false);
+      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       this._clearTrashteroidProjectiles();
       this._finalizeLevel(true);
       break;
@@ -1328,11 +1467,11 @@ export class Game {
     const radiusY = Math.max(90, window.innerHeight * 0.26);
     const projectedX = centerX + _targetScreenPos.x * centerX;
     const projectedY = centerY - _targetScreenPos.y * centerY;
-    const inFront = _targetScreenPos.z > -1 && _targetScreenPos.z < 1;
-    const ellipseNorm =
-      ((projectedX - centerX) * (projectedX - centerX)) / (radiusX * radiusX) +
-      ((projectedY - centerY) * (projectedY - centerY)) / (radiusY * radiusY);
-    const insideEllipse = inFront && ellipseNorm <= 1;
+    const onScreen =
+      _targetScreenPos.z > -1 &&
+      _targetScreenPos.z < 1 &&
+      Math.abs(_targetScreenPos.x) <= 1 &&
+      Math.abs(_targetScreenPos.y) <= 1;
 
     _targetOffset.copy(targetPos).sub(this.camera.position);
     _targetOffset.applyQuaternion(this.camera.quaternion.clone().invert());
@@ -1342,11 +1481,32 @@ export class Game {
       angle += Math.PI;
     }
 
-    const x = insideEllipse ? projectedX : centerX + Math.sin(angle) * radiusX;
-    const y = insideEllipse ? projectedY : centerY - Math.cos(angle) * radiusY;
+    const x = onScreen ? projectedX : centerX + Math.sin(angle) * radiusX;
+    const y = onScreen ? projectedY : centerY - Math.cos(angle) * radiusY;
+    const indicatorAngle = onScreen ? 0 : angle;
     const distance = toDisplayDistance(targetPos.distanceTo(this.player.mesh.position));
 
-    this.hud.updateBossIndicator(true, x, y, angle, Math.max(1, distance));
+    this.hud.updateBossIndicator(true, x, y, indicatorAngle, Math.max(1, distance), 'TRASHTEROID');
+  }
+
+  _updateTrashteroidRangeAlert() {
+    const trashteroid = this._trashteroid;
+    if (!trashteroid?.active) {
+      this.hud.setTrashteroidRangeAlert(false);
+      return;
+    }
+
+    const playerPos = this.player?.mesh?.position;
+    if (!playerPos) {
+      this.hud.setTrashteroidRangeAlert(false);
+      return;
+    }
+
+    const maxShotDistance = Math.max(1, this.projectiles?.maxDist ?? 2500);
+    const targetDistanceToCenter = playerPos.distanceTo(trashteroid.group.position);
+    const targetSurfaceDistance = Math.max(0, targetDistanceToCenter - (trashteroid.hitRadius ?? 0));
+    const outOfRange = targetSurfaceDistance > (maxShotDistance + PROJECTILE_HIT_PADDING);
+    this.hud.setTrashteroidRangeAlert(outOfRange, 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.');
   }
 
   _getMissionObjectiveState(finalizeShield = false) {
@@ -1464,6 +1624,7 @@ export class Game {
     this.hud.updateObjectives(state.objectives);
     this.hud.hideTimer();
     this.hud.setBossBarVisible(false);
+    this.hud.setBossVulnerabilityStatus('shielded', 0, false);
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
     this._showLevelCompleteScreen(primaryComplete, state.fastDone, state.shieldBonus);
   }
@@ -1811,6 +1972,13 @@ export class Game {
 
     if (!fired) return 0;
 
+    if (PLAYER_SHOOT_HITSCAN) {
+      const maxDistance = Math.max(1, this.projectiles.maxDist ?? 2500);
+      for (let shotIndex = 0; shotIndex < fired; shotIndex++) {
+        this._resolvePlayerHitscanShot(type, this.player.mesh.position, fireDirection, maxDistance);
+      }
+    }
+
     this.shotsFired += fired;
     this._noteTutorialShot();
     this._refreshPauseMenu();
@@ -1959,29 +2127,63 @@ export class Game {
     this.projectiles.update(delta);
     const playerPos = this.player.mesh.position;
     const playerQuat = this.player.baseQuaternion;
+    const levelConfig = this.levels.getCurrentConfig();
+    this.asteroidField.setTargetCount(levelConfig?.boss?.asteroidTarget);
     this.asteroidField.update(delta, playerPos);
     const spawnConfig = this.levels.getSpawnConfig();
+    const missionConfig = this.levels.getMissionConfig();
     const hasBossLevel = !!this.levels.getCurrentConfig().boss;
-    if (!hasBossLevel) {
-      this.debris.update(delta, spawnConfig, playerPos, playerQuat);
-    }
+    const reachTrashteroidObjective = !!missionConfig?.primary?.reachTrashteroid;
+    const noSpawnNearTarget = !hasBossLevel && reachTrashteroidObjective && this._trashteroid?.active;
+    const trashteroidCollisionRadius = this._trashteroid?.collisionRadius ?? 0;
+    const noSpawnRadius = trashteroidCollisionRadius * 2;
+    const nearTargetSpawnLock = noSpawnNearTarget
+      && noSpawnRadius > 0
+      && this._trashteroid.group.position.distanceTo(playerPos) <= noSpawnRadius;
+    const runtimeSpawnConfig = noSpawnNearTarget
+      ? {
+        ...spawnConfig,
+        noSpawnCenter: this._trashteroid.group.position,
+        noSpawnRadius,
+        ...(nearTargetSpawnLock ? { targetActive: 0, maxActive: 0, bootstrapActive: 0 } : null),
+      }
+      : spawnConfig;
+    const debrisRuntimeConfig = hasBossLevel
+      ? {
+        ...runtimeSpawnConfig,
+        disableNaturalSpawn: true,
+        targetActive: 0,
+        maxActive: 0,
+        bootstrapActive: 0,
+        forwardSpawnMax: Math.max(runtimeSpawnConfig?.forwardSpawnMax ?? runtimeSpawnConfig?.spawnMaxDistance ?? 0, 6000),
+        spawnMaxDistance: Math.max(runtimeSpawnConfig?.spawnMaxDistance ?? runtimeSpawnConfig?.forwardSpawnMax ?? 0, 6000),
+        despawnDistance: Math.max(runtimeSpawnConfig?.despawnDistance ?? 0, 6000),
+        despawnAnchor: this._trashteroid?.active ? this._trashteroid.group.position : null,
+        despawnAnchorExtraDistance: 1000,
+      }
+      : runtimeSpawnConfig;
+
+    this.debris.update(delta, debrisRuntimeConfig, playerPos, playerQuat);
     const asteroidColliders = this.asteroidField.getColliders();
-    if (!hasBossLevel) {
-      this.debris.resolveAsteroidCollisions(asteroidColliders);
-      const specialSpawnConfig = this._isTutorialActiveForCurrentLevel()
-        ? { ...spawnConfig, progressPerSpawn: Math.max(24, (spawnConfig?.progressPerSpawn ?? 140) * 0.33) }
-        : spawnConfig;
-      this.specialDebris.update(delta, specialSpawnConfig, playerPos, playerQuat);
-      this.specialDebris.resolveAsteroidCollisions(asteroidColliders);
-      this.recycleDebris.update(delta, spawnConfig, playerPos, playerQuat);
-      this.recycleDebris.resolveAsteroidCollisions(asteroidColliders);
-    }
-    this._updateTrashteroid(delta);
+    this.debris.resolveAsteroidCollisions(asteroidColliders);
+    const specialSpawnConfig = this._isTutorialActiveForCurrentLevel() && !hasBossLevel
+      ? {
+        ...debrisRuntimeConfig,
+        progressPerSpawn: Math.max(24, (debrisRuntimeConfig?.progressPerSpawn ?? 140) * 0.33),
+      }
+      : debrisRuntimeConfig;
+    this.specialDebris.update(delta, specialSpawnConfig, playerPos, playerQuat);
+    this.specialDebris.resolveAsteroidCollisions(asteroidColliders);
+    this.recycleDebris.update(delta, debrisRuntimeConfig, playerPos, playerQuat);
+    this.recycleDebris.resolveAsteroidCollisions(asteroidColliders);
+    this._updateTrashteroid(delta, rawDelta);
     this._resolveTrashteroidAsteroidCollisions(asteroidColliders, delta);
     this._updateTrashteroidProjectiles(delta);
-    // Check projectile collisions against asteroids (sparks)
-    this._checkProjectileAsteroidCollisions();
-    this._checkProjectileTrashteroidCollisions();
+    // Legacy moving-projectile collision checks are disabled when hitscan is on.
+    if (!PLAYER_SHOOT_HITSCAN) {
+      this._checkProjectileAsteroidCollisions();
+      this._checkProjectileTrashteroidCollisions();
+    }
     this._checkAsteroidPlayerCollisions();
     this._checkTrashteroidPlayerCollisions(playerPos);
 
@@ -1999,11 +2201,13 @@ export class Game {
     this._updateEffects(delta);
 
     // Collision: projectiles vs debris (regular + special)
-    this._checkProjectileDebrisCollisions(this.debris, 'normal');
-    this._checkProjectileDebrisCollisions(this.recycleDebris, 'vaporizer');
-    this._checkProjectileSpecialRewardCollisions();
-    this._checkProjectileRecyclePenaltyCollisions();
-    this._checkProjectileTrashPenaltyCollisions();
+    if (!PLAYER_SHOOT_HITSCAN) {
+      this._checkProjectileDebrisCollisions(this.debris, 'normal');
+      this._checkProjectileDebrisCollisions(this.recycleDebris, 'vaporizer');
+      this._checkProjectileSpecialRewardCollisions();
+      this._checkProjectileRecyclePenaltyCollisions();
+      this._checkProjectileTrashPenaltyCollisions();
+    }
 
     // Collision: trash vs player (hits / misses)
     this._checkDebrisPlayerCollisions(playerPos, playerQuat);
@@ -2011,6 +2215,7 @@ export class Game {
     this._checkDebrisPlayerCollisions(playerPos, playerQuat, this.recycleDebris);
 
     this._updateMissionTargetIndicator();
+    this._updateTrashteroidRangeAlert();
     this._updateMinimap();
 
     this.score = Math.max(0, this.score);
@@ -2057,14 +2262,240 @@ export class Game {
     return _closestPoint.distanceToSquared(center) <= radiusSq;
   }
 
+  _intersectRaySphereDistance(origin, direction, center, radius, maxDistance = Infinity) {
+    _toCenter.copy(origin).sub(center);
+    const b = _toCenter.dot(direction);
+    const c = _toCenter.lengthSq() - radius * radius;
+    const discriminant = b * b - c;
+    if (discriminant < 0) return Infinity;
+
+    const sqrtDiscriminant = Math.sqrt(discriminant);
+    let distance = -b - sqrtDiscriminant;
+    if (distance < 0) {
+      distance = -b + sqrtDiscriminant;
+    }
+
+    if (distance < 0 || distance > maxDistance) return Infinity;
+    return distance;
+  }
+
+  _resolvePlayerHitscanShot(type, origin, direction, maxDistance) {
+    const hitRadiusScale = 1.5;
+    const canHitRegularTrash = type === 'normal';
+    const canHitSpecialTrash = type === 'normal';
+    const canHitRecycleTrash = type === 'vaporizer';
+    const canPenaltyRecycleTrash = type === 'normal';
+    const canPenaltyRegularTrash = type === 'vaporizer';
+
+    let bestDistance = maxDistance;
+    let bestHit = null;
+
+    if (canHitRegularTrash || canPenaltyRegularTrash) {
+      const debrisList = this.debris.getActive();
+      for (let i = 0; i < debrisList.length; i++) {
+        const radius = (debrisList[i].hitRadius || 1) * hitRadiusScale + PROJECTILE_HIT_PADDING;
+        const distance = this._intersectRaySphereDistance(origin, direction, debrisList[i].position, radius, bestDistance);
+        if (distance >= bestDistance) continue;
+        bestDistance = distance;
+        bestHit = {
+          kind: canHitRegularTrash ? 'normal-reward' : 'normal-penalty',
+          manager: this.debris,
+          index: i,
+          position: debrisList[i].position,
+          points: debrisList[i].points || 100,
+        };
+      }
+    }
+
+    if (canHitSpecialTrash) {
+      const specialList = this.specialDebris.getActive();
+      for (let i = 0; i < specialList.length; i++) {
+        const radius = (specialList[i].hitRadius || 1) * hitRadiusScale + PROJECTILE_HIT_PADDING;
+        const distance = this._intersectRaySphereDistance(origin, direction, specialList[i].position, radius, bestDistance);
+        if (distance >= bestDistance) continue;
+        bestDistance = distance;
+        bestHit = {
+          kind: 'special-reward',
+          manager: this.specialDebris,
+          index: i,
+          position: specialList[i].position,
+          points: specialList[i].points || 5000,
+        };
+      }
+    }
+
+    if (canHitRecycleTrash || canPenaltyRecycleTrash) {
+      const recycleList = this.recycleDebris.getActive();
+      for (let i = 0; i < recycleList.length; i++) {
+        const radius = (recycleList[i].hitRadius || 1) * hitRadiusScale + PROJECTILE_HIT_PADDING;
+        const distance = this._intersectRaySphereDistance(origin, direction, recycleList[i].position, radius, bestDistance);
+        if (distance >= bestDistance) continue;
+        bestDistance = distance;
+        bestHit = {
+          kind: canHitRecycleTrash ? 'recycle-reward' : 'recycle-penalty',
+          manager: this.recycleDebris,
+          index: i,
+          position: recycleList[i].position,
+          points: recycleList[i].points || 500,
+        };
+      }
+    }
+
+    const trashteroid = this._trashteroid;
+    if (trashteroid?.active) {
+      const distance = this._intersectRaySphereDistance(
+        origin,
+        direction,
+        trashteroid.group.position,
+        trashteroid.hitRadius + PROJECTILE_HIT_PADDING,
+        bestDistance
+      );
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestHit = {
+          kind: 'trashteroid',
+          position: trashteroid.group.position,
+        };
+      }
+    }
+
+    const asteroids = this.asteroidField.getColliders();
+    for (let i = 0; i < asteroids.length; i++) {
+      const sphere = asteroids[i].boundingSphere;
+      const distance = this._intersectRaySphereDistance(
+        origin,
+        direction,
+        sphere.center,
+        sphere.radius * 0.8 + PROJECTILE_HIT_PADDING,
+        bestDistance
+      );
+      if (distance >= bestDistance) continue;
+      bestDistance = distance;
+      bestHit = {
+        kind: 'asteroid',
+        position: sphere.center,
+      };
+    }
+
+    if (!bestHit) return false;
+
+    _closestPoint.copy(direction).multiplyScalar(bestDistance).add(origin);
+    const impactPoint = _closestPoint.clone();
+
+    if (bestHit.kind === 'normal-reward') {
+      this.score += bestHit.points;
+      this.trashHits++;
+      this._trashDestroyedRequired++;
+      this._noteTutorialTrashDestroyed();
+      if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
+        this._trashDestroyedFast++;
+      }
+      this._refreshPauseMenu();
+      this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._spawnScorePopup(impactPoint.clone(), bestHit.points);
+      bestHit.manager.remove(bestHit.index);
+      return true;
+    }
+
+    if (bestHit.kind === 'special-reward') {
+      this.score += bestHit.points;
+      this.trashHits++;
+      this._trashDestroyedRequired++;
+      this._noteTutorialTrashDestroyed();
+      this._noteTutorialSpecialDestroyed();
+      if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
+        this._trashDestroyedFast++;
+      }
+      this._refreshPauseMenu();
+      this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._spawnScorePopup(impactPoint.clone(), bestHit.points);
+      bestHit.manager.remove(bestHit.index);
+      return true;
+    }
+
+    if (bestHit.kind === 'recycle-reward') {
+      this.score += bestHit.points;
+      this.trashHits++;
+      this._recycleCollectedRequired++;
+      this._noteTutorialRecycleDestroyed();
+      this._refreshPauseMenu();
+      this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._spawnScorePopup(impactPoint.clone(), bestHit.points);
+      bestHit.manager.remove(bestHit.index);
+      return true;
+    }
+
+    if (bestHit.kind === 'recycle-penalty' || bestHit.kind === 'normal-penalty') {
+      const penalty = WRONG_BEAM_PENALTY;
+      this.score = Math.max(0, this.score - penalty);
+      this._refreshPauseMenu();
+      this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._spawnScorePopup(impactPoint.clone(), -penalty, { color: '#ff3b30' });
+      bestHit.manager.remove(bestHit.index);
+      return true;
+    }
+
+    if (bestHit.kind === 'trashteroid') {
+      const bossConfig = this.levels.getCurrentConfig().boss ?? null;
+      if (!bossConfig) {
+        this._spawnSparks(impactPoint, {
+          count: 18,
+          speed: 20,
+          ttl: 0.5,
+          color: 0xffc66e,
+          size: 1.35,
+        });
+        return true;
+      }
+
+      if (!trashteroid.isVulnerable) {
+        this._spawnSparks(impactPoint, {
+          count: 16,
+          speed: 14,
+          ttl: 0.35,
+          color: 0x8fd8ff,
+          size: 1.25,
+        });
+        return true;
+      }
+
+      trashteroid.health = Math.max(0, trashteroid.health - 1);
+      this.score += TRASHTEROID_SCORE_PER_HIT;
+      this._spawnSparks(impactPoint, {
+        count: 22,
+        speed: 26,
+        ttl: 0.55,
+        color: 0xff8c55,
+        size: 1.8,
+      });
+      this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
+
+      if (trashteroid.health > 0) return true;
+
+      this.score += TRASHTEROID_SCORE_ON_DESTROY;
+      this._spawnExplosion(trashteroid.group.position.clone(), { count: 360, ttl: 2.5 });
+      trashteroid.active = false;
+      trashteroid.group.visible = false;
+      this.hud.setBossBarVisible(false);
+      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
+      this._clearTrashteroidProjectiles();
+      this._finalizeLevel(true);
+      return true;
+    }
+
+    // Asteroid hit: visual-only hit feedback is intentionally subtle.
+    return true;
+  }
+
   _checkProjectileDebrisCollisions(debrisManager = this.debris, projectileTypeFilter = null) {
     const projectiles = this.projectiles.getActive();
     const debrisList = debrisManager.getActive();
+    const hitRadiusScale = 1.5;
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
       if (projectileTypeFilter && projectiles[i].type !== projectileTypeFilter) continue;
       for (let j = debrisList.length - 1; j >= 0; j--) {
-        const hitRadius = debrisList[j].hitRadius || 1;
+        const hitRadius = (debrisList[j].hitRadius || 1) * hitRadiusScale;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
           const points = debrisList[j].points || 100;
           this.score += points;
@@ -2093,11 +2524,12 @@ export class Game {
   _checkProjectileSpecialRewardCollisions() {
     const projectiles = this.projectiles.getActive();
     const debrisList = this.specialDebris.getActive();
+    const hitRadiusScale = 1.5;
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
       if (projectiles[i].type !== 'normal') continue;
       for (let j = debrisList.length - 1; j >= 0; j--) {
-        const hitRadius = debrisList[j].hitRadius || 1;
+        const hitRadius = (debrisList[j].hitRadius || 1) * hitRadiusScale;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
           const points = debrisList[j].points || 5000;
           this.score += points;
@@ -2122,11 +2554,12 @@ export class Game {
   _checkProjectileRecyclePenaltyCollisions() {
     const projectiles = this.projectiles.getActive();
     const debrisList = this.recycleDebris.getActive();
+    const hitRadiusScale = 1.5;
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
       if (projectiles[i].type !== 'normal') continue;
       for (let j = debrisList.length - 1; j >= 0; j--) {
-        const hitRadius = debrisList[j].hitRadius || 1;
+        const hitRadius = (debrisList[j].hitRadius || 1) * hitRadiusScale;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
           const penalty = WRONG_BEAM_PENALTY;
           this.score = Math.max(0, this.score - penalty);
@@ -2144,11 +2577,12 @@ export class Game {
   _checkProjectileTrashPenaltyCollisions() {
     const projectiles = this.projectiles.getActive();
     const debrisList = this.debris.getActive();
+    const hitRadiusScale = 1.5;
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
       if (projectiles[i].type !== 'vaporizer') continue;
       for (let j = debrisList.length - 1; j >= 0; j--) {
-        const hitRadius = debrisList[j].hitRadius || 1;
+        const hitRadius = (debrisList[j].hitRadius || 1) * hitRadiusScale;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
           const penalty = WRONG_BEAM_PENALTY;
           this.score = Math.max(0, this.score - penalty);
@@ -2169,9 +2603,9 @@ export class Game {
 
     for (let i = debrisList.length - 1; i >= 0; i--) {
       const d = debrisList[i];
-      const hitRadius = d.hitRadius || 1;
+      const hitRadius = Math.max(d.hitRadius || 1, d.collisionRadius || 0);
       // Slightly larger effective radius makes collisions feel less late.
-      const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 1.0;
+      const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 2.0;
       // Count a miss a bit earlier once debris slips behind the ship.
       const passDistance = hitRadius + 20;
       // Nearby debris gets pushed away even without direct contact.
@@ -2195,6 +2629,7 @@ export class Game {
 
         // Scale damage by current player speed.
         const playerSpeed = this.player.velocity.length();
+        console.log("damage");
         const damage = THREE.MathUtils.clamp(Math.round(6 + (playerSpeed / 120) * 12), 5, 20);
         this._damagePlayer(damage);
 
@@ -2213,6 +2648,10 @@ export class Game {
 
       // Nudge nearby debris away to reduce frustrating glancing overlaps.
       if (distSq < reactDistance * reactDistance && distSq > hitDistance * hitDistance) {
+        console.log("near miss")
+        const playerSpeed = this.player.velocity.length();
+        const grazeDamage = THREE.MathUtils.clamp(Math.round(4 + (playerSpeed / 180) * 8), 3, 12);
+        this._damagePlayer(grazeDamage);
         const dist = Math.sqrt(distSq) || 0.0001;
         _debrisAway.copy(_toDebris).multiplyScalar(1 / dist); // from player to debris
         // Keep it just outside the reaction radius and add a small impulse.
@@ -2700,16 +3139,20 @@ export class Game {
       ? Math.max(6, Math.floor(baseCount * 0.45))
       : baseCount;
     const speedScale = reducedFlashing ? 0.7 : 1;
-    const baseSize = options.size || 0.9;
+    const sizeScale = options.sizeScale ?? 1;
+    const velocityScale = options.velocityScale ?? 1;
+    const parent = options.parent ?? this._effectGroup;
+    const origin = options.positionIsLocal ? pos : (parent === this._effectGroup ? pos : parent.worldToLocal(pos.clone()));
+    const baseSize = (options.size || 0.9) * sizeScale;
     const size = reducedFlashing ? baseSize * 0.78 : baseSize;
     const positions = new Float32Array(count * 3);
     const velocities = new Array(count);
     for (let k = 0; k < count; k++) {
-      positions[k * 3] = pos.x + (Math.random() - 0.5) * 0.2;
-      positions[k * 3 + 1] = pos.y + (Math.random() - 0.5) * 0.2;
-      positions[k * 3 + 2] = pos.z + (Math.random() - 0.5) * 0.2;
+      positions[k * 3] = origin.x + (Math.random() - 0.5) * 0.2 * sizeScale;
+      positions[k * 3 + 1] = origin.y + (Math.random() - 0.5) * 0.2 * sizeScale;
+      positions[k * 3 + 2] = origin.z + (Math.random() - 0.5) * 0.2 * sizeScale;
       const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.2), (Math.random() - 0.5)).normalize();
-      velocities[k] = dir.multiplyScalar((options.speed || 12) * speedScale * (0.6 + Math.random() * 0.9));
+      velocities[k] = dir.multiplyScalar((options.speed || 12) * speedScale * velocityScale * (0.6 + Math.random() * 0.9));
     }
 
     const geom = new THREE.BufferGeometry();
@@ -2724,10 +3167,11 @@ export class Game {
       blending: options.blending || (reducedFlashing ? THREE.NormalBlending : THREE.AdditiveBlending),
     });
     const points = new THREE.Points(geom, mat);
-    this._effectGroup.add(points);
+    parent.add(points);
 
     this._sparks.push({
       mesh: points,
+      parent,
       velocities,
       life: 0,
       ttl: options.ttl || 0.9,
@@ -2746,13 +3190,41 @@ export class Game {
     const reducedFlashing = this._isReducedFlashing();
     const baseCount = options.count || 220;
     const ttl = options.ttl || 1.6;
+    const sizeScale = options.sizeScale ?? 1;
+    const smokeSizeMultiplier = Math.max(0.1, options.smokeSizeMultiplier ?? 1);
+    const velocityScale = options.velocityScale ?? 1;
+    const parent = options.parent ?? this._effectGroup;
+    const positionIsLocal = !!options.positionIsLocal;
 
     if (!reducedFlashing) {
       // Core flash — bright, short-lived
-      this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.12), speed: 25, size: 8, ttl: Math.max(0.2, ttl * 0.12), color: 0xffffff, colorEnd: 0xffcc88 });
+      this._spawnSparks(pos.clone(), {
+        count: Math.floor(baseCount * 0.12),
+        speed: 25,
+        size: 8,
+        ttl: Math.max(0.2, ttl * 0.12),
+        color: 0xffffff,
+        colorEnd: 0xffcc88,
+        sizeScale,
+        velocityScale,
+        parent,
+        positionIsLocal,
+      });
     } else {
       // Reduced flashing mode swaps bright core flash for a gentler burst.
-      this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.08), speed: 16, size: 4, ttl: Math.max(0.24, ttl * 0.16), color: 0xe5b97c, colorEnd: 0x6a4a2a, blending: THREE.NormalBlending });
+      this._spawnSparks(pos.clone(), {
+        count: Math.floor(baseCount * 0.08),
+        speed: 16,
+        size: 4,
+        ttl: Math.max(0.24, ttl * 0.16),
+        color: 0xe5b97c,
+        colorEnd: 0x6a4a2a,
+        blending: THREE.NormalBlending,
+        sizeScale,
+        velocityScale,
+        parent,
+        positionIsLocal,
+      });
     }
 
     // Embers — orange, additive, mid-lived
@@ -2764,26 +3236,32 @@ export class Game {
       color: reducedFlashing ? 0xd6a062 : 0xffbb66,
       colorEnd: 0x442200,
       blending: reducedFlashing ? THREE.NormalBlending : THREE.AdditiveBlending,
+      sizeScale,
+      velocityScale,
+      parent,
+      positionIsLocal,
     });
 
     // Smoke — larger, darker, rises slowly
     const smokeCount = Math.floor(baseCount * 0.28);
+    const smokeSizeScale = sizeScale * smokeSizeMultiplier;
     const positions = new Float32Array(smokeCount * 3);
     const velocities = new Array(smokeCount);
+    const smokeOrigin = positionIsLocal ? pos : (parent === this._effectGroup ? pos : parent.worldToLocal(pos.clone()));
     for (let k = 0; k < smokeCount; k++) {
-      positions[k * 3] = pos.x + (Math.random() - 0.5) * 2.0;
-      positions[k * 3 + 1] = pos.y + (Math.random() - 0.5) * 1.0;
-      positions[k * 3 + 2] = pos.z + (Math.random() - 0.5) * 2.0;
+      positions[k * 3] = smokeOrigin.x + (Math.random() - 0.5) * 2.0 * smokeSizeScale;
+      positions[k * 3 + 1] = smokeOrigin.y + (Math.random() - 0.5) * 1.0 * smokeSizeScale;
+      positions[k * 3 + 2] = smokeOrigin.z + (Math.random() - 0.5) * 2.0 * smokeSizeScale;
       // omnidirectional smoke: emit in all directions (slower than embers)
       const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).normalize();
-      velocities[k] = dir.multiplyScalar((reducedFlashing ? 28 : 45) * (0.6 + Math.random() * 0.8));
+      velocities[k] = dir.multiplyScalar((reducedFlashing ? 28 : 45) * velocityScale * (0.6 + Math.random() * 0.8));
     }
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ map: this._particleTexture, color: 0x333333, size: reducedFlashing ? 5.0 : 6.0, sizeAttenuation: true, depthWrite: false, transparent: true, opacity: reducedFlashing ? 0.16 : 0.1, blending: THREE.NormalBlending });
+    const mat = new THREE.PointsMaterial({ map: this._particleTexture, color: 0x333333, size: (reducedFlashing ? 5.0 : 6.0) * smokeSizeScale, sizeAttenuation: true, depthWrite: false, transparent: true, opacity: reducedFlashing ? 0.16 : 0.1, blending: THREE.NormalBlending });
     const points = new THREE.Points(geom, mat);
-    this._effectGroup.add(points);
-    this._sparks.push({ mesh: points, velocities, life: 0, ttl: Math.max(1.6, ttl * 1.3), sizeStart: reducedFlashing ? 5.0 : 6.0, sizeEnd: reducedFlashing ? 9.0 : 12.0, colorStart: new THREE.Color(0x333333), colorEnd: new THREE.Color(0x111111), type: 'smoke' });
+    parent.add(points);
+    this._sparks.push({ mesh: points, parent, velocities, life: 0, ttl: Math.max(1.6, ttl * 1.3), sizeStart: (reducedFlashing ? 5.0 : 6.0) * smokeSizeScale, sizeEnd: (reducedFlashing ? 9.0 : 12.0) * smokeSizeScale, colorStart: new THREE.Color(0x333333), colorEnd: new THREE.Color(0x111111), type: 'smoke' });
   }
 
   // Spawn a very short-lived muzzle particle burst in player-local space.
@@ -2883,7 +3361,7 @@ export class Game {
       if (p.mesh && p.mesh.material) p.mesh.material.opacity = Math.max(0, 1 - t);
 
       if (p.life >= p.ttl) {
-        this._effectGroup.remove(p.mesh);
+        (p.parent ?? this._effectGroup).remove(p.mesh);
         if (p.mesh.geometry) p.mesh.geometry.dispose();
         if (p.mesh.material) p.mesh.material.dispose();
         this._sparks.splice(i, 1);
@@ -2980,30 +3458,22 @@ export class Game {
 
     const diffuse = texLoader.load(texPath + 'Earth_Stylized.png');
     diffuse.colorSpace = THREE.SRGBColorSpace;
-    const clouds = texLoader.load(texPath + 'Earth_Clouds_6K.jpg');
 
     // Main planet sphere
     const planetGeo = new THREE.SphereGeometry(1600, 64, 64);
     const planetMat = new THREE.MeshBasicMaterial({
       map: diffuse,
       fog: false,
+      depthWrite: false,
+      depthTest: true,
     });
     this.planet = new THREE.Mesh(planetGeo, planetMat);
+    this.planet.frustumCulled = false;
+    this.planet.renderOrder = -1000;
     this.planet.position.set(-1200, -600, -3500);
     this.scene.add(this.planet);
 
-    // Cloud layer — slightly larger, transparent sphere
-    const cloudGeo = new THREE.SphereGeometry(805, 64, 64);
-    const cloudMat = new THREE.MeshBasicMaterial({
-      alphaMap: clouds,
-      transparent: true,
-      opacity: 0.4,
-      depthWrite: false,
-      color: 0xffffff,
-      fog: false,
-    });
-    this.cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
-    this.planet.add(this.cloudMesh);
+    this.cloudMesh = null;
   }
 
   _onResize() {
