@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { LEVEL_CONFIGS } from './LevelManager.js';
+import { LEVEL_CONFIGS, getUnlockedLevel } from './LevelManager.js';
 
 /**
  * 3D level-select screen.
@@ -12,6 +12,13 @@ import { LEVEL_CONFIGS } from './LevelManager.js';
 
 const EARTH_POS = new THREE.Vector3(-12, 0, 0);
 const SHIP_START = new THREE.Vector3(EARTH_POS.x, EARTH_POS.y + 2, EARTH_POS.z + 0);
+const MOUSE_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
+const ACCESSIBILITY_SETTINGS_STORAGE_KEY = 'trashteroid_accessibility_settings';
+const DEFAULT_ACCESSIBILITY_SETTINGS = {
+  reducedMotion: false,
+  reducedFlashing: false,
+  musicVisualizer: false,
+};
 
 const LEVEL_DATA = [
   { id: 1, label: 'LEVEL 1', sub: '15,000 mi — Debris Field', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
@@ -21,6 +28,10 @@ const LEVEL_DATA = [
 
 function formatTrashLabel(count) {
   return `Destroy ${count} ${count === 1 ? 'piece' : 'pieces'} of trash`;
+}
+
+function formatRecycleLabel(count) {
+  return `Collect ${count} ${count === 1 ? 'recyclable' : 'recyclables'}`;
 }
 
 function getBriefing(levelId) {
@@ -36,6 +47,9 @@ function getBriefing(levelId) {
   }
   if (primary.trashRequired) {
     required.push(formatTrashLabel(primary.trashRequired));
+  }
+  if (primary.recycleRequired) {
+    required.push(formatRecycleLabel(primary.recycleRequired));
   }
   if (primary.destroyTrashteroid) {
     required.push('Destroy Trashteroid');
@@ -62,6 +76,63 @@ function easeInOut(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+function loadAccessibilitySettings() {
+  try {
+    const rawValue = window.localStorage.getItem(ACCESSIBILITY_SETTINGS_STORAGE_KEY);
+    if (!rawValue) return { ...DEFAULT_ACCESSIBILITY_SETTINGS };
+    const parsed = JSON.parse(rawValue);
+    return {
+      reducedMotion: !!parsed?.reducedMotion,
+      reducedFlashing: !!parsed?.reducedFlashing,
+      musicVisualizer: !!parsed?.musicVisualizer,
+    };
+  } catch (error) {
+    return { ...DEFAULT_ACCESSIBILITY_SETTINGS };
+  }
+}
+
+function saveAccessibilitySettings(settings) {
+  const normalized = {
+    reducedMotion: !!settings?.reducedMotion,
+    reducedFlashing: !!settings?.reducedFlashing,
+    musicVisualizer: !!settings?.musicVisualizer,
+  };
+
+  try {
+    window.localStorage.setItem(ACCESSIBILITY_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+  } catch (error) {
+    // Ignore storage failures and keep current runtime values.
+  }
+
+  return normalized;
+}
+
+function loadMouseSensitivityDisplayValue() {
+  try {
+    const rawValue = window.localStorage.getItem(MOUSE_SENSITIVITY_STORAGE_KEY);
+    const parsed = rawValue == null ? NaN : Number(rawValue);
+    if (Number.isFinite(parsed)) {
+      return THREE.MathUtils.clamp(Math.round(parsed * 1000), 8, 60);
+    }
+  } catch (error) {
+    // Ignore storage failures and use default value.
+  }
+
+  return 24;
+}
+
+function saveMouseSensitivityDisplayValue(displayValue) {
+  const clamped = THREE.MathUtils.clamp(Math.round(displayValue), 8, 60);
+
+  try {
+    window.localStorage.setItem(MOUSE_SENSITIVITY_STORAGE_KEY, `${clamped / 1000}`);
+  } catch (error) {
+    // Ignore storage failures and keep runtime value.
+  }
+
+  return clamped;
+}
+
 export class LevelSelect {
   /**
    * @param {HTMLCanvasElement} canvas  – the same canvas the game uses
@@ -74,6 +145,9 @@ export class LevelSelect {
     this._selectedLevel = null;
     this._shipArrived = false;
     this._introScene = introScene;
+    this._unlockedLevel = getUnlockedLevel();
+    this._unlockBypass = false;
+    this._accessibilitySettings = loadAccessibilitySettings();
 
     /* ── renderer (shared with IntroScene) ── */
     this.renderer = sharedRenderer;
@@ -143,10 +217,42 @@ export class LevelSelect {
       });
     });
 
+    /* ── settings panel ── */
+    this._settingsBtn = document.getElementById('level-select-settings-btn');
+    this._settingsRoot = document.getElementById('level-select-settings');
+    this._settingsPanel = document.getElementById('level-select-settings-panel');
+    this._settingsCloseBtn = document.getElementById('level-select-settings-close');
+    this._settingsSensitivity = document.getElementById('level-select-mouse-sensitivity');
+    this._settingsSensitivityValue = document.getElementById('level-select-mouse-sensitivity-value');
+    this._settingsReducedMotion = document.getElementById('level-select-reduced-motion');
+    this._settingsReducedFlashing = document.getElementById('level-select-reduced-flashing');
+    this._settingsMusicVisualizer = document.getElementById('level-select-music-visualizer');
+    this._musicVisualizer = document.getElementById('music-visualizer');
+    this._musicVisualizerBars = this._musicVisualizer
+      ? Array.from(this._musicVisualizer.querySelectorAll('.visualizer-bar'))
+      : [];
+    this._musicVisualizerPhase = 0;
+    this._musicVisualizerEnergy = 0;
+
     /* ── bind events ── */
     this._onClick = this._onClick.bind(this);
+    this._onKeyDown = this._onKeyDown.bind(this);
     this._onResize = this._onResize.bind(this);
     this._frame = this._frame.bind(this);
+    this._onSettingsButtonClick = this._onSettingsButtonClick.bind(this);
+    this._onSettingsRootClick = this._onSettingsRootClick.bind(this);
+    this._onSettingsInput = this._onSettingsInput.bind(this);
+
+    this._settingsBtn?.addEventListener('click', this._onSettingsButtonClick);
+    this._settingsRoot?.addEventListener('click', this._onSettingsRootClick);
+    this._settingsCloseBtn?.addEventListener('click', this._onSettingsButtonClick);
+    this._settingsSensitivity?.addEventListener('input', this._onSettingsInput);
+    this._settingsReducedMotion?.addEventListener('change', this._onSettingsInput);
+    this._settingsReducedFlashing?.addEventListener('change', this._onSettingsInput);
+    this._settingsMusicVisualizer?.addEventListener('change', this._onSettingsInput);
+
+    this._syncSettingsControls();
+    this._applyAccessibilityPreview();
 
     this._clock = new THREE.Clock();
     this._rafId = null;
@@ -156,6 +262,10 @@ export class LevelSelect {
 
   show() {
     this.active = true;
+    this._unlockedLevel = getUnlockedLevel();
+    this._unlockBypass = false;
+    this._syncSettingsControls();
+    this._applyAccessibilityPreview();
     this._selectedLevel = null;
     this._shipArrived = false;
     this.ship.position.copy(SHIP_START);
@@ -167,8 +277,13 @@ export class LevelSelect {
     if (this._briefingTutorialToggle) {
       this._briefingTutorialToggle.checked = false;
     }
+    if (this._settingsBtn) {
+      this._settingsBtn.classList.remove('hidden');
+    }
+    this._hideSettingsPanel();
 
     window.addEventListener('click', this._onClick);
+    window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('resize', this._onResize);
     this._clock.start();
     this._frame();
@@ -177,7 +292,13 @@ export class LevelSelect {
   hide() {
     this.active = false;
     this._hidePopup();
+    this._hideSettingsPanel();
+    this._setMusicVisualizerVisible(false);
+    if (this._settingsBtn) {
+      this._settingsBtn.classList.add('hidden');
+    }
     window.removeEventListener('click', this._onClick);
+    window.removeEventListener('keydown', this._onKeyDown);
     window.removeEventListener('resize', this._onResize);
     if (this._rafId) cancelAnimationFrame(this._rafId);
     this._rafId = null;
@@ -198,6 +319,7 @@ export class LevelSelect {
     this._animateShip(delta);
     this._animateNodes(delta);
     this._animateCamera(delta);
+    this._updateMusicVisualizer(delta);
 
     // IntroScene renders the starfield in its own RAF loop; render level-select scene on top
     this.renderer.autoClear = false;
@@ -250,7 +372,9 @@ export class LevelSelect {
       }
     } else {
       // Gentle hover bob when idle
-      this.ship.position.y += Math.sin(Date.now() * 0.002) * 0.003;
+      if (!this._accessibilitySettings.reducedMotion) {
+        this.ship.position.y += Math.sin(Date.now() * 0.002) * 0.003;
+      }
     }
   }
 
@@ -292,35 +416,49 @@ export class LevelSelect {
   }
 
   _animateNodes(delta) {
+    const reducedMotion = this._accessibilitySettings.reducedMotion;
     const t = Date.now() * 0.001;
 
     // Animate Earth the same way
     if (this._earthMesh) {
-      this._earthMesh.position.y = EARTH_POS.y + Math.sin(t) * 0.3;
+      this._earthMesh.position.y = reducedMotion ? EARTH_POS.y : EARTH_POS.y + Math.sin(t) * 0.3;
       this._earthRing.position.y = this._earthMesh.position.y;
       this._earthLabel.position.y = this._earthMesh.position.y - 2;
-      this._earthRing.rotation.z += delta * 0.5;
-      const ep = 1 + Math.sin(t * 2) * 0.08;
+      this._earthRing.rotation.z += reducedMotion ? 0 : delta * 0.5;
+      const ep = reducedMotion ? 1 : 1 + Math.sin(t * 2) * 0.08;
       this._earthMesh.scale.setScalar(ep);
     }
 
     for (const node of this.nodes) {
+      const unlocked = this._isLevelUnlocked(node.data.id);
+
       // Gentle float
-      node.mesh.position.y = node.data.pos.y + Math.sin(t + node.data.id * 2) * 0.3;
+      node.mesh.position.y = reducedMotion
+        ? node.data.pos.y
+        : node.data.pos.y + Math.sin(t + node.data.id * 2) * 0.3;
       node.ring.position.y = node.mesh.position.y;
       node.label.position.y = node.mesh.position.y - 2;
 
       // Rotate ring
-      node.ring.rotation.z += delta * 0.5;
+      node.ring.rotation.z += reducedMotion ? 0 : delta * 0.5;
 
       // Pulse scale
-      const pulse = 1 + Math.sin(t * 2 + node.data.id) * 0.08;
+      const pulse = reducedMotion ? 1 : 1 + Math.sin(t * 2 + node.data.id) * 0.08;
       node.mesh.scale.setScalar(pulse);
 
+      node.mesh.material.color.setHex(unlocked ? node.data.color : 0x4d5563);
+      node.mesh.material.emissive.setHex(unlocked ? node.data.color : 0x11151d);
+      node.ring.material.color.setHex(unlocked ? node.data.color : 0x5e6674);
+      node.label.material.color.setHex(unlocked ? 0xffffff : 0x6b7380);
+      node.label.material.opacity = unlocked ? 1 : 0.24;
+
       // Highlight selected
-      if (this._selectedLevel && this._selectedLevel.id === node.data.id) {
+      if (unlocked && this._selectedLevel && this._selectedLevel.id === node.data.id) {
         node.ring.material.opacity = 0.5 + Math.sin(t * 4) * 0.3;
         node.mesh.material.emissiveIntensity = 0.8 + Math.sin(t * 4) * 0.2;
+      } else if (!unlocked) {
+        node.ring.material.opacity = 0.03;
+        node.mesh.material.emissiveIntensity = 0.03;
       } else {
         node.ring.material.opacity = 0.35;
         node.mesh.material.emissiveIntensity = 0.5;
@@ -328,10 +466,16 @@ export class LevelSelect {
     }
   }
 
+  _isLevelUnlocked(levelId) {
+    return this._unlockBypass || levelId <= this._unlockedLevel;
+  }
+
   /* ── click / raycasting ── */
 
   _onClick(e) {
     if (!this.active) return;
+    if (this._settingsRoot && !this._settingsRoot.classList.contains('hidden') && this._settingsRoot.contains(e.target)) return;
+    if (this._settingsBtn && !this._settingsBtn.classList.contains('hidden') && this._settingsBtn.contains(e.target)) return;
     // Ignore clicks on the popup itself
     if (this._popup && !this._popup.classList.contains('hidden') && this._popup.contains(e.target)) return;
 
@@ -364,6 +508,9 @@ export class LevelSelect {
       // Otherwise attempt to resolve a level id
       const id = obj.userData && obj.userData.levelId;
       if (id) {
+        if (!this._isLevelUnlocked(id)) {
+          return;
+        }
         const levelData = LEVEL_DATA.find(l => l.id === id);
         if (levelData) {
           this._selectedLevel = levelData;
@@ -376,6 +523,124 @@ export class LevelSelect {
         }
       }
     }
+  }
+
+  _onKeyDown(e) {
+    if (!this.active) return;
+    if (e.key !== '5') return;
+    this._unlockBypass = true;
+  }
+
+  _syncSettingsControls() {
+    this._accessibilitySettings = loadAccessibilitySettings();
+    const sensitivityValue = loadMouseSensitivityDisplayValue();
+
+    if (this._settingsSensitivity) {
+      this._settingsSensitivity.value = `${sensitivityValue}`;
+    }
+    if (this._settingsSensitivityValue) {
+      this._settingsSensitivityValue.textContent = `${sensitivityValue}`;
+    }
+    if (this._settingsReducedMotion) {
+      this._settingsReducedMotion.checked = this._accessibilitySettings.reducedMotion;
+    }
+    if (this._settingsReducedFlashing) {
+      this._settingsReducedFlashing.checked = this._accessibilitySettings.reducedFlashing;
+    }
+    if (this._settingsMusicVisualizer) {
+      this._settingsMusicVisualizer.checked = this._accessibilitySettings.musicVisualizer;
+    }
+  }
+
+  _applyAccessibilityPreview() {
+    this._setMusicVisualizerVisible(this.active && !!this._accessibilitySettings.musicVisualizer);
+  }
+
+  _setMusicVisualizerVisible(visible) {
+    if (!this._musicVisualizer) return;
+    this._musicVisualizer.classList.remove('music-visualizer-gameplay');
+    this._musicVisualizer.classList.toggle('hidden', !visible);
+    this._musicVisualizer.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    if (!visible) {
+      this._musicVisualizerEnergy = 0;
+      this._resetMusicVisualizerBars();
+    }
+  }
+
+  _resetMusicVisualizerBars() {
+    for (let i = 0; i < this._musicVisualizerBars.length; i++) {
+      const bar = this._musicVisualizerBars[i];
+      bar.style.transform = 'scaleY(0.18)';
+      bar.style.opacity = '0.52';
+    }
+  }
+
+  _updateMusicVisualizer(delta) {
+    if (!this.active || !this._accessibilitySettings.musicVisualizer) return;
+    if (!this._musicVisualizerBars.length) return;
+
+    this._musicVisualizerPhase += delta * 5.2;
+    const targetEnergy = this._accessibilitySettings.reducedMotion ? 0.32 : 0.52;
+    const smoothing = 1 - Math.exp(-delta * 7);
+    this._musicVisualizerEnergy += (targetEnergy - this._musicVisualizerEnergy) * smoothing;
+
+    for (let i = 0; i < this._musicVisualizerBars.length; i++) {
+      const bar = this._musicVisualizerBars[i];
+      const wave = (Math.sin(this._musicVisualizerPhase * 2.3 + i * 0.68) + 1) * 0.5;
+      const ripple = (Math.sin(this._musicVisualizerPhase * 4.6 + i * 1.04) + 1) * 0.5;
+      const level = THREE.MathUtils.clamp(
+        0.16 + this._musicVisualizerEnergy * (0.46 + wave * 0.56) + ripple * 0.14,
+        0.12,
+        1
+      );
+      bar.style.transform = `scaleY(${0.18 + level * 1.3})`;
+      bar.style.opacity = `${0.5 + level * 0.45}`;
+    }
+  }
+
+  _showSettingsPanel() {
+    if (!this._settingsRoot) return;
+    this._settingsRoot.classList.remove('hidden');
+    this._settingsRoot.setAttribute('aria-hidden', 'false');
+  }
+
+  _hideSettingsPanel() {
+    if (!this._settingsRoot) return;
+    this._settingsRoot.classList.add('hidden');
+    this._settingsRoot.setAttribute('aria-hidden', 'true');
+  }
+
+  _onSettingsButtonClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!this._settingsRoot || this._settingsRoot.classList.contains('hidden')) {
+      this._showSettingsPanel();
+      return;
+    }
+    this._hideSettingsPanel();
+  }
+
+  _onSettingsRootClick(e) {
+    if (!this._settingsRoot || this._settingsRoot.classList.contains('hidden')) return;
+    if (this._settingsPanel && this._settingsPanel.contains(e.target)) return;
+    this._hideSettingsPanel();
+  }
+
+  _onSettingsInput() {
+    if (this._settingsSensitivity) {
+      const sensitivityValue = saveMouseSensitivityDisplayValue(Number(this._settingsSensitivity.value));
+      this._settingsSensitivity.value = `${sensitivityValue}`;
+      if (this._settingsSensitivityValue) {
+        this._settingsSensitivityValue.textContent = `${sensitivityValue}`;
+      }
+    }
+
+    this._accessibilitySettings = saveAccessibilitySettings({
+      reducedMotion: !!this._settingsReducedMotion?.checked,
+      reducedFlashing: !!this._settingsReducedFlashing?.checked,
+      musicVisualizer: !!this._settingsMusicVisualizer?.checked,
+    });
+    this._applyAccessibilityPreview();
   }
 
   /* ── popup ── */
@@ -467,6 +732,12 @@ export class LevelSelect {
   /* ── helpers ── */
 
   _animateCamera(delta) {
+    if (this._accessibilitySettings.reducedMotion) {
+      this.camera.position.set(0, 10, 24);
+      this.camera.lookAt(0, 1, -4);
+      return;
+    }
+
     // Slowly orbit around the center of the level layout
     this._orbitAngle += delta * 0.08;
     const radius = 28;

@@ -37,6 +37,10 @@ export class HUD {
     this.tutorialCalloutTitle = document.getElementById('tutorial-callout-title');
     this.tutorialCalloutText = document.getElementById('tutorial-callout-text');
     this.tutorialCalloutRequirements = document.getElementById('tutorial-callout-requirements');
+    this.musicVisualizer = document.getElementById('music-visualizer');
+    this.musicVisualizerBars = this.musicVisualizer
+      ? Array.from(this.musicVisualizer.querySelectorAll('.visualizer-bar'))
+      : [];
     if (this.minimapCanvas) {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
@@ -45,12 +49,34 @@ export class HUD {
     this._speedSamples = [];
     this._tutorialCalloutHideTimer = null;
     this._tutorialCalloutAnimationFrame = null;
+    this._reducedMotion = false;
+    this._reducedFlashing = false;
+    this._musicVisualizerEnabled = false;
+    this._musicVisualizerPhase = 0;
+    this._musicVisualizerEnergy = 0;
+    this._gameplayVisible = false;
+  }
+
+  setAccessibilitySettings(settings = {}) {
+    this._reducedMotion = !!settings.reducedMotion;
+    this._reducedFlashing = !!settings.reducedFlashing;
+    this._musicVisualizerEnabled = !!settings.musicVisualizer;
+
+    this._setMusicVisualizerVisible(this._gameplayVisible && this._musicVisualizerEnabled);
+
+    if (this._reducedFlashing && this.damageVignette) {
+      this.damageVignette.classList.remove('flashing', 'pulsing');
+    }
   }
 
   setGameplayVisible(visible) {
+    this._gameplayVisible = !!visible;
+
     if (this.hudRoot) {
       this.hudRoot.classList.toggle('hidden', !visible);
     }
+
+    this._setMusicVisualizerVisible(this._gameplayVisible && this._musicVisualizerEnabled);
 
     if (visible) return;
 
@@ -63,6 +89,45 @@ export class HUD {
     if (this.minimap) this.minimap.classList.add('hidden');
     if (this.bossIndicator) this.bossIndicator.classList.add('hidden');
     if (this.tutorialCallout) this.tutorialCallout.classList.add('hidden');
+  }
+
+  _setMusicVisualizerVisible(visible) {
+    if (!this.musicVisualizer) return;
+    this.musicVisualizer.classList.toggle('hidden', !visible);
+    this.musicVisualizer.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    this.musicVisualizer.classList.toggle('music-visualizer-gameplay', !!visible);
+
+    if (!visible) {
+      this._musicVisualizerEnergy = 0;
+      for (let i = 0; i < this.musicVisualizerBars.length; i++) {
+        const bar = this.musicVisualizerBars[i];
+        bar.style.transform = 'scaleY(0.18)';
+        bar.style.opacity = '0.52';
+      }
+    }
+  }
+
+  updateMusicVisualizer(intensity = 0, delta = 0) {
+    if (!this._musicVisualizerEnabled || !this._gameplayVisible) return;
+    if (!this.musicVisualizerBars.length) return;
+
+    this._musicVisualizerPhase += Math.max(0.005, delta) * 6;
+    const targetEnergy = THREE.MathUtils.clamp(intensity, 0, 1);
+    const smoothing = 1 - Math.exp(-Math.max(0.005, delta) * 9);
+    this._musicVisualizerEnergy += (targetEnergy - this._musicVisualizerEnergy) * smoothing;
+
+    for (let i = 0; i < this.musicVisualizerBars.length; i++) {
+      const bar = this.musicVisualizerBars[i];
+      const wave = (Math.sin(this._musicVisualizerPhase * 1.9 + i * 0.7) + 1) * 0.5;
+      const ripple = (Math.sin(this._musicVisualizerPhase * 3.9 + i * 1.04) + 1) * 0.5;
+      const level = THREE.MathUtils.clamp(
+        0.14 + this._musicVisualizerEnergy * (0.52 + wave * 0.62) + ripple * 0.16,
+        0.1,
+        1
+      );
+      bar.style.transform = `scaleX(${0.18 + level * 1.45})`;
+      bar.style.opacity = `${0.5 + level * 0.45}`;
+    }
   }
 
   updateBossIndicator(visible, x, y, angle, distance) {
@@ -202,6 +267,7 @@ export class HUD {
 
   flashDamage() {
     if (!this.damageVignette) return;
+    if (this._reducedFlashing) return;
     const el = this.damageVignette;
     // Restart the flash animation by toggling the class
     el.classList.remove('flashing');
@@ -215,7 +281,7 @@ export class HUD {
     this._lowHealth = !!enabled;
     const el = this.damageVignette;
     el.classList.toggle('low', !!enabled);
-    el.classList.toggle('pulsing', !!enabled);
+    el.classList.toggle('pulsing', !!enabled && !this._reducedFlashing);
   }
 
   clearDamageIndicators() {
@@ -382,7 +448,7 @@ export class HUD {
   showTutorialCallout(title, text, options = {}) {
     if (!this.tutorialCallout || !this.tutorialCalloutTitle || !this.tutorialCalloutText) return;
     const placement = options.placement ?? 'center';
-    const animate = options.animate ?? false;
+    const animate = this._reducedMotion ? false : (options.animate ?? false);
 
     if (this._tutorialCalloutHideTimer) {
       clearTimeout(this._tutorialCalloutHideTimer);
@@ -412,7 +478,7 @@ export class HUD {
 
   hideTutorialCallout(options = {}) {
     if (!this.tutorialCallout) return;
-    const animated = options.animated ?? false;
+    const animated = this._reducedMotion ? false : (options.animated ?? false);
 
     if (this._tutorialCalloutHideTimer) {
       clearTimeout(this._tutorialCalloutHideTimer);
@@ -446,7 +512,7 @@ export class HUD {
     this.pauseScreen.setAttribute('aria-hidden', visible ? 'false' : 'true');
   }
 
-  updatePauseStats(shotsFired, trashHits, averageSpeed) {
+  updatePauseStats(shotsFired, trashHits) {
     if (!this.pauseAccuracyValue || !this.pauseAccuracyDetail) return;
     const percent = shotsFired > 0 ? Math.round(((trashHits / shotsFired) * 100) * 4) : 0;
     this.pauseAccuracyValue.textContent = `${percent.toFixed(shotsFired > 0 ? 1 : 0)}%`;
