@@ -1010,6 +1010,102 @@ body::before {
   display: none !important;
 }
 
+/* ── Mission Crawl (Star Wars style) ────────────────────────────────────── */
+#mission-crawl {
+  position: fixed;
+  inset: 0;
+  z-index: 850;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0 110px;
+  overflow: hidden;
+}
+
+#mission-crawl.hidden { display: none !important; }
+
+#crawl-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 0%,   rgba(4, 8, 22, 0.72) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(4, 8, 22, 0.72) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+#crawl-stage {
+  position: relative;
+  z-index: 1;
+  width: min(820px, 90vw);
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+#crawl-text {
+  color: var(--hud-cyan);
+  font-family: 'Orbitron', sans-serif;
+  font-size: clamp(13px, 1.7vw, 17px);
+  font-weight: 500;
+  line-height: 2;
+  text-align: center;
+  letter-spacing: 0.06em;
+  white-space: pre-wrap;
+  text-shadow: 0 0 14px rgba(184, 237, 255, 0.7), 0 0 36px rgba(143, 247, 239, 0.3);
+}
+
+#crawl-footer {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+#crawl-continue {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--hud-cyan);
+  background: transparent;
+  border: 1px solid rgba(184, 237, 255, 0.45);
+  padding: 10px 32px;
+  cursor: pointer;
+  text-shadow: 0 0 10px rgba(184, 237, 255, 0.8);
+  box-shadow: 0 0 14px rgba(184, 237, 255, 0.15), inset 0 0 14px rgba(184, 237, 255, 0.06);
+  transition: border-color 0.2s, box-shadow 0.2s, color 0.2s;
+  animation: crawl-skip-blink 1.6s ease-in-out infinite;
+}
+
+#crawl-continue:hover {
+  border-color: rgba(184, 237, 255, 0.85);
+  box-shadow: 0 0 28px rgba(184, 237, 255, 0.35), inset 0 0 18px rgba(184, 237, 255, 0.1);
+  color: #fff;
+}
+
+#crawl-continue.hidden { display: none !important; }
+
+#crawl-skip {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.18em;
+  color: rgba(184, 237, 255, 0.38);
+  pointer-events: none;
+  animation: crawl-skip-blink 2s ease-in-out infinite;
+}
+
+@keyframes crawl-skip-blink {
+  0%, 100% { opacity: 0.28; }
+  50%       { opacity: 0.65; }
+}
+
 #screen-fade {
   position: fixed;
   inset: 0;

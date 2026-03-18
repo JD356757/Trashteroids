@@ -78,10 +78,89 @@ function launchGame({ levelId, tutorialMode }) {
   game.start();
 }
 
+function showCrawl(onComplete) {
+  const crawl = document.getElementById('mission-crawl');
+  const textEl = document.getElementById('crawl-text');
+  const continueBtn = document.getElementById('crawl-continue');
+  if (!crawl || !textEl) { onComplete(); return; }
+
+  const CRAWL_TEXT = 
+    'THE YEAR IS 2162.\n\n' +
+    'FOR OVER A CENTURY, HUMANITY CELEBRATED\n' +
+    'THE "GREAT CLEANSING"—\n' +
+    'A REVOLUTIONARY WASTE DISPOSAL PROGRAM\n' +
+    'THAT LAUNCHED EARTH\'S GARBAGE\n' +
+    'INTO ORBIT VIA MASSIVE RAIL CANNONS.\n\n' +
+    'CITIES GLEAMED.\n' +
+    'OCEANS CLEARED.\n' +
+    'WE THOUGHT WE SOLVED THE TRASH PROBLEM FOREVER.\n\n' +
+    'WE WERE CATASTROPHICALLY WRONG.\n\n' +
+    'TWO WEEKS AGO, THE INTERNATIONAL SPACY AGENCY DETECTED\n' +
+    'A MOON-SIZED ANOMALY HURTLING TOWARD EARTH:\n' +
+    'THE TRASHTEROID.\n\n' +
+    'A COLOSSAL BODY OF COMPRESSED WASTE,\n' +
+    'A VIOLENT PROJECTILE BORN FROM OUR OWN FILTH.\n\n' +
+    'ESTIMATED IMPACT: 13 DAYS.\n\n' +
+    'THE RESULTING EXTINCTION-LEVEL EVENT\n' +
+    'WILL POISON THE ATMOSPHERE AND RENDER\n' +
+    'OUR HOME UNINHABITABLE FOR CENTURIES.\n\n' +
+    'IN AN UNPRECEDENTED EMERGENCY RESPONSE,\n' +
+    'THE INTERNATIONAL SPACE AGENCY HAS SENT\n' +
+    'YOU INTO EARTH ORBIT WITH\n' +
+    'TWO TOOLS: A TRASH VAPORIZER.\n' +
+    'AND A RECYCLING BEAM.\n\n' +
+    'YOUR MISSION:\n\n' +
+    'OBLITERATE THE TRASHTEROID.\n' +
+    'SAVE THE EARTH...';
+
+  crawl.classList.remove('hidden');
+  crawl.setAttribute('aria-hidden', 'false');
+  textEl.textContent = '';
+  if (continueBtn) continueBtn.classList.add('hidden');
+
+  let done = false;
+  let i = 0;
+  let timeout = null;
+
+  const finish = () => {
+    if (done) return;
+    done = true;
+    if (timeout) clearTimeout(timeout);
+    window.removeEventListener('keydown', keySkip);
+    if (continueBtn) continueBtn.removeEventListener('click', finish);
+    crawl.classList.add('hidden');
+    crawl.setAttribute('aria-hidden', 'true');
+    if (continueBtn) continueBtn.classList.add('hidden');
+    onComplete();
+  };
+
+  const type = () => {
+    if (i >= CRAWL_TEXT.length) {
+      if (continueBtn) {
+        continueBtn.classList.remove('hidden');
+        continueBtn.addEventListener('click', finish, { once: true });
+      }
+      return;
+    }
+    const ch = CRAWL_TEXT[i++];
+    textEl.textContent += ch;
+    const delay = ch === '.' ? 420
+                : (ch === '!' || ch === '?') ? 380
+                : ch === ',' ? 110
+                : ch === '\n' ? 160
+                : 28;
+    timeout = setTimeout(type, delay);
+  };
+
+  const keySkip = () => finish();
+  window.addEventListener('keydown', keySkip);
+  type();
+}
+
 function showLevelSelect() {
   if (overlay.classList.contains('hidden')) return;
+  overlay.classList.add('hidden');
   runScreenFade(() => {
-    overlay.classList.add('hidden');
     introScene.showBackground();
     if (document.pointerLockElement) document.exitPointerLock();
     if (crosshair) crosshair.classList.add('hidden');
@@ -89,7 +168,17 @@ function showLevelSelect() {
   });
 }
 
-startBtn.addEventListener('click', showLevelSelect);
+startBtn.addEventListener('click', () => {
+  overlay.classList.add('hidden');
+  showCrawl(() => {
+    runScreenFade(() => {
+      introScene.showBackground();
+      if (document.pointerLockElement) document.exitPointerLock();
+      if (crosshair) crosshair.classList.add('hidden');
+      levelSelect.show();
+    });
+  });
+});
 
 // Allow pressing 9 to skip cutscene / overlay straight to level select
 window.addEventListener('keydown', (e) => {
