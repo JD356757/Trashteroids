@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Player } from './Player.js';
 import { DebrisManager } from './DebrisManager.js';
 import { SpecialDebrisManager } from './SpecialDebrisManager.js';
+import { RecycleDebrisManager } from './RecycleDebrisManager.js';
 import { ProjectileManager } from './ProjectileManager.js';
 import { LevelManager } from './LevelManager.js';
 import { InputHandler } from './InputHandler.js';
@@ -89,21 +90,29 @@ const TUTORIAL_BEATS = {
     ],
   },
   fire: {
-    title: 'Vaporize',
-    message: 'Hold left click to vaporize normal trash!',
+    title: 'Vaporizer',
+    message: 'Hold left click to fire the Vaporizer beam at regular trash!',
     placement: 'center',
     requirements: [
-      { id: 'fire', label: 'Hold left click to use your regular beam' },
+      { id: 'fire', label: 'Hold left click to fire the Vaporizer' },
       { id: 'trash', label: 'Destroy a piece of trash' },
     ],
   },
   special: {
     title: 'Special Trash',
-    message: 'Special trash has a yellow outline. Hold Shift to fire the vaporizer beam and destroy one.',
+    message: 'Yellow-outlined debris gives a huge bonus — use the Vaporizer (left click) to destroy it!',
     placement: 'center',
     requirements: [
-      { id: 'special-fire', label: 'Hold Shift to fire the vaporizer beam' },
-      { id: 'special-trash', label: 'Destroy 1 special trash with the vaporizer' },
+      { id: 'special-trash', label: 'Destroy 1 special piece of trash' },
+    ],
+  },
+  recycle: {
+    title: 'Recycle Beam',
+    message: 'Cyan-outlined bins are recyclable — don\'t vaporize them! Hold Shift to fire the Recycle Beam and collect them for points.',
+    placement: 'center',
+    requirements: [
+      { id: 'recycle-fire', label: 'Hold Shift to fire the Recycle Beam' },
+      { id: 'recycle-trash', label: 'Collect 1 recyclable with the Recycle Beam' },
     ],
   },
   objectives: {
@@ -264,6 +273,7 @@ export class Game {
     this._prevPlayerPos = this.player.mesh.position.clone();
     this.debris = new DebrisManager(this.scene);
     this.specialDebris = new SpecialDebrisManager(this.scene);
+    this.recycleDebris = new RecycleDebrisManager(this.scene);
     this.projectiles = new ProjectileManager(this.scene);
     this.levels = new LevelManager();
     this.hud = new HUD();
@@ -324,6 +334,7 @@ export class Game {
     this.projectiles.clear();
     this.debris.clear();
     this.specialDebris.clear();
+    this.recycleDebris.clear();
     this._clearTrashteroidProjectiles();
     this._clearTransientEffects();
     this.input?.dispose?.();
@@ -591,6 +602,7 @@ export class Game {
     this.projectiles.clear();
     this.debris.clear();
     this.specialDebris.clear();
+    this.recycleDebris.clear();
     this._clearTransientEffects();
     this._resetPlayerState(resetPlayerPosition);
     this._configureTrashteroidForLevel(levelConfig);
@@ -1171,6 +1183,7 @@ export class Game {
       boostShown: false,
       fireShown: false,
       specialShown: false,
+      recycleShown: false,
       objectivesShown: false,
       transitionRemaining: 0,
       activeBeatId: null,
@@ -1203,7 +1216,8 @@ export class Game {
     if (beatId === 'roll') return { rollSeen: false };
     if (beatId === 'boost') return { boosted: false };
     if (beatId === 'fire') return { fired: false, trashDestroyed: false };
-    if (beatId === 'special') return { vaporizerFired: false, specialDestroyed: false };
+    if (beatId === 'special') return { specialDestroyed: false };
+    if (beatId === 'recycle') return { recycleFired: false, recycleDestroyed: false };
     if (beatId === 'objectives') return { remaining: TUTORIAL_OBJECTIVES_HINT_DURATION };
     return {};
   }
@@ -1232,15 +1246,21 @@ export class Game {
 
     if (beatId === 'fire') {
       return [
-        { id: 'fire', label: 'Hold left click to use your regular beam', complete: !!progress.fired },
+        { id: 'fire', label: 'Hold left click to fire the Vaporizer', complete: !!progress.fired },
         { id: 'trash', label: 'Destroy a piece of trash', complete: !!progress.trashDestroyed },
       ];
     }
 
     if (beatId === 'special') {
       return [
-        { id: 'special-fire', label: 'Hold Shift to fire the vaporizer beam', complete: !!progress.vaporizerFired },
-        { id: 'special-trash', label: 'Destroy 1 special trash with the vaporizer', complete: !!progress.specialDestroyed },
+        { id: 'special-trash', label: 'Destroy 1 special piece of trash', complete: !!progress.specialDestroyed },
+      ];
+    }
+
+    if (beatId === 'recycle') {
+      return [
+        { id: 'recycle-fire', label: 'Hold Shift to fire the Recycle Beam', complete: !!progress.recycleFired },
+        { id: 'recycle-trash', label: 'Collect 1 recyclable with the Recycle Beam', complete: !!progress.recycleDestroyed },
       ];
     }
 
@@ -1322,7 +1342,13 @@ export class Game {
       return;
     }
 
-    if (!this._tutorial.objectivesShown && this._tutorial.specialShown) {
+    if (!this._tutorial.recycleShown && this._tutorial.specialShown) {
+      this._tutorial.recycleShown = true;
+      this._startTutorialBeat('recycle');
+      return;
+    }
+
+    if (!this._tutorial.objectivesShown && this._tutorial.recycleShown) {
       this._tutorial.objectivesShown = true;
       this._startTutorialBeat('objectives');
     }
@@ -1377,7 +1403,7 @@ export class Game {
     }
   }
 
-  _noteTutorialSpecialTrashDestroyed() {
+  _noteTutorialSpecialDestroyed() {
     if (!this._isTutorialActiveForCurrentLevel()) return;
     if (this._tutorial.activeBeatId !== 'special' || !this._tutorial.activeBeatProgress) return;
 
@@ -1386,7 +1412,19 @@ export class Game {
       this._renderTutorialBeat('special');
     }
 
-    if (this._tutorial.activeBeatProgress.vaporizerFired) {
+    this._completeActiveTutorialBeat();
+  }
+
+  _noteTutorialRecycleDestroyed() {
+    if (!this._isTutorialActiveForCurrentLevel()) return;
+    if (this._tutorial.activeBeatId !== 'recycle' || !this._tutorial.activeBeatProgress) return;
+
+    if (!this._tutorial.activeBeatProgress.recycleDestroyed) {
+      this._tutorial.activeBeatProgress.recycleDestroyed = true;
+      this._renderTutorialBeat('recycle');
+    }
+
+    if (this._tutorial.activeBeatProgress.recycleFired) {
       this._completeActiveTutorialBeat();
     }
   }
@@ -1455,13 +1493,13 @@ export class Game {
       return;
     }
 
-    if (this._tutorial.activeBeatId === 'special') {
-      if (!progress.vaporizerFired && vaporizerFired > 0) {
-        progress.vaporizerFired = true;
+    if (this._tutorial.activeBeatId === 'recycle') {
+      if (!progress.recycleFired && vaporizerFired > 0) {
+        progress.recycleFired = true;
         this._updateTutorialBeatDisplay();
       }
 
-      if (progress.vaporizerFired && progress.specialDestroyed) {
+      if (progress.recycleFired && progress.recycleDestroyed) {
         this._completeActiveTutorialBeat();
       }
       return;
@@ -1620,6 +1658,8 @@ export class Game {
       : spawnConfig;
     this.specialDebris.update(delta, specialSpawnConfig, playerPos, playerQuat);
     this.specialDebris.resolveAsteroidCollisions(asteroidColliders);
+    this.recycleDebris.update(delta, spawnConfig, playerPos, playerQuat);
+    this.recycleDebris.resolveAsteroidCollisions(asteroidColliders);
     this._updateTrashteroid(delta);
     this._resolveTrashteroidAsteroidCollisions(asteroidColliders, delta);
     this._updateTrashteroidProjectiles(delta);
@@ -1644,12 +1684,14 @@ export class Game {
 
     // Collision: projectiles vs debris (regular + special)
     this._checkProjectileDebrisCollisions(this.debris, 'normal');
-    this._checkProjectileDebrisCollisions(this.specialDebris, 'vaporizer');
-    this._checkProjectileSpecialPenaltyCollisions();
+    this._checkProjectileDebrisCollisions(this.recycleDebris, 'vaporizer');
+    this._checkProjectileSpecialRewardCollisions();
+    this._checkProjectileRecyclePenaltyCollisions();
 
     // Collision: trash vs player (hits / misses)
     this._checkDebrisPlayerCollisions(playerPos, playerQuat);
     this._checkDebrisPlayerCollisions(playerPos, playerQuat, this.specialDebris);
+    this._checkDebrisPlayerCollisions(playerPos, playerQuat, this.recycleDebris);
 
     this._updateMissionTargetIndicator();
     this._updateMinimap();
@@ -1710,8 +1752,8 @@ export class Game {
           this.trashHits++;
           this._trashDestroyedRequired++;
           this._noteTutorialTrashDestroyed();
-          if (debrisManager === this.specialDebris && projectiles[i].type === 'vaporizer') {
-            this._noteTutorialSpecialTrashDestroyed();
+          if (debrisManager === this.recycleDebris && projectiles[i].type === 'vaporizer') {
+            this._noteTutorialRecycleDestroyed();
           }
           if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
             this._trashDestroyedFast++;
@@ -1727,7 +1769,7 @@ export class Game {
     }
   }
 
-  _checkProjectileSpecialPenaltyCollisions() {
+  _checkProjectileSpecialRewardCollisions() {
     const projectiles = this.projectiles.getActive();
     const debrisList = this.specialDebris.getActive();
 
@@ -1736,13 +1778,42 @@ export class Game {
       for (let j = debrisList.length - 1; j >= 0; j--) {
         const hitRadius = debrisList[j].hitRadius || 1;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
-          const penalty = debrisList[j].points || 5000;
+          const points = debrisList[j].points || 5000;
+          this.score += points;
+          this.trashHits++;
+          this._trashDestroyedRequired++;
+          this._noteTutorialTrashDestroyed();
+          this._noteTutorialSpecialDestroyed();
+          if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
+            this._trashDestroyedFast++;
+          }
+          this._refreshPauseMenu();
+          this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          this._spawnScorePopup(_closestPoint.clone(), points);
+          this.projectiles.remove(i);
+          this.specialDebris.remove(j);
+          break;
+        }
+      }
+    }
+  }
+
+  _checkProjectileRecyclePenaltyCollisions() {
+    const projectiles = this.projectiles.getActive();
+    const debrisList = this.recycleDebris.getActive();
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      if (projectiles[i].type !== 'normal') continue;
+      for (let j = debrisList.length - 1; j >= 0; j--) {
+        const hitRadius = debrisList[j].hitRadius || 1;
+        if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
+          const penalty = debrisList[j].points || 2000;
           this.score = Math.max(0, this.score - penalty);
           this._refreshPauseMenu();
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
           this._spawnScorePopup(_closestPoint.clone(), -penalty, { color: '#ff3b30' });
           this.projectiles.remove(i);
-          this.specialDebris.remove(j);
+          this.recycleDebris.remove(j);
           break;
         }
       }
@@ -2117,6 +2188,12 @@ export class Game {
     const specialList = this.specialDebris.getActive();
     for (let i = 0; i < specialList.length; i++) {
       const distance = this._intersectAimSphere(specialList[i].position, specialList[i].hitRadius || 1.0);
+      if (distance < bestDistance) bestDistance = distance;
+    }
+
+    const recycleList = this.recycleDebris.getActive();
+    for (let i = 0; i < recycleList.length; i++) {
+      const distance = this._intersectAimSphere(recycleList[i].position, recycleList[i].hitRadius || 1.0);
       if (distance < bestDistance) bestDistance = distance;
     }
 
