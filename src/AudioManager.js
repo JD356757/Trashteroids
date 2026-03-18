@@ -1,5 +1,16 @@
 const SOUNDTRACK_URL = '/audioloop.wav';
+const SPACE_AMBIENCE_URL = '/space.m4a';
+const BOOST_URL = '/boostcut.m4a';
+const BOOST_BASS_URL = '/boostbass.m4a';
 const DEFAULT_BAND_COUNT = 14;
+const DEFAULT_AMBIENCE_DURATION = 10;
+const MAIN_MENU_VOLUME = 0.68;
+const MAIN_IN_LEVEL_VOLUME = 0.06;
+const AMBIENCE_IN_LEVEL_VOLUME = 0.78;
+const AMBIENCE_OVERLAP_SECONDS = 1.25;
+const BOOST_VOLUME = 0.62;
+const BOOST_FADE_OUT_MS = 500;
+const BOOST_FADE_IN_MS = 120;
 
 class SoundtrackManager {
   constructor() {
@@ -8,7 +19,36 @@ class SoundtrackManager {
     this._audioEl.loop = true;
     this._audioEl.preload = 'auto';
     this._audioEl.crossOrigin = 'anonymous';
-    this._audioEl.volume = 0.68;
+    this._audioEl.volume = MAIN_MENU_VOLUME;
+
+    this._ambientEls = [document.createElement('audio'), document.createElement('audio')];
+    for (let i = 0; i < this._ambientEls.length; i++) {
+      const ambient = this._ambientEls[i];
+      ambient.src = SPACE_AMBIENCE_URL;
+      ambient.loop = false;
+      ambient.preload = 'auto';
+      ambient.crossOrigin = 'anonymous';
+      ambient.volume = 0;
+    }
+    this._ambientPrimaryIndex = 0;
+    this._ambientSwapTimer = null;
+    this._ambientFadeRaf = null;
+    this._mainFadeRaf = null;
+    this._inLevel = false;
+    this._thrusting = false;
+
+    this._boostEls = [document.createElement('audio'), document.createElement('audio')];
+    this._boostEls[0].src = BOOST_URL;
+    this._boostEls[1].src = BOOST_BASS_URL;
+    for (let i = 0; i < this._boostEls.length; i++) {
+      const boostAudio = this._boostEls[i];
+      boostAudio.loop = true;
+      boostAudio.preload = 'auto';
+      boostAudio.crossOrigin = 'anonymous';
+      boostAudio.volume = 0;
+    }
+    this._boosting = false;
+    this._boostFadeRaf = null;
 
     this._audioContext = null;
     this._sourceNode = null;
@@ -94,10 +134,236 @@ class SoundtrackManager {
       if (this._audioEl.paused) {
         await this._audioEl.play();
       }
+      if (this._inLevel && this._thrusting) {
+        await this._startSpaceAmbience();
+      }
       this._playing = true;
     } catch (error) {
       // Ignore autoplay failures; playback will start on the next user gesture.
     }
+  }
+
+  _cancelAnimationFrame(refName) {
+    const id = this[refName];
+    if (id != null) {
+      cancelAnimationFrame(id);
+      this[refName] = null;
+    }
+  }
+
+  _clearAmbientSwapTimer() {
+    if (this._ambientSwapTimer != null) {
+      window.clearTimeout(this._ambientSwapTimer);
+      this._ambientSwapTimer = null;
+    }
+  }
+
+  _fadeAudioElementVolume(audioEl, from, to, durationMs, rafField, onComplete = null) {
+    this._cancelAnimationFrame(rafField);
+
+    const safeDurationMs = Math.max(1, durationMs);
+    const startTime = performance.now();
+    audioEl.volume = from;
+
+    const step = () => {
+      const elapsed = performance.now() - startTime;
+      const t = this._clamp(elapsed / safeDurationMs, 0, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      audioEl.volume = from + (to - from) * eased;
+
+      if (t < 1) {
+        this[rafField] = requestAnimationFrame(step);
+        return;
+      }
+
+      this[rafField] = null;
+      audioEl.volume = to;
+      onComplete?.();
+    };
+
+    this[rafField] = requestAnimationFrame(step);
+  }
+
+  _fadeBoost(toVolume, durationMs, onComplete = null) {
+    this._cancelAnimationFrame('_boostFadeRaf');
+
+    const safeDurationMs = Math.max(1, durationMs);
+    const startTime = performance.now();
+    const fromVolume = this._boostEls[0]?.volume ?? 0;
+
+    const step = () => {
+      const elapsed = performance.now() - startTime;
+      const t = this._clamp(elapsed / safeDurationMs, 0, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const volume = fromVolume + (toVolume - fromVolume) * eased;
+
+      for (let i = 0; i < this._boostEls.length; i++) {
+        this._boostEls[i].volume = volume;
+      }
+
+      if (t < 1) {
+        this._boostFadeRaf = requestAnimationFrame(step);
+        return;
+      }
+
+      this._boostFadeRaf = null;
+      for (let i = 0; i < this._boostEls.length; i++) {
+        this._boostEls[i].volume = toVolume;
+      }
+      onComplete?.();
+    };
+
+    this._boostFadeRaf = requestAnimationFrame(step);
+  }
+
+  _scheduleAmbientCrossfade() {
+    if (!this._inLevel || !this._thrusting) return;
+
+    const current = this._ambientEls[this._ambientPrimaryIndex];
+    const duration = Number.isFinite(current.duration) && current.duration > 0
+      ? current.duration
+      : DEFAULT_AMBIENCE_DURATION;
+    const overlap = Math.max(0.35, AMBIENCE_OVERLAP_SECONDS);
+    const remainingBeforeCrossfade = Math.max(0.2, duration - overlap - current.currentTime);
+    this._clearAmbientSwapTimer();
+    this._ambientSwapTimer = window.setTimeout(() => {
+      this._ambientSwapTimer = null;
+      this._crossfadeAmbientLoop();
+    }, remainingBeforeCrossfade * 1000);
+  }
+
+  async _startSpaceAmbience() {
+    this._clearAmbientSwapTimer();
+    this._cancelAnimationFrame('_ambientFadeRaf');
+
+    const primary = this._ambientEls[this._ambientPrimaryIndex];
+    const secondary = this._ambientEls[1 - this._ambientPrimaryIndex];
+
+    secondary.pause();
+    secondary.currentTime = 0;
+    secondary.volume = 0;
+
+    try {
+      if (primary.paused) {
+        primary.currentTime = 0;
+        await primary.play();
+      }
+    } catch (error) {
+      return;
+    }
+
+    this._fadeAudioElementVolume(primary, primary.volume, AMBIENCE_IN_LEVEL_VOLUME, 650, '_ambientFadeRaf');
+    this._scheduleAmbientCrossfade();
+  }
+
+  _crossfadeAmbientLoop() {
+    if (!this._inLevel || !this._thrusting) return;
+
+    const from = this._ambientEls[this._ambientPrimaryIndex];
+    const to = this._ambientEls[1 - this._ambientPrimaryIndex];
+    const overlapMs = Math.max(350, AMBIENCE_OVERLAP_SECONDS * 1000);
+
+    this._cancelAnimationFrame('_ambientFadeRaf');
+    to.currentTime = 0;
+    to.volume = 0;
+    to.play().catch(() => {
+      this._scheduleAmbientCrossfade();
+    });
+
+    const startTime = performance.now();
+    const step = () => {
+      if (!this._inLevel || !this._thrusting) {
+        this._ambientFadeRaf = null;
+        return;
+      }
+
+      const elapsed = performance.now() - startTime;
+      const t = this._clamp(elapsed / overlapMs, 0, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      from.volume = AMBIENCE_IN_LEVEL_VOLUME * (1 - eased);
+      to.volume = AMBIENCE_IN_LEVEL_VOLUME * eased;
+
+      if (t < 1) {
+        this._ambientFadeRaf = requestAnimationFrame(step);
+        return;
+      }
+
+      from.pause();
+      from.currentTime = 0;
+      from.volume = 0;
+      to.volume = AMBIENCE_IN_LEVEL_VOLUME;
+      this._ambientPrimaryIndex = 1 - this._ambientPrimaryIndex;
+      this._ambientFadeRaf = null;
+      this._scheduleAmbientCrossfade();
+    };
+
+    this._ambientFadeRaf = requestAnimationFrame(step);
+  }
+
+  _stopSpaceAmbience() {
+    this._clearAmbientSwapTimer();
+    this._cancelAnimationFrame('_ambientFadeRaf');
+
+    for (let i = 0; i < this._ambientEls.length; i++) {
+      const ambient = this._ambientEls[i];
+      ambient.pause();
+      ambient.currentTime = 0;
+      ambient.volume = 0;
+    }
+    this._ambientPrimaryIndex = 0;
+  }
+
+  setInLevel(inLevel) {
+    this._inLevel = !!inLevel;
+
+    const targetMainVolume = this._inLevel ? MAIN_IN_LEVEL_VOLUME : MAIN_MENU_VOLUME;
+    this._fadeAudioElementVolume(this._audioEl, this._audioEl.volume, targetMainVolume, 700, '_mainFadeRaf');
+
+    if (this._inLevel && this._thrusting) {
+      this._startSpaceAmbience();
+    } else {
+      this._stopSpaceAmbience();
+      this.setBoosting(false);
+    }
+  }
+
+  setThrusting(thrusting) {
+    const nextThrusting = !!thrusting;
+    if (nextThrusting === this._thrusting) return;
+    this._thrusting = nextThrusting;
+
+    if (this._inLevel && this._thrusting) {
+      this._startSpaceAmbience();
+    } else {
+      this._stopSpaceAmbience();
+    }
+  }
+
+  setBoosting(boosting) {
+    const wantsBoost = !!boosting && this._inLevel;
+    if (wantsBoost === this._boosting) return;
+    this._boosting = wantsBoost;
+
+    if (wantsBoost) {
+      for (let i = 0; i < this._boostEls.length; i++) {
+        const boostAudio = this._boostEls[i];
+        boostAudio.currentTime = 0;
+        boostAudio.play().catch(() => {
+          // Ignore autoplay/gesture restrictions; it will retry next boost frame.
+        });
+      }
+      this._fadeBoost(BOOST_VOLUME, BOOST_FADE_IN_MS);
+      return;
+    }
+
+    this._fadeBoost(0, BOOST_FADE_OUT_MS, () => {
+      if (this._boosting) return;
+      for (let i = 0; i < this._boostEls.length; i++) {
+        const boostAudio = this._boostEls[i];
+        boostAudio.pause();
+        boostAudio.currentTime = 0;
+      }
+    });
   }
 
   getBandLevels(count = DEFAULT_BAND_COUNT) {

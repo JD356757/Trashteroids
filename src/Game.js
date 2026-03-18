@@ -151,6 +151,10 @@ function toDisplayDistance(worldDistance) {
   return Math.max(0, Math.round(worldDistance * DISPLAY_DISTANCE_SCALE));
 }
 
+const EARTH_BACKGROUND_OFFSET = new THREE.Vector3(-1200, -600, -3500);
+// Keep the sun well separated from Earth in view direction (>= 120 degrees).
+const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, 3600);
+
 export class Game {
   constructor(canvas, startLevel = 1, options = {}) {
     this.canvas = canvas;
@@ -229,7 +233,7 @@ export class Game {
 
     // Sun — a warm directional light from far away, locked in the background
     this.sunLight = new THREE.DirectionalLight(0xfff5e0, 2);
-    this.sunLight.position.set(2000, 1000, -3000);
+    this.sunLight.position.copy(SUN_BACKGROUND_OFFSET);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(2048, 2048);
     this.sunLight.shadow.camera.near = 0.5;
@@ -353,6 +357,7 @@ export class Game {
   start() {
     if (this.running) return;
     soundtrackManager.start();
+    soundtrackManager.setInLevel(true);
     this.running = true;
     this.clock.start();
     this._resetTutorialState();
@@ -361,6 +366,9 @@ export class Game {
   }
 
   dispose() {
+    soundtrackManager.setInLevel(false);
+    soundtrackManager.setBoosting(false);
+    soundtrackManager.setThrusting(false);
     this.running = false;
     this.paused = true;
     this.boostActive = false;
@@ -1960,14 +1968,15 @@ export class Game {
     }
   }
 
-  _firePlayerBeam(type) {
+  _firePlayerBeam(type, frameDelta = 0) {
     const fireDirection = this._getAssistedFireDirection();
     const fired = this.projectiles.fire(
       this.player.mesh.position,
       fireDirection,
       this.player.velocity,
       this.player.mesh.quaternion,
-      type
+      type,
+      frameDelta
     );
 
     if (!fired) return 0;
@@ -2068,6 +2077,8 @@ export class Game {
     const delta = rawDelta * this._timeScale;
 
     if (this.paused) {
+      soundtrackManager.setBoosting(false);
+      soundtrackManager.setThrusting(false);
       this.hud.updateBoostBar(this.boostCharge, false);
       this.input.resetPressed();
       this.renderer.render(this.scene, this.camera);
@@ -2083,6 +2094,7 @@ export class Game {
     const { dx, dy } = this.input.consumeMouseDelta();
     this.player.rotate(dx, dy, rawDelta);
     const thrustHeld = this.input.isDown('w');
+    soundtrackManager.setThrusting(thrustHeld);
 
     // W → forward thrust
     const wantsBoost = thrustHeld && this.input.isDown(' ') && this.boostCharge > 0;
@@ -2100,6 +2112,7 @@ export class Game {
     } else {
       this.boostCharge = Math.min(1, this.boostCharge + BOOST_RECHARGE_RATE * delta);
     }
+    soundtrackManager.setBoosting(this.boostActive);
 
     // A / D → manual roll
     let rollInput = 0;
@@ -2109,8 +2122,8 @@ export class Game {
     this.player.manualRollInput = rollInput;
 
     // Fire regular beam with mouse-left and vaporizer beam with Shift.
-    const fired = this.input.isDown('mouseleft') ? this._firePlayerBeam('normal') : 0;
-    const vaporizerFired = this.input.isDown('shift') ? this._firePlayerBeam('vaporizer') : 0;
+    const fired = this.input.isDown('mouseleft') ? this._firePlayerBeam('normal', rawDelta) : 0;
+    const vaporizerFired = this.input.isDown('shift') ? this._firePlayerBeam('vaporizer', rawDelta) : 0;
 
     this._updateActiveTutorialProgress({
       dx,
@@ -3426,9 +3439,9 @@ export class Game {
 
     // Sun stays at fixed offset from camera — always in background
     this.sunLight.position.set(
-      camPos.x + 2000,
-      camPos.y + 1000,
-      camPos.z - 3000
+      camPos.x + SUN_BACKGROUND_OFFSET.x,
+      camPos.y + SUN_BACKGROUND_OFFSET.y,
+      camPos.z + SUN_BACKGROUND_OFFSET.z
     );
     this.sunLight.target.position.copy(camPos);
     this.sunLight.target.updateMatrixWorld();
@@ -3444,9 +3457,9 @@ export class Game {
     // Planet stays at fixed offset from camera — unreachable
     if (this.planet) {
       this.planet.position.set(
-        camPos.x - 1200,
-        camPos.y - 600,
-        camPos.z - 3500
+        camPos.x + EARTH_BACKGROUND_OFFSET.x,
+        camPos.y + EARTH_BACKGROUND_OFFSET.y,
+        camPos.z + EARTH_BACKGROUND_OFFSET.z
       );
       // Earth does not rotate
     }
@@ -3470,7 +3483,7 @@ export class Game {
     this.planet = new THREE.Mesh(planetGeo, planetMat);
     this.planet.frustumCulled = false;
     this.planet.renderOrder = -1000;
-    this.planet.position.set(-1200, -600, -3500);
+    this.planet.position.copy(EARTH_BACKGROUND_OFFSET);
     this.scene.add(this.planet);
 
     this.cloudMesh = null;
