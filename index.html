@@ -64,6 +64,23 @@
     <div id="boost-bar-track"><div id="boost-bar-fill"></div></div>
   </div>
 
+  <div id="music-visualizer" class="hidden" aria-hidden="true">
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+    <span class="visualizer-bar"></span>
+  </div>
+
   <div id="crosshair" class="hidden">
     <div class="crosshair-ring"></div>
     <div class="crosshair-line crosshair-left"></div>
@@ -95,7 +112,7 @@
 
       <div class="pause-actions">
         <button id="pause-resume-btn" class="pause-btn">Resume Mission</button>
-        <button id="pause-restart-btn" class="pause-btn pause-btn-secondary">Restart Run</button>
+        <button id="pause-restart-btn" class="pause-btn pause-btn-secondary">Exit to Menu</button>
       </div>
 
       <div class="pause-hint">Press Esc to resume</div>
@@ -132,6 +149,35 @@
     <div id="level-popup-buttons">
       <button id="level-popup-yes">START LEVEL</button>
       <button id="level-popup-no">BACK</button>
+    </div>
+  </div>
+
+  <button id="level-select-settings-btn" class="hidden" aria-label="Open settings" title="Settings">⚙</button>
+
+  <div id="level-select-settings" class="hidden" aria-hidden="true">
+    <div id="level-select-settings-panel">
+      <div id="level-select-settings-title">SETTINGS</div>
+
+      <label class="level-select-setting-label" for="level-select-mouse-sensitivity">Mouse Sensitivity</label>
+      <input id="level-select-mouse-sensitivity" type="range" min="8" max="60" step="1" value="24" />
+      <div id="level-select-mouse-sensitivity-value">24</div>
+
+      <label class="level-select-setting-toggle" for="level-select-reduced-motion">
+        <input id="level-select-reduced-motion" type="checkbox" />
+        <span>Reduce Motion</span>
+      </label>
+
+      <label class="level-select-setting-toggle" for="level-select-reduced-flashing">
+        <input id="level-select-reduced-flashing" type="checkbox" />
+        <span>Reduce Flashing</span>
+      </label>
+
+      <label class="level-select-setting-toggle" for="level-select-music-visualizer">
+        <input id="level-select-music-visualizer" type="checkbox" />
+        <span>Music Visualizer</span>
+      </label>
+
+      <button id="level-select-settings-close">CLOSE</button>
     </div>
   </div>
 
