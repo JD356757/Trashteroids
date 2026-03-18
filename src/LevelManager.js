@@ -13,6 +13,7 @@ export const LEVEL_CONFIGS = {
       successSubtitle: 'Required objective complete.',
       primary: {
         trashRequired: 30,
+        recycleRequired: 9,
       },
       bonus: {
         fastTrashRequired: 3,
@@ -49,6 +50,7 @@ export const LEVEL_CONFIGS = {
       successSubtitle: 'Trashteroid reached. Final assault window open.',
       primary: {
         trashRequired: 40,
+        recycleRequired: 15,
         reachTrashteroid: true,
         reachDistanceDisplay: 60,
       },
@@ -89,13 +91,13 @@ export const LEVEL_CONFIGS = {
         destroyTrashteroid: true,
       },
       bonus: {
-        fastTrashRequired: 5,
+        fastTrashRequired: 0,
         fastSpeedDisplay: 300,
         shieldThreshold: 90,
       },
     },
     boss: {
-      maxHealth: 1400,
+      maxHealth: 2200,
       startDistance: 900,
       strafeAmplitude: 140,
       verticalAmplitude: 80,
@@ -103,16 +105,21 @@ export const LEVEL_CONFIGS = {
       verticalFrequency: 0.28,
       moveSharpness: 1.12,
       speedRatio: 1.015,
-      shotInterval: 0.58,
-      projectileSpeed: 1020,
-      projectileDamage: 32,
+      shotInterval: 0.34,
+      projectileSpeed: 1400,
+      projectileDamage: 48,
       projectileLifetime: 5.5,
-      collisionRadius: 66,
-      contactDamage: 16,
+      collisionRadius: 72,
+      contactDamage: 26,
+      bossScale: 7,
+      projectileBurstCount: 5,
+      projectileSpreadScale: 0.019,
+      projectileVerticalSpreadScale: 0.01,
+      projectileAimError: 0.01,
     },
     spawn: {
-      maxActive: 18,
-      bootstrapActive: 8,
+      maxActive: 0,
+      bootstrapActive: 0,
       forwardSpawnMin: 980,
       forwardSpawnMax: 1425,
       lateralSpread: 220,
@@ -131,6 +138,47 @@ export const LEVEL_CONFIGS = {
     },
   },
 };
+
+const LEVEL_UNLOCK_STORAGE_KEY = 'trashteroid_unlocked_level';
+
+function getMaxConfiguredLevel() {
+  const keys = Object.keys(LEVEL_CONFIGS).map((entry) => Number(entry));
+  return keys.length > 0 ? Math.max(...keys) : 1;
+}
+
+export function getUnlockedLevel() {
+  const maxConfigured = getMaxConfiguredLevel();
+
+  try {
+    const raw = window.localStorage.getItem(LEVEL_UNLOCK_STORAGE_KEY);
+    const parsed = raw == null ? NaN : Number(raw);
+    if (Number.isFinite(parsed)) {
+      return Math.min(maxConfigured, Math.max(1, Math.floor(parsed)));
+    }
+  } catch (error) {
+    // Ignore storage errors and fall back to level 1.
+  }
+
+  return 1;
+}
+
+export function setUnlockedLevel(level) {
+  const maxConfigured = getMaxConfiguredLevel();
+  const clamped = Math.min(maxConfigured, Math.max(1, Math.floor(level)));
+
+  try {
+    window.localStorage.setItem(LEVEL_UNLOCK_STORAGE_KEY, `${clamped}`);
+  } catch (error) {
+    // Ignore storage failures and keep runtime behavior.
+  }
+
+  return clamped;
+}
+
+export function unlockLevel(level) {
+  const nextUnlocked = Math.max(getUnlockedLevel(), Math.floor(level));
+  return setUnlockedLevel(nextUnlocked);
+}
 
 export class LevelManager {
   constructor() {
