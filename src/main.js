@@ -1,6 +1,7 @@
 import { Game } from './Game.js';
 import { IntroScene } from './IntroScene.js';
 import { LevelSelect } from './LevelSelect.js';
+import { soundtrackManager } from './AudioManager.js';
 
 const overlay = document.getElementById('overlay');
 const startBtn = document.getElementById('start-btn');
@@ -15,6 +16,12 @@ introScene.show();
 
 /* ── Shared renderer for LevelSelect (same WebGL context as IntroScene) ── */
 const levelSelect = new LevelSelect(canvas, launchGame, introScene.renderer, introScene);
+
+const unlockSoundtrack = () => {
+  soundtrackManager.start();
+};
+window.addEventListener('pointerdown', unlockSoundtrack, { once: true });
+window.addEventListener('keydown', unlockSoundtrack, { once: true });
 
 function runScreenFade(midpoint) {
   if (!screenFade) {
@@ -54,6 +61,7 @@ function runScreenFade(midpoint) {
 }
 
 function launchGame({ levelId, tutorialMode }) {
+  soundtrackManager.start();
   introScene.hide();
   levelSelect.hide();
   crosshair.classList.remove('hidden');
@@ -203,6 +211,7 @@ function showCrawl(onComplete) {
 
 function showLevelSelect() {
   if (overlay.classList.contains('hidden')) return;
+  soundtrackManager.start();
   overlay.classList.add('hidden');
   runScreenFade(() => {
     introScene.showBackground();
@@ -213,6 +222,7 @@ function showLevelSelect() {
 }
 
 startBtn.addEventListener('click', () => {
+  soundtrackManager.start();
   overlay.classList.add('hidden');
   showCrawl(() => {
     runScreenFade(() => {
@@ -227,6 +237,7 @@ startBtn.addEventListener('click', () => {
 // Allow pressing 9 to skip cutscene / overlay straight to level select
 window.addEventListener('keydown', (e) => {
   if (e.key === '9') {
+    soundtrackManager.start();
     showLevelSelect();
   }
 });
