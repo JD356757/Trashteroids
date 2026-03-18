@@ -394,6 +394,14 @@ body::before {
   color: rgba(255, 255, 255, 0.55);
 }
 
+#level-complete-stars {
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  color: #fff2ba;
+  text-shadow: 0 0 12px rgba(255, 222, 140, 0.45);
+  min-height: 20px;
+}
+
 #level-complete-bonuses {
   font-size: 11px;
   letter-spacing: 0.18em;
@@ -1308,7 +1316,7 @@ body::before {
   background:
     radial-gradient(circle at 50% 50%, rgba(14, 28, 56, 0.2), rgba(0, 0, 0, 0.95) 62%),
     #000;
-  transition: opacity 420ms ease;
+  transition: opacity var(--screen-fade-duration, 420ms) ease;
 }
 
 #screen-fade.visible {
