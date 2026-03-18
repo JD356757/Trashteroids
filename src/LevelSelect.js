@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { LEVEL_CONFIGS, getUnlockedLevel } from './LevelManager.js';
+import { LEVEL_CONFIGS, getAllLevelStars, getUnlockedLevel } from './LevelManager.js';
 import { soundtrackManager } from './AudioManager.js';
 
 /**
@@ -147,6 +147,7 @@ export class LevelSelect {
     this._shipArrived = false;
     this._introScene = introScene;
     this._unlockedLevel = getUnlockedLevel();
+    this._levelStars = getAllLevelStars();
     this._unlockBypass = false;
     this._accessibilitySettings = loadAccessibilitySettings();
 
@@ -266,6 +267,7 @@ export class LevelSelect {
     soundtrackManager.setInLevel(false);
     this.active = true;
     this._unlockedLevel = getUnlockedLevel();
+    this._syncLevelStarsFromStorage();
     this._unlockBypass = false;
     this._syncSettingsControls();
     this._applyAccessibilityPreview();
@@ -414,7 +416,12 @@ export class LevelSelect {
       label.userData.levelId = data.id;
       this.scene.add(label);
 
-      this.nodes.push({ mesh, ring, label, data });
+      const starsLabel = this._makeStarsSprite(this._getStarsText(data.id));
+      starsLabel.position.copy(data.pos).add(new THREE.Vector3(0, -3.05, 0));
+      starsLabel.userData.levelId = data.id;
+      this.scene.add(starsLabel);
+
+      this.nodes.push({ mesh, ring, label, starsLabel, data });
     }
   }
 
@@ -427,7 +434,6 @@ export class LevelSelect {
       this._earthMesh.position.y = reducedMotion ? EARTH_POS.y : EARTH_POS.y + Math.sin(t) * 0.3;
       this._earthRing.position.y = this._earthMesh.position.y;
       this._earthLabel.position.y = this._earthMesh.position.y - 2;
-      this._earthRing.rotation.z += reducedMotion ? 0 : delta * 0.5;
       const ep = reducedMotion ? 1 : 1 + Math.sin(t * 2) * 0.08;
       this._earthMesh.scale.setScalar(ep);
     }
@@ -441,9 +447,9 @@ export class LevelSelect {
         : node.data.pos.y + Math.sin(t + node.data.id * 2) * 0.3;
       node.ring.position.y = node.mesh.position.y;
       node.label.position.y = node.mesh.position.y - 2;
-
-      // Rotate ring
-      node.ring.rotation.z += reducedMotion ? 0 : delta * 0.5;
+      if (node.starsLabel) {
+        node.starsLabel.position.y = node.mesh.position.y - 3.05;
+      }
 
       // Pulse scale
       const pulse = reducedMotion ? 1 : 1 + Math.sin(t * 2 + node.data.id) * 0.08;
@@ -454,6 +460,9 @@ export class LevelSelect {
       node.ring.material.color.setHex(unlocked ? node.data.color : 0x5e6674);
       node.label.material.color.setHex(unlocked ? 0xffffff : 0x6b7380);
       node.label.material.opacity = unlocked ? 1 : 0.24;
+      if (node.starsLabel?.material) {
+        node.starsLabel.material.opacity = unlocked ? 0.95 : 0.22;
+      }
 
       // Highlight selected
       if (unlocked && this._selectedLevel && this._selectedLevel.id === node.data.id) {
@@ -489,7 +498,7 @@ export class LevelSelect {
     // include node meshes + rings + earth meshes so clicks on any of them count
     const meshes = [];
     for (const n of this.nodes) {
-      meshes.push(n.mesh, n.ring, n.label);
+      meshes.push(n.mesh, n.ring, n.label, n.starsLabel);
     }
     if (this._earthMesh) meshes.push(this._earthMesh, this._earthRing, this._earthLabel);
 
@@ -663,8 +672,10 @@ export class LevelSelect {
 
   _showPopup() {
     if (!this._selectedLevel) return;
+    const stars = this._getLevelStars(this._selectedLevel.id);
+    const starsText = this._getStarsText(this._selectedLevel.id);
     this._popupLabel.textContent = this._selectedLevel.label;
-    this._popupSub.textContent = this._selectedLevel.sub;
+    this._popupSub.textContent = `${this._selectedLevel.sub} - Stars ${stars}/3 ${starsText}`;
     this._popup.classList.remove('hidden');
   }
 
@@ -818,6 +829,54 @@ export class LevelSelect {
     const sprite = new THREE.Sprite(mat);
     sprite.scale.set(5, 1.25, 1);
     return sprite;
+  }
+
+  _makeStarsSprite(text) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'bold 42px "Orbitron", sans-serif';
+    ctx.fillStyle = '#ffe799';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#ffe799';
+    ctx.shadowBlur = 14;
+    ctx.fillText(text, 128, 50);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(3.2, 1.0, 1);
+    return sprite;
+  }
+
+  _getLevelStars(levelId) {
+    return this._levelStars?.[String(levelId)] ?? 0;
+  }
+
+  _getStarsText(levelId) {
+    const stars = this._getLevelStars(levelId);
+    return `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`;
+  }
+
+  _refreshNodeStarLabels() {
+    for (const node of this.nodes) {
+      if (!node.starsLabel) continue;
+      const refreshed = this._makeStarsSprite(this._getStarsText(node.data.id));
+      refreshed.position.copy(node.starsLabel.position);
+      refreshed.userData.levelId = node.data.id;
+      this.scene.remove(node.starsLabel);
+      node.starsLabel.material?.map?.dispose?.();
+      node.starsLabel.material?.dispose?.();
+      node.starsLabel = refreshed;
+      this.scene.add(refreshed);
+    }
+  }
+
+  _syncLevelStarsFromStorage() {
+    this._levelStars = getAllLevelStars();
+    this._refreshNodeStarLabels();
   }
 
   _onResize() {
