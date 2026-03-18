@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LEVEL_CONFIGS, getUnlockedLevel } from './LevelManager.js';
+import { soundtrackManager } from './AudioManager.js';
 
 /**
  * 3D level-select screen.
@@ -261,6 +262,7 @@ export class LevelSelect {
   /* ════════════════  public API  ════════════════ */
 
   show() {
+    soundtrackManager.start();
     this.active = true;
     this._unlockedLevel = getUnlockedLevel();
     this._unlockBypass = false;
@@ -558,7 +560,7 @@ export class LevelSelect {
 
   _setMusicVisualizerVisible(visible) {
     if (!this._musicVisualizer) return;
-    this._musicVisualizer.classList.remove('music-visualizer-gameplay');
+    this._musicVisualizer.classList.toggle('music-visualizer-gameplay', !!visible);
     this._musicVisualizer.classList.toggle('hidden', !visible);
     this._musicVisualizer.setAttribute('aria-hidden', visible ? 'false' : 'true');
     if (!visible) {
@@ -568,10 +570,14 @@ export class LevelSelect {
   }
 
   _resetMusicVisualizerBars() {
+    if (this._musicVisualizer) {
+      this._musicVisualizer.style.setProperty('--visualizer-energy', '0');
+    }
+
     for (let i = 0; i < this._musicVisualizerBars.length; i++) {
       const bar = this._musicVisualizerBars[i];
-      bar.style.transform = 'scaleY(0.18)';
-      bar.style.opacity = '0.52';
+      bar.style.transform = 'scaleX(0.12)';
+      bar.style.opacity = '0.44';
     }
   }
 
@@ -579,23 +585,28 @@ export class LevelSelect {
     if (!this.active || !this._accessibilitySettings.musicVisualizer) return;
     if (!this._musicVisualizerBars.length) return;
 
-    this._musicVisualizerPhase += delta * 5.2;
-    const targetEnergy = this._accessibilitySettings.reducedMotion ? 0.32 : 0.52;
-    const smoothing = 1 - Math.exp(-delta * 7);
-    this._musicVisualizerEnergy += (targetEnergy - this._musicVisualizerEnergy) * smoothing;
+    const dt = Math.max(0.005, delta || 0.016);
+    const phaseSpeed = this._accessibilitySettings.reducedMotion ? 2.3 : 4.9;
+    this._musicVisualizerPhase += dt * phaseSpeed;
+
+    const bandLevels = soundtrackManager.getBandLevels(this._musicVisualizerBars.length);
+    const motionScale = this._accessibilitySettings.reducedMotion ? 0.76 : 1;
+    const lastBarIndex = Math.max(1, this._musicVisualizerBars.length - 1);
+    let totalLevel = 0;
 
     for (let i = 0; i < this._musicVisualizerBars.length; i++) {
       const bar = this._musicVisualizerBars[i];
-      const wave = (Math.sin(this._musicVisualizerPhase * 2.3 + i * 0.68) + 1) * 0.5;
-      const ripple = (Math.sin(this._musicVisualizerPhase * 4.6 + i * 1.04) + 1) * 0.5;
-      const level = THREE.MathUtils.clamp(
-        0.16 + this._musicVisualizerEnergy * (0.46 + wave * 0.56) + ripple * 0.14,
-        0.12,
-        1
-      );
-      bar.style.transform = `scaleY(${0.18 + level * 1.3})`;
-      bar.style.opacity = `${0.5 + level * 0.45}`;
+      const rawLevel = THREE.MathUtils.clamp((bandLevels[i] ?? 0) * motionScale, 0, 1);
+      const bandOffset = (i / lastBarIndex) * Math.PI * 2;
+      const wave = 0.86 + Math.sin(this._musicVisualizerPhase * 2.2 + bandOffset) * 0.14;
+      const level = THREE.MathUtils.clamp((0.04 + Math.pow(rawLevel, 0.9) * 0.9) * wave, 0, 1);
+      totalLevel += level;
+      bar.style.transform = `scaleX(${0.12 + level * 1.1})`;
+      bar.style.opacity = `${0.36 + level * 0.56}`;
     }
+
+    const avgLevel = totalLevel / this._musicVisualizerBars.length;
+    this._musicVisualizer.style.setProperty('--visualizer-energy', `${avgLevel.toFixed(3)}`);
   }
 
   _showSettingsPanel() {
@@ -640,6 +651,10 @@ export class LevelSelect {
       reducedFlashing: !!this._settingsReducedFlashing?.checked,
       musicVisualizer: !!this._settingsMusicVisualizer?.checked,
     });
+
+    if (this._accessibilitySettings.musicVisualizer) {
+      soundtrackManager.start();
+    }
     this._applyAccessibilityPreview();
   }
 

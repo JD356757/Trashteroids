@@ -10,6 +10,7 @@ import { InputHandler } from './InputHandler.js';
 import { HUD } from './HUD.js';
 import { Starfield } from './Starfield.js';
 import { AsteroidField } from './AsteroidField.js';
+import { soundtrackManager } from './AudioManager.js';
 
 // Reusable vectors for camera follow
 // Offset: higher + further back so ship sits in the lower portion of the screen
@@ -337,6 +338,7 @@ export class Game {
 
   start() {
     if (this.running) return;
+    soundtrackManager.start();
     this.running = true;
     this.clock.start();
     this._resetTutorialState();
@@ -1963,17 +1965,8 @@ export class Game {
     this.hud.update(this.score, this.levels.current, this.lives);
     this.hud.updateBoostBar(this.boostCharge, this.boostActive);
     this.hud.updateSpeedometer(this.player.velocity.length());
-    const speedVisualizerLevel = THREE.MathUtils.clamp(
-      this.player.velocity.length() / toWorldSpeed(900),
-      0,
-      1
-    );
-    const shotVisualizerLevel = (fired + vaporizerFired) > 0 ? 0.85 : 0;
-    const boostVisualizerLevel = this.boostActive ? 0.95 : 0;
-    this.hud.updateMusicVisualizer(
-      Math.max(speedVisualizerLevel * 0.72, shotVisualizerLevel, boostVisualizerLevel),
-      rawDelta
-    );
+    const bandLevels = soundtrackManager.getBandLevels(this.hud.musicVisualizerBars?.length || 14);
+    this.hud.updateMusicVisualizer(bandLevels, rawDelta);
     this._updateMissionObjectives(delta);
     this.input.resetPressed();
     this.renderer.render(this.scene, this.camera);

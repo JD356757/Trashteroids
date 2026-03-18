@@ -569,31 +569,73 @@ body::before {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
+  width: min(980px, calc(100vw - 42px));
   height: 54px;
   display: flex;
   align-items: flex-end;
+  justify-content: space-between;
   gap: 5px;
   padding: 8px 12px;
   border: 1px solid rgba(140, 222, 255, 0.24);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(7, 18, 36, 0.88), rgba(6, 14, 28, 0.7));
+  background:
+    linear-gradient(180deg, rgba(8, 20, 38, 0.9), rgba(4, 12, 24, 0.76)),
+    radial-gradient(120% 135% at 50% 100%, rgba(95, 178, 255, 0.18), transparent 72%);
   box-shadow:
     0 14px 28px rgba(4, 8, 18, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  isolation: isolate;
   pointer-events: none;
   z-index: 26;
 }
 
+#music-visualizer::before,
+#music-visualizer::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#music-visualizer::before {
+  bottom: 6px;
+  height: 20px;
+  opacity: calc(0.2 + var(--visualizer-energy, 0.24) * 0.5);
+  background:
+    radial-gradient(42px 13px at 0 100%, rgba(142, 232, 255, 0.42) 32%, transparent 34%) 0 100% / 48px 16px repeat-x,
+    radial-gradient(58px 17px at 24px 100%, rgba(255, 196, 158, 0.32) 28%, transparent 31%) 0 100% / 72px 19px repeat-x;
+  animation: visualizer-wave-slide 6.6s linear infinite;
+}
+
+#music-visualizer::after {
+  top: 0;
+  bottom: 0;
+  opacity: 0.36;
+  background:
+    linear-gradient(180deg, rgba(190, 235, 255, 0.18) 0%, transparent 35%),
+    linear-gradient(90deg, transparent 0%, rgba(143, 247, 239, 0.1) 18%, transparent 40%, rgba(255, 213, 176, 0.1) 70%, transparent 100%);
+  animation: visualizer-shimmer 3.8s ease-in-out infinite;
+}
+
 #music-visualizer .visualizer-bar {
-  width: 6px;
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-width: 4px;
+  max-width: 26px;
   height: 30px;
   border-radius: 999px;
   transform-origin: center bottom;
-  transform: scaleY(0.18);
-  opacity: 0.52;
+  transform: scaleY(0.12);
+  opacity: 0.44;
   background: linear-gradient(180deg, #ffd5b0 0%, #8ff7ef 48%, #7c9dff 100%);
-  box-shadow: 0 0 8px rgba(143, 247, 239, 0.38);
-  transition: transform 80ms linear, opacity 120ms linear;
+  box-shadow:
+    0 0 10px rgba(143, 247, 239, 0.34),
+    inset 0 0 8px rgba(255, 255, 255, 0.12);
+  transition: transform 70ms linear, opacity 100ms linear;
 }
 
 #music-visualizer.music-visualizer-gameplay {
@@ -602,6 +644,8 @@ body::before {
   top: 50%;
   bottom: auto;
   transform: translateY(-50%);
+  width: auto;
+  min-width: 0;
   height: auto;
   min-height: 168px;
   padding: 10px 8px;
@@ -611,10 +655,30 @@ body::before {
 }
 
 #music-visualizer.music-visualizer-gameplay .visualizer-bar {
+  flex: 0 0 auto;
   width: 30px;
   height: 5px;
   transform-origin: right center;
-  transform: scaleX(0.18);
+  transform: scaleX(0.12);
+}
+
+@keyframes visualizer-wave-slide {
+  0% {
+    background-position: 0 100%, 0 100%;
+  }
+  100% {
+    background-position: 96px 100%, 144px 100%;
+  }
+}
+
+@keyframes visualizer-shimmer {
+  0%,
+  100% {
+    filter: brightness(0.95);
+  }
+  50% {
+    filter: brightness(1.08);
+  }
 }
 
 #tutorial-callout {
@@ -1858,13 +1922,15 @@ body::before {
 
   #music-visualizer {
     bottom: 14px;
+    width: calc(100vw - 20px);
+    max-width: 760px;
     gap: 4px;
     height: 46px;
     padding: 6px 8px;
   }
 
   #music-visualizer .visualizer-bar {
-    width: 5px;
+    max-width: 18px;
   }
 
   #music-visualizer.music-visualizer-gameplay {
