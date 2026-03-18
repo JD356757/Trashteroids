@@ -142,6 +142,7 @@ export const LEVEL_CONFIGS = {
 };
 
 const LEVEL_UNLOCK_STORAGE_KEY = 'trashteroid_unlocked_level';
+const LEVEL_STARS_STORAGE_KEY = 'trashteroid_level_stars';
 
 function getMaxConfiguredLevel() {
   const keys = Object.keys(LEVEL_CONFIGS).map((entry) => Number(entry));
@@ -180,6 +181,70 @@ export function setUnlockedLevel(level) {
 export function unlockLevel(level) {
   const nextUnlocked = Math.max(getUnlockedLevel(), Math.floor(level));
   return setUnlockedLevel(nextUnlocked);
+}
+
+function getDefaultLevelStarsMap() {
+  const map = {};
+  for (const level of Object.keys(LEVEL_CONFIGS)) {
+    map[level] = 0;
+  }
+  return map;
+}
+
+function sanitizeStarsMap(rawMap) {
+  const fallback = getDefaultLevelStarsMap();
+  if (!rawMap || typeof rawMap !== 'object') {
+    return fallback;
+  }
+
+  for (const level of Object.keys(fallback)) {
+    const parsed = Number(rawMap[level]);
+    if (Number.isFinite(parsed)) {
+      fallback[level] = Math.min(3, Math.max(0, Math.floor(parsed)));
+    }
+  }
+
+  return fallback;
+}
+
+function saveLevelStarsMap(starsMap) {
+  try {
+    window.localStorage.setItem(LEVEL_STARS_STORAGE_KEY, JSON.stringify(starsMap));
+  } catch (error) {
+    // Ignore storage failures and keep runtime behavior.
+  }
+}
+
+export function getAllLevelStars() {
+  try {
+    const raw = window.localStorage.getItem(LEVEL_STARS_STORAGE_KEY);
+    if (!raw) {
+      return getDefaultLevelStarsMap();
+    }
+    const parsed = JSON.parse(raw);
+    return sanitizeStarsMap(parsed);
+  } catch (error) {
+    return getDefaultLevelStarsMap();
+  }
+}
+
+export function getLevelStars(level) {
+  const map = getAllLevelStars();
+  const key = String(Math.floor(level));
+  return map[key] ?? 0;
+}
+
+export function recordLevelStars(level, stars) {
+  const map = getAllLevelStars();
+  const key = String(Math.floor(level));
+  if (!(key in map)) {
+    return 0;
+  }
+
+  const clampedStars = Math.min(3, Math.max(0, Math.floor(stars)));
+  map[key] = Math.max(map[key], clampedStars);
+  saveLevelStarsMap(map);
+  return map[key];
 }
 
 export class LevelManager {
