@@ -1,10 +1,11 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Player } from './Player.js';
 import { DebrisManager } from './DebrisManager.js';
 import { SpecialDebrisManager } from './SpecialDebrisManager.js';
 import { RecycleDebrisManager } from './RecycleDebrisManager.js';
 import { ProjectileManager } from './ProjectileManager.js';
-import { LevelManager } from './LevelManager.js';
+import { LevelManager, unlockLevel } from './LevelManager.js';
 import { InputHandler } from './InputHandler.js';
 import { HUD } from './HUD.js';
 import { Starfield } from './Starfield.js';
@@ -39,6 +40,7 @@ const _bossRight = new THREE.Vector3();
 const _bossUp = new THREE.Vector3();
 const _bossAim = new THREE.Vector3();
 const _bossMuzzle = new THREE.Vector3();
+const _bossOrbitA = new THREE.Vector3();
 const _worldUp = new THREE.Vector3(0, 1, 0);
 const _muzzleBurstLocal = new THREE.Vector3(0, 0.2, -1.5);
 const _debrisAway = new THREE.Vector3();
@@ -54,6 +56,12 @@ const MIN_AIM_DISTANCE = 1.0; // ignore intersections closer than this to the ca
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
 const PLAYER_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
+const ACCESSIBILITY_SETTINGS_STORAGE_KEY = 'trashteroid_accessibility_settings';
+const DEFAULT_ACCESSIBILITY_SETTINGS = Object.freeze({
+  reducedMotion: false,
+  reducedFlashing: false,
+  musicVisualizer: false,
+});
 const DISPLAY_DISTANCE_SCALE = 0.45;
 const TUTORIAL_TIME_SCALE = 1.0;
 const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
@@ -63,6 +71,9 @@ const TRASHTEROID_HIT_RADIUS = 72;
 const TRASHTEROID_SURFACE_OFFSET = 58;
 const TRASHTEROID_SCORE_PER_HIT = 35;
 const TRASHTEROID_SCORE_ON_DESTROY = 5000;
+const WRONG_BEAM_PENALTY = 2000;
+const LEVEL_ENTRY_FADE_HOLD_MS = 280;
+const LEVEL_ENTRY_FADE_MS = 420;
 const TUTORIAL_BEATS = {
   move: {
     title: 'Move & Look',
@@ -147,20 +158,22 @@ export class Game {
     this.paused = false;
     this.shotsFired = 0;
     this.trashHits = 0;
-    this._averageSpeedSum = 0;
-    this._averageSpeedTime = 0;
     this._pauseUnlockArmed = false;
     this._startLevel = startLevel;
     this._tutorialMode = this._startLevel === 1 && !!options.tutorialMode;
     this._onReturnToLevelSelect = options.onReturnToLevelSelect ?? null;
     this._returnToLevelSelectTimeout = null;
+    this._screenFadeEl = document.getElementById('screen-fade');
+    this._levelEntryFadeToken = 0;
+    this._levelEntryFadeHoldTimeout = null;
+    this._levelEntryFadeSafetyTimeout = null;
     this._timeScale = 1;
     this._tutorial = this._createTutorialState();
     this._handleLevelNextClick = () => this._onLevelNext();
     this._handleLevelRetryClick = () => this._onLevelRetry();
     this._handleWindowResize = () => this._onResize();
     this._handlePauseResumeClick = () => this._resumeGame();
-    this._handlePauseRestartClick = () => window.location.reload();
+    this._handlePauseRestartClick = () => this._exitToMenu();
     this._handlePauseSensitivityInput = (event) => {
       const displayValue = Number(event.currentTarget.value);
       this._setMouseSensitivity(displayValue / 1000, true);
@@ -170,6 +183,7 @@ export class Game {
     this._levelTimer = 0;
     this._levelTimerRunning = false;
     this._trashDestroyedRequired = 0;
+    this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(200);
     this._levelComplete = false;
@@ -277,9 +291,11 @@ export class Game {
     this.projectiles = new ProjectileManager(this.scene);
     this.levels = new LevelManager();
     this.hud = new HUD();
+    this._accessibilitySettings = this._getAccessibilitySettings();
     this.hud.hideTutorialCallout();
     this.hud.setBossBarVisible(false);
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+    this.hud.setAccessibilitySettings(this._accessibilitySettings);
     this.starfield = new Starfield(this.scene);
     this._applySavedSensitivity();
     this._bindPauseControls();
@@ -294,12 +310,14 @@ export class Game {
     this._popups = [];
     this._muzzles = [];
     this._enemyProjectiles = [];
-    this._enemyProjectileGeometry = new THREE.SphereGeometry(3.2, 10, 10);
-    this._enemyProjectileMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6948,
-      transparent: true,
-      opacity: 0.92,
-    });
+    this._enemyTrashProjectileGeometries = [
+      new THREE.BoxGeometry(1.25, 0.95, 1.6),
+      new THREE.CylinderGeometry(0.45, 0.7, 1.45, 9),
+      new THREE.ConeGeometry(0.72, 1.75, 7),
+      new THREE.DodecahedronGeometry(0.92, 0),
+      new THREE.TorusGeometry(0.74, 0.24, 8, 14),
+      new THREE.SphereGeometry(0.92, 10, 10),
+    ];
     this._trashteroid = this._createTrashteroid();
 
     // Large decorative asteroid field around the player zone
@@ -330,6 +348,7 @@ export class Game {
     this.running = false;
     this.paused = true;
     this.boostActive = false;
+    this._cancelLevelEntryFade();
     this._clearScheduledReturnToLevelSelect();
     this.projectiles.clear();
     this.debris.clear();
@@ -373,6 +392,24 @@ export class Game {
     this.player.mouseSensitivity = savedSensitivity;
   }
 
+  _getAccessibilitySettings() {
+    try {
+      const rawValue = window.localStorage.getItem(ACCESSIBILITY_SETTINGS_STORAGE_KEY);
+      if (!rawValue) {
+        return { ...DEFAULT_ACCESSIBILITY_SETTINGS };
+      }
+
+      const parsed = JSON.parse(rawValue);
+      return {
+        reducedMotion: !!parsed?.reducedMotion,
+        reducedFlashing: !!parsed?.reducedFlashing,
+        musicVisualizer: !!parsed?.musicVisualizer,
+      };
+    } catch (error) {
+      return { ...DEFAULT_ACCESSIBILITY_SETTINGS };
+    }
+  }
+
   _bindPauseControls() {
     if (this.hud.pauseResumeBtn) {
       this.hud.pauseResumeBtn.addEventListener('click', this._handlePauseResumeClick);
@@ -403,18 +440,63 @@ export class Game {
 
   _refreshPauseMenu() {
     this.hud.setPauseSensitivity(this.player.mouseSensitivity);
-    this.hud.updatePauseStats(this.shotsFired, this.trashHits, this._getAverageSpeed());
+    this.hud.updatePauseStats(this.shotsFired, this.trashHits);
   }
 
-  _getAverageSpeed() {
-    if (this._averageSpeedTime <= 0) return 0;
-    return this._averageSpeedSum / this._averageSpeedTime;
+  _isReducedFlashing() {
+    return !!this._accessibilitySettings?.reducedFlashing;
   }
 
   _clearScheduledReturnToLevelSelect() {
     if (this._returnToLevelSelectTimeout == null) return;
     window.clearTimeout(this._returnToLevelSelectTimeout);
     this._returnToLevelSelectTimeout = null;
+  }
+
+  _cancelLevelEntryFade() {
+    if (this._levelEntryFadeHoldTimeout != null) {
+      window.clearTimeout(this._levelEntryFadeHoldTimeout);
+      this._levelEntryFadeHoldTimeout = null;
+    }
+    if (this._levelEntryFadeSafetyTimeout != null) {
+      window.clearTimeout(this._levelEntryFadeSafetyTimeout);
+      this._levelEntryFadeSafetyTimeout = null;
+    }
+  }
+
+  _showLevelEntryFade() {
+    if (!this._screenFadeEl) return;
+
+    this._cancelLevelEntryFade();
+    this._levelEntryFadeToken += 1;
+    const token = this._levelEntryFadeToken;
+
+    this._screenFadeEl.classList.remove('hidden');
+    this._screenFadeEl.classList.add('visible');
+
+    // Hold the blackout briefly so newly-entered level textures can upload.
+    this._levelEntryFadeHoldTimeout = window.setTimeout(() => {
+      this._levelEntryFadeHoldTimeout = null;
+      if (token !== this._levelEntryFadeToken) return;
+
+      requestAnimationFrame(() => {
+        if (token !== this._levelEntryFadeToken) return;
+
+        this._screenFadeEl.classList.remove('visible');
+
+        const finish = () => {
+          if (token !== this._levelEntryFadeToken) return;
+          if (this._levelEntryFadeSafetyTimeout != null) {
+            window.clearTimeout(this._levelEntryFadeSafetyTimeout);
+            this._levelEntryFadeSafetyTimeout = null;
+          }
+          this._screenFadeEl.classList.add('hidden');
+        };
+
+        this._screenFadeEl.addEventListener('transitionend', finish, { once: true });
+        this._levelEntryFadeSafetyTimeout = window.setTimeout(finish, LEVEL_ENTRY_FADE_MS + 100);
+      });
+    }, LEVEL_ENTRY_FADE_HOLD_MS);
   }
 
   _scheduleReturnToLevelSelect(delayMs = 2200, payload = {}) {
@@ -459,17 +541,22 @@ export class Game {
     group.name = 'Trashteroid';
     group.visible = false;
 
-    const shell = new THREE.Mesh(
+    const fallbackShell = new THREE.Mesh(
       new THREE.IcosahedronGeometry(52, 1),
       new THREE.MeshStandardMaterial({
-        color: 0x48505c,
+        color: 0x58616f,
         roughness: 0.96,
         metalness: 0.12,
         emissive: 0x10151d,
-        emissiveIntensity: 0.55,
+        emissiveIntensity: 0.42,
       })
     );
-    group.add(shell);
+    group.add(fallbackShell);
+
+    const modelRoot = new THREE.Group();
+    modelRoot.name = 'TrashteroidModel';
+    group.add(modelRoot);
+    this._loadTrashteroidModel(modelRoot, fallbackShell);
 
     const coreGlow = new THREE.Mesh(
       new THREE.SphereGeometry(30, 18, 18),
@@ -483,61 +570,65 @@ export class Game {
     );
     group.add(coreGlow);
 
-    const scrapGeometries = [
-      new THREE.BoxGeometry(18, 9, 13),
-      new THREE.BoxGeometry(12, 16, 10),
-      new THREE.CylinderGeometry(5, 7, 18, 8),
-      new THREE.ConeGeometry(7, 18, 6),
-      new THREE.TorusGeometry(8, 2.4, 8, 16),
+    const orbitDebris = [];
+    const debrisGeometries = [
+      new THREE.BoxGeometry(8, 5, 7),
+      new THREE.BoxGeometry(5, 7, 4),
+      new THREE.CylinderGeometry(2.4, 3.2, 7, 8),
+      new THREE.ConeGeometry(3.2, 8, 6),
+      new THREE.TorusGeometry(3.6, 1.0, 8, 12),
+      new THREE.DodecahedronGeometry(3.2, 0),
     ];
-    const scrapColors = [0x7d8b9b, 0x5c6975, 0x9b8e6c, 0x64788a, 0x6d635a];
 
-    for (let i = 0; i < 22; i++) {
-      const chunk = new THREE.Mesh(
-        scrapGeometries[i % scrapGeometries.length],
+    for (let i = 0; i < 26; i++) {
+      const mesh = new THREE.Mesh(
+        debrisGeometries[i % debrisGeometries.length],
         new THREE.MeshStandardMaterial({
-          color: scrapColors[i % scrapColors.length],
-          roughness: 0.88,
-          metalness: 0.18,
-          emissive: 0x0d1117,
-          emissiveIntensity: 0.22,
+          color: [0x665c4a, 0x5f6772, 0x6f726a, 0x5d6b57, 0x725a50][i % 5],
+          roughness: 0.9,
+          metalness: 0.15,
+          emissive: 0x111317,
+          emissiveIntensity: 0.2,
         })
       );
+      mesh.castShadow = true;
+      mesh.receiveShadow = false;
+      group.add(mesh);
 
-      _targetOffset.set(
-        Math.random() - 0.5,
-        Math.random() - 0.5,
-        Math.random() - 0.5
-      ).normalize();
-      chunk.position.copy(_targetOffset).multiplyScalar(44 + Math.random() * 20);
-      chunk.rotation.set(
-        Math.random() * Math.PI,
-        Math.random() * Math.PI,
-        Math.random() * Math.PI
-      );
-      chunk.scale.setScalar(0.72 + Math.random() * 0.85);
-      group.add(chunk);
+      _targetOffset
+        .set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)
+        .normalize();
+      const axisRef = Math.abs(_targetOffset.dot(_worldUp)) > 0.92
+        ? _bossOrbitA.set(1, 0, 0)
+        : _worldUp;
+
+      const tangentA = new THREE.Vector3().crossVectors(_targetOffset, axisRef).normalize();
+      const tangentB = new THREE.Vector3().crossVectors(_targetOffset, tangentA).normalize();
+
+      orbitDebris.push({
+        mesh,
+        tangentA,
+        tangentB,
+        radius: 86 + Math.random() * 58,
+        speed: 0.32 + Math.random() * 0.86,
+        phase: Math.random() * Math.PI * 2,
+        wobble: 0.3 + Math.random() * 0.7,
+        spin: new THREE.Vector3(
+          (Math.random() - 0.5) * 1.7,
+          (Math.random() - 0.5) * 1.7,
+          (Math.random() - 0.5) * 1.7
+        ),
+      });
     }
-
-    const hazardRing = new THREE.Mesh(
-      new THREE.TorusGeometry(76, 2.4, 10, 40),
-      new THREE.MeshBasicMaterial({
-        color: 0xff6e42,
-        transparent: true,
-        opacity: 0.16,
-        depthWrite: false,
-      })
-    );
-    hazardRing.rotation.set(Math.PI * 0.35, 0, Math.PI * 0.18);
-    group.add(hazardRing);
 
     this.scene.add(group);
 
     return {
       group,
-      shell,
+      shell: fallbackShell,
+      modelRoot,
       glow: coreGlow,
-      ring: hazardRing,
+      orbitDebris,
       anchor: new THREE.Vector3(),
       prevPosition: new THREE.Vector3(),
       velocity: new THREE.Vector3(),
@@ -550,6 +641,87 @@ export class Game {
       time: 0,
       shotCooldown: 0,
     };
+  }
+
+  _loadTrashteroidModel(targetRoot, fallbackShell) {
+    const loader = new GLTFLoader();
+    loader.load(
+      '/models/roid.glb',
+      (gltf) => {
+        const model = gltf.scene;
+
+        model.traverse((child) => {
+          if (!child.isMesh) return;
+          child.castShadow = true;
+          child.receiveShadow = true;
+
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          for (let i = 0; i < materials.length; i++) {
+            const material = materials[i];
+            if (!material) continue;
+            if ('roughness' in material) {
+              material.roughness = THREE.MathUtils.clamp((material.roughness ?? 0.7) + 0.16, 0, 1);
+            }
+            if ('metalness' in material) {
+              material.metalness = THREE.MathUtils.clamp((material.metalness ?? 0.1) + 0.08, 0, 1);
+            }
+            if ('emissive' in material && material.emissive) {
+              material.emissive.setHex(0x171b22);
+              material.emissiveIntensity = 0.24;
+            }
+          }
+        });
+
+        const bbox = new THREE.Box3().setFromObject(model);
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        bbox.getCenter(center);
+        bbox.getSize(size);
+        model.position.sub(center);
+
+        const maxAxis = Math.max(size.x, size.y, size.z, 0.001);
+        const desiredDiameter = 112;
+        const scale = desiredDiameter / maxAxis;
+        model.scale.setScalar(scale);
+
+        targetRoot.clear();
+        targetRoot.add(model);
+
+        if (fallbackShell?.parent) {
+          fallbackShell.parent.remove(fallbackShell);
+          fallbackShell.geometry?.dispose?.();
+          fallbackShell.material?.dispose?.();
+        }
+      },
+      undefined,
+      () => {
+        // Keep fallback shell if model fails to load.
+      }
+    );
+  }
+
+  _updateTrashteroidOrbitDebris(trashteroid, bossConfig, delta) {
+    const orbitDebris = trashteroid?.orbitDebris;
+    if (!orbitDebris?.length) return;
+
+    const orbitScale = bossConfig ? 1.2 : 0.92;
+    const wobbleScale = bossConfig ? 9 : 5;
+
+    for (let i = 0; i < orbitDebris.length; i++) {
+      const orbiter = orbitDebris[i];
+      const angle = orbiter.phase + trashteroid.time * orbiter.speed;
+      const localRadius = orbiter.radius * orbitScale + Math.sin(angle * (0.6 + orbiter.wobble)) * wobbleScale;
+
+      _targetOffset
+        .copy(orbiter.tangentA)
+        .multiplyScalar(Math.cos(angle) * localRadius)
+        .addScaledVector(orbiter.tangentB, Math.sin(angle) * localRadius);
+
+      orbiter.mesh.position.copy(_targetOffset);
+      orbiter.mesh.rotation.x += orbiter.spin.x * delta;
+      orbiter.mesh.rotation.y += orbiter.spin.y * delta;
+      orbiter.mesh.rotation.z += orbiter.spin.z * delta;
+    }
   }
 
   _resetPlayerState(resetPosition = false) {
@@ -587,6 +759,7 @@ export class Game {
     this._levelTimer = levelConfig.timer ?? 0;
     this._levelTimerRunning = this._levelTimer > 0 && !this._isTutorialActiveForCurrentLevel();
     this._trashDestroyedRequired = 0;
+    this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(fastSpeedDisplay);
 
@@ -595,8 +768,6 @@ export class Game {
       this.lives = 100;
       this.shotsFired = 0;
       this.trashHits = 0;
-      this._averageSpeedSum = 0;
-      this._averageSpeedTime = 0;
     }
 
     this.projectiles.clear();
@@ -614,6 +785,7 @@ export class Game {
     this.hud.updateTimer(this._levelTimer);
     this.hud.updateObjectives(this._getMissionObjectiveState(false).objectives);
     this._refreshPauseMenu();
+    this._showLevelEntryFade();
   }
 
   _configureTrashteroidForLevel(levelConfig) {
@@ -646,11 +818,11 @@ export class Game {
     trashteroid.group.visible = true;
 
     if (bossConfig) {
-      const BOSS_SCALE = 5;
-      trashteroid.group.scale.setScalar(BOSS_SCALE);
-      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * BOSS_SCALE;
-      trashteroid.collisionRadius = (bossConfig.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6)) * BOSS_SCALE;
-      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * BOSS_SCALE;
+      const bossScale = bossConfig.bossScale ?? 5;
+      trashteroid.group.scale.setScalar(bossScale);
+      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * bossScale;
+      trashteroid.collisionRadius = (bossConfig.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6)) * bossScale;
+      trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * bossScale;
       // Start the trashteroid already moving towards Earth
       _bossMoveDelta.set(-1200, -600, -3500).normalize();
       trashteroid.velocity.copy(_bossMoveDelta).multiplyScalar(
@@ -668,9 +840,8 @@ export class Game {
 
   _clearTrashteroidProjectiles() {
     for (let i = this._enemyProjectiles.length - 1; i >= 0; i--) {
-      this.scene.remove(this._enemyProjectiles[i].mesh);
+      this._despawnEnemyProjectile(i);
     }
-    this._enemyProjectiles.length = 0;
   }
 
   _despawnEnemyProjectile(index) {
@@ -678,37 +849,68 @@ export class Game {
     if (!projectile) return;
     this.scene.remove(projectile.mesh);
     projectile.mesh.traverse?.((child) => {
-      if (child.material && child.material !== this._enemyProjectileMaterial) {
-        child.material.dispose?.();
+      if (child.geometry) {
+        child.geometry.dispose?.();
+      }
+      if (child.material) {
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (let i = 0; i < materials.length; i++) {
+          materials[i]?.dispose?.();
+        }
       }
     });
     this._enemyProjectiles.splice(index, 1);
   }
 
   _spawnTrashteroidProjectile(origin, direction, speed, ttl) {
-    const core = new THREE.Mesh(this._enemyProjectileGeometry, this._enemyProjectileMaterial);
-    const glow = new THREE.Mesh(
-      this._enemyProjectileGeometry,
-      new THREE.MeshBasicMaterial({
-        color: 0xffbf73,
-        transparent: true,
-        opacity: 0.26,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
+    const geometryTemplate = this._enemyTrashProjectileGeometries[
+      Math.floor(Math.random() * this._enemyTrashProjectileGeometries.length)
+    ];
+    const geometry = geometryTemplate.clone();
+
+    const trashColors = [0x72654f, 0x4f5a67, 0x656870, 0x6b4f44, 0x5f6d5a, 0x7a7366];
+    const core = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: trashColors[Math.floor(Math.random() * trashColors.length)],
+        roughness: 0.88,
+        metalness: 0.18,
+        emissive: 0x140607,
+        emissiveIntensity: 0.36,
       })
     );
-    glow.scale.setScalar(1.8);
-    core.add(glow);
 
-    core.position.copy(origin);
-    core.scale.setScalar(0.95 + Math.random() * 0.35);
-    this.scene.add(core);
+    const outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry, 20),
+      new THREE.LineBasicMaterial({
+        color: 0xff3030,
+        transparent: true,
+        opacity: this._isReducedFlashing() ? 0.65 : 0.95,
+        depthTest: false,
+      })
+    );
+    outline.renderOrder = 4;
+    core.add(outline);
+
+    const projectileGroup = new THREE.Group();
+    projectileGroup.add(core);
+    projectileGroup.position.copy(origin);
+    const projectileScale = 2.2 + Math.random() * 2.2;
+    projectileGroup.scale.setScalar(projectileScale);
+    projectileGroup.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    this.scene.add(projectileGroup);
 
     this._enemyProjectiles.push({
-      mesh: core,
-      position: core.position,
-      prevPosition: core.position.clone(),
-      velocity: direction.clone().multiplyScalar(speed),
+      mesh: projectileGroup,
+      position: projectileGroup.position,
+      prevPosition: projectileGroup.position.clone(),
+      velocity: direction.clone().multiplyScalar(speed * (0.92 + Math.random() * 0.16)),
+      hitRadius: projectileScale * 0.82,
+      spin: new THREE.Vector3(
+        (Math.random() - 0.5) * 2.4,
+        (Math.random() - 0.5) * 2.4,
+        (Math.random() - 0.5) * 2.4
+      ),
       life: 0,
       ttl,
     });
@@ -718,9 +920,13 @@ export class Game {
     const trashteroid = this._trashteroid;
     if (!trashteroid?.active) return;
 
+    const projectileSpeed = Math.max(1, bossConfig.projectileSpeed ?? 1000);
+    const distanceToPlayer = trashteroid.group.position.distanceTo(this.player.mesh.position);
+    const leadTime = THREE.MathUtils.clamp((distanceToPlayer / projectileSpeed) * 0.95, 0.18, 1.18);
+
     _bossAim
       .copy(this.player.mesh.position)
-      .addScaledVector(this.player.velocity, 0.45)
+      .addScaledVector(this.player.velocity, leadTime)
       .sub(trashteroid.group.position);
 
     if (_bossAim.lengthSq() === 0) return;
@@ -734,21 +940,38 @@ export class Game {
     _bossUp.crossVectors(_bossRight, _bossAim).normalize();
 
     const surfaceOffset = trashteroid.surfaceOffset ?? TRASHTEROID_SURFACE_OFFSET;
-    const sideSpread = surfaceOffset * (22 / TRASHTEROID_SURFACE_OFFSET);
-    const upOffset = surfaceOffset * (8 / TRASHTEROID_SURFACE_OFFSET);
-    const sideOffsets = [-sideSpread, 0, sideSpread];
-    const dirSpreads = [-22, 0, 22]; // keep angular spread consistent regardless of scale
-    for (let i = 0; i < sideOffsets.length; i++) {
+    const burstCount = Math.max(3, bossConfig.projectileBurstCount ?? 5);
+    const lateralSpreadScale = bossConfig.projectileSpreadScale ?? 0.024;
+    const verticalSpreadScale = bossConfig.projectileVerticalSpreadScale ?? 0.014;
+    const aimErrorScale = bossConfig.projectileAimError ?? 0.014;
+
+    for (let i = 0; i < burstCount; i++) {
+      const ratio = burstCount === 1 ? 0 : (i / (burstCount - 1)) * 2 - 1;
+      _targetOffset
+        .set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)
+        .normalize();
+
+      if (_targetOffset.dot(_bossAim) < -0.12) {
+        _targetOffset.addScaledVector(_bossAim, 0.9).normalize();
+      }
+
       _bossMuzzle
         .copy(trashteroid.group.position)
-        .addScaledVector(_bossAim, surfaceOffset)
-        .addScaledVector(_bossRight, sideOffsets[i])
-        .addScaledVector(_bossUp, upOffset);
+        .addScaledVector(_targetOffset, surfaceOffset * (0.86 + Math.random() * 0.22));
 
-      const spreadDirection = _bossAim
+      _debrisAway
+        .copy(this.player.mesh.position)
+        .addScaledVector(this.player.velocity, leadTime)
+        .sub(_bossMuzzle);
+      if (_debrisAway.lengthSq() < 1e-5) {
+        _debrisAway.copy(_bossAim);
+      }
+      _debrisAway.normalize();
+
+      const spreadDirection = _debrisAway
         .clone()
-        .addScaledVector(_bossRight, dirSpreads[i] * 0.0015)
-        .addScaledVector(_bossUp, (Math.random() - 0.5) * 0.03)
+        .addScaledVector(_bossRight, ratio * lateralSpreadScale + (Math.random() - 0.5) * aimErrorScale)
+        .addScaledVector(_bossUp, (Math.random() - 0.5) * verticalSpreadScale)
         .normalize();
 
       this._spawnTrashteroidProjectile(
@@ -783,9 +1006,7 @@ export class Game {
     trashteroid.group.rotation.y += delta * 0.18;
     trashteroid.group.rotation.z += delta * 0.05;
 
-    if (trashteroid.ring) {
-      trashteroid.ring.rotation.z += delta * 0.22;
-    }
+    this._updateTrashteroidOrbitDebris(trashteroid, bossConfig, delta);
     if (trashteroid.glow) {
       const pulse = 1 + Math.sin(trashteroid.time * 2.8) * 0.08;
       trashteroid.glow.scale.setScalar(pulse);
@@ -836,7 +1057,7 @@ export class Game {
     trashteroid.shotCooldown -= delta;
     if (trashteroid.shotCooldown <= 0) {
       this._fireTrashteroidBurst(bossConfig);
-      trashteroid.shotCooldown = bossConfig.shotInterval;
+      trashteroid.shotCooldown = bossConfig.shotInterval * (0.8 + Math.random() * 0.35);
     }
 
     this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
@@ -851,8 +1072,14 @@ export class Game {
       projectile.life += delta;
       projectile.prevPosition.copy(projectile.mesh.position);
       projectile.mesh.position.addScaledVector(projectile.velocity, delta);
+      if (projectile.spin) {
+        projectile.mesh.rotation.x += projectile.spin.x * delta;
+        projectile.mesh.rotation.y += projectile.spin.y * delta;
+        projectile.mesh.rotation.z += projectile.spin.z * delta;
+      }
 
-      if (this._projectileHitsSphere(projectile, this.player.mesh.position, PLAYER_COLLISION_RADIUS + 0.45)) {
+      const projectileHitRadius = projectile.hitRadius ?? 1.2;
+      if (this._projectileHitsSphere(projectile, this.player.mesh.position, PLAYER_COLLISION_RADIUS + projectileHitRadius)) {
         this._spawnSparks(_closestPoint.clone(), {
           count: 18,
           speed: 20,
@@ -1082,6 +1309,18 @@ export class Game {
         label: `Destroy ${primary.trashRequired} pieces of trash`,
         current: this._trashDestroyedRequired,
         target: primary.trashRequired,
+        complete,
+        bonus: false,
+      });
+      primaryComplete = primaryComplete && complete;
+    }
+
+    if (primary.recycleRequired) {
+      const complete = this._recycleCollectedRequired >= primary.recycleRequired;
+      objectives.push({
+        label: `Collect ${primary.recycleRequired} recyclables`,
+        current: this._recycleCollectedRequired,
+        target: primary.recycleRequired,
         complete,
         bonus: false,
       });
@@ -1559,6 +1798,26 @@ export class Game {
     this.canvas.requestPointerLock();
   }
 
+  _exitToMenu() {
+    if (typeof this._onReturnToLevelSelect === 'function') {
+      this.paused = true;
+      this.boostActive = false;
+      this._pauseUnlockArmed = false;
+      this.hud.setPauseVisible(false);
+      this.input.releaseAll();
+      if (document.pointerLockElement) {
+        document.exitPointerLock();
+      }
+      this._onReturnToLevelSelect({
+        level: this.levels.current,
+        outcome: 'exit_menu',
+      });
+      return;
+    }
+
+    window.location.reload();
+  }
+
   _loop() {
     if (!this.running) return;
     requestAnimationFrame(() => this._loop());
@@ -1644,22 +1903,25 @@ export class Game {
     // Update subsystems
     this.player.update(delta);
     this.projectiles.update(delta);
-    this._averageSpeedSum += this.player.velocity.length() * rawDelta;
-    this._averageSpeedTime += rawDelta;
     const playerPos = this.player.mesh.position;
     const playerQuat = this.player.baseQuaternion;
     this.asteroidField.update(delta, playerPos);
     const spawnConfig = this.levels.getSpawnConfig();
-    this.debris.update(delta, spawnConfig, playerPos, playerQuat);
+    const hasBossLevel = !!this.levels.getCurrentConfig().boss;
+    if (!hasBossLevel) {
+      this.debris.update(delta, spawnConfig, playerPos, playerQuat);
+    }
     const asteroidColliders = this.asteroidField.getColliders();
-    this.debris.resolveAsteroidCollisions(asteroidColliders);
-    const specialSpawnConfig = this._isTutorialActiveForCurrentLevel()
-      ? { ...spawnConfig, progressPerSpawn: Math.max(24, (spawnConfig?.progressPerSpawn ?? 140) * 0.33) }
-      : spawnConfig;
-    this.specialDebris.update(delta, specialSpawnConfig, playerPos, playerQuat);
-    this.specialDebris.resolveAsteroidCollisions(asteroidColliders);
-    this.recycleDebris.update(delta, spawnConfig, playerPos, playerQuat);
-    this.recycleDebris.resolveAsteroidCollisions(asteroidColliders);
+    if (!hasBossLevel) {
+      this.debris.resolveAsteroidCollisions(asteroidColliders);
+      const specialSpawnConfig = this._isTutorialActiveForCurrentLevel()
+        ? { ...spawnConfig, progressPerSpawn: Math.max(24, (spawnConfig?.progressPerSpawn ?? 140) * 0.33) }
+        : spawnConfig;
+      this.specialDebris.update(delta, specialSpawnConfig, playerPos, playerQuat);
+      this.specialDebris.resolveAsteroidCollisions(asteroidColliders);
+      this.recycleDebris.update(delta, spawnConfig, playerPos, playerQuat);
+      this.recycleDebris.resolveAsteroidCollisions(asteroidColliders);
+    }
     this._updateTrashteroid(delta);
     this._resolveTrashteroidAsteroidCollisions(asteroidColliders, delta);
     this._updateTrashteroidProjectiles(delta);
@@ -1687,6 +1949,7 @@ export class Game {
     this._checkProjectileDebrisCollisions(this.recycleDebris, 'vaporizer');
     this._checkProjectileSpecialRewardCollisions();
     this._checkProjectileRecyclePenaltyCollisions();
+    this._checkProjectileTrashPenaltyCollisions();
 
     // Collision: trash vs player (hits / misses)
     this._checkDebrisPlayerCollisions(playerPos, playerQuat);
@@ -1700,6 +1963,17 @@ export class Game {
     this.hud.update(this.score, this.levels.current, this.lives);
     this.hud.updateBoostBar(this.boostCharge, this.boostActive);
     this.hud.updateSpeedometer(this.player.velocity.length());
+    const speedVisualizerLevel = THREE.MathUtils.clamp(
+      this.player.velocity.length() / toWorldSpeed(900),
+      0,
+      1
+    );
+    const shotVisualizerLevel = (fired + vaporizerFired) > 0 ? 0.85 : 0;
+    const boostVisualizerLevel = this.boostActive ? 0.95 : 0;
+    this.hud.updateMusicVisualizer(
+      Math.max(speedVisualizerLevel * 0.72, shotVisualizerLevel, boostVisualizerLevel),
+      rawDelta
+    );
     this._updateMissionObjectives(delta);
     this.input.resetPressed();
     this.renderer.render(this.scene, this.camera);
@@ -1750,13 +2024,15 @@ export class Game {
           const points = debrisList[j].points || 100;
           this.score += points;
           this.trashHits++;
-          this._trashDestroyedRequired++;
-          this._noteTutorialTrashDestroyed();
-          if (debrisManager === this.recycleDebris && projectiles[i].type === 'vaporizer') {
+          if (debrisManager === this.recycleDebris) {
+            this._recycleCollectedRequired++;
             this._noteTutorialRecycleDestroyed();
-          }
-          if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
-            this._trashDestroyedFast++;
+          } else {
+            this._trashDestroyedRequired++;
+            this._noteTutorialTrashDestroyed();
+            if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
+              this._trashDestroyedFast++;
+            }
           }
           this._refreshPauseMenu();
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
@@ -1807,13 +2083,35 @@ export class Game {
       for (let j = debrisList.length - 1; j >= 0; j--) {
         const hitRadius = debrisList[j].hitRadius || 1;
         if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
-          const penalty = debrisList[j].points || 2000;
+          const penalty = WRONG_BEAM_PENALTY;
           this.score = Math.max(0, this.score - penalty);
           this._refreshPauseMenu();
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
           this._spawnScorePopup(_closestPoint.clone(), -penalty, { color: '#ff3b30' });
           this.projectiles.remove(i);
           this.recycleDebris.remove(j);
+          break;
+        }
+      }
+    }
+  }
+
+  _checkProjectileTrashPenaltyCollisions() {
+    const projectiles = this.projectiles.getActive();
+    const debrisList = this.debris.getActive();
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      if (projectiles[i].type !== 'vaporizer') continue;
+      for (let j = debrisList.length - 1; j >= 0; j--) {
+        const hitRadius = debrisList[j].hitRadius || 1;
+        if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
+          const penalty = WRONG_BEAM_PENALTY;
+          this.score = Math.max(0, this.score - penalty);
+          this._refreshPauseMenu();
+          this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          this._spawnScorePopup(_closestPoint.clone(), -penalty, { color: '#ff3b30' });
+          this.projectiles.remove(i);
+          this.debris.remove(j);
           break;
         }
       }
@@ -1986,6 +2284,11 @@ export class Game {
 
     const mission = this.levels.getMissionConfig();
     const nextLevel = reqDone ? this.levels.getNextLevel() : null;
+
+    if (reqDone && nextLevel) {
+      unlockLevel(nextLevel);
+    }
+
     const title = el.querySelector('#level-complete-title');
     const sub = el.querySelector('#level-complete-subtitle');
     const bonuses = el.querySelector('#level-complete-bonuses');
@@ -2346,7 +2649,14 @@ export class Game {
   // Spawn a short-lived spark particle burst at world `pos`.
   _spawnSparks(pos, options = {}) {
     // Lightweight textured sparks; supports size/color interpolation.
-    const count = options.count || 24;
+    const reducedFlashing = this._isReducedFlashing();
+    const baseCount = options.count || 24;
+    const count = reducedFlashing
+      ? Math.max(6, Math.floor(baseCount * 0.45))
+      : baseCount;
+    const speedScale = reducedFlashing ? 0.7 : 1;
+    const baseSize = options.size || 0.9;
+    const size = reducedFlashing ? baseSize * 0.78 : baseSize;
     const positions = new Float32Array(count * 3);
     const velocities = new Array(count);
     for (let k = 0; k < count; k++) {
@@ -2354,28 +2664,62 @@ export class Game {
       positions[k * 3 + 1] = pos.y + (Math.random() - 0.5) * 0.2;
       positions[k * 3 + 2] = pos.z + (Math.random() - 0.5) * 0.2;
       const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.2), (Math.random() - 0.5)).normalize();
-      velocities[k] = dir.multiplyScalar((options.speed || 12) * (0.6 + Math.random() * 0.9));
+      velocities[k] = dir.multiplyScalar((options.speed || 12) * speedScale * (0.6 + Math.random() * 0.9));
     }
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ map: this._particleTexture, color: options.color || 0xffcc66, size: options.size || 0.9, sizeAttenuation: true, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending });
+    const mat = new THREE.PointsMaterial({
+      map: this._particleTexture,
+      color: options.color || 0xffcc66,
+      size,
+      sizeAttenuation: true,
+      depthWrite: false,
+      transparent: true,
+      blending: options.blending || (reducedFlashing ? THREE.NormalBlending : THREE.AdditiveBlending),
+    });
     const points = new THREE.Points(geom, mat);
     this._effectGroup.add(points);
 
-    this._sparks.push({ mesh: points, velocities, life: 0, ttl: options.ttl || 0.9, sizeStart: options.size || 0.9, sizeEnd: options.sizeEnd || 0.1, colorStart: new THREE.Color(options.color || 0xffcc66), colorEnd: new THREE.Color(options.colorEnd || 0x222222), type: 'spark' });
+    this._sparks.push({
+      mesh: points,
+      velocities,
+      life: 0,
+      ttl: options.ttl || 0.9,
+      sizeStart: size,
+      sizeEnd: reducedFlashing
+        ? Math.max(0.08, (options.sizeEnd || 0.1) * 0.75)
+        : (options.sizeEnd || 0.1),
+      colorStart: new THREE.Color(options.color || 0xffcc66),
+      colorEnd: new THREE.Color(options.colorEnd || 0x222222),
+      type: 'spark',
+    });
   }
 
   // Larger explosion effect for debris destruction
   _spawnExplosion(pos, options = {}) {
+    const reducedFlashing = this._isReducedFlashing();
     const baseCount = options.count || 220;
     const ttl = options.ttl || 1.6;
 
-    // Core flash — bright, short-lived
-    this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.12), speed: 25, size: 8, ttl: Math.max(0.2, ttl * 0.12), color: 0xffffff, colorEnd: 0xffcc88 });
+    if (!reducedFlashing) {
+      // Core flash — bright, short-lived
+      this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.12), speed: 25, size: 8, ttl: Math.max(0.2, ttl * 0.12), color: 0xffffff, colorEnd: 0xffcc88 });
+    } else {
+      // Reduced flashing mode swaps bright core flash for a gentler burst.
+      this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.08), speed: 16, size: 4, ttl: Math.max(0.24, ttl * 0.16), color: 0xe5b97c, colorEnd: 0x6a4a2a, blending: THREE.NormalBlending });
+    }
 
     // Embers — orange, additive, mid-lived
-    this._spawnSparks(pos.clone(), { count: Math.floor(baseCount * 0.6), speed: 75, size: 6, ttl: Math.max(0.8, ttl * 0.7), color: 0xffbb66, colorEnd: 0x442200 });
+    this._spawnSparks(pos.clone(), {
+      count: Math.floor(baseCount * (reducedFlashing ? 0.36 : 0.6)),
+      speed: reducedFlashing ? 42 : 75,
+      size: reducedFlashing ? 3.8 : 6,
+      ttl: Math.max(0.8, ttl * 0.7),
+      color: reducedFlashing ? 0xd6a062 : 0xffbb66,
+      colorEnd: 0x442200,
+      blending: reducedFlashing ? THREE.NormalBlending : THREE.AdditiveBlending,
+    });
 
     // Smoke — larger, darker, rises slowly
     const smokeCount = Math.floor(baseCount * 0.28);
@@ -2387,19 +2731,21 @@ export class Game {
       positions[k * 3 + 2] = pos.z + (Math.random() - 0.5) * 2.0;
       // omnidirectional smoke: emit in all directions (slower than embers)
       const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).normalize();
-      velocities[k] = dir.multiplyScalar(45 * (0.6 + Math.random() * 0.8));
+      velocities[k] = dir.multiplyScalar((reducedFlashing ? 28 : 45) * (0.6 + Math.random() * 0.8));
     }
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ map: this._particleTexture, color: 0x333333, size: 6.0, sizeAttenuation: true, depthWrite: false, transparent: true, opacity: 0.1, blending: THREE.NormalBlending });
+    const mat = new THREE.PointsMaterial({ map: this._particleTexture, color: 0x333333, size: reducedFlashing ? 5.0 : 6.0, sizeAttenuation: true, depthWrite: false, transparent: true, opacity: reducedFlashing ? 0.16 : 0.1, blending: THREE.NormalBlending });
     const points = new THREE.Points(geom, mat);
     this._effectGroup.add(points);
-    this._sparks.push({ mesh: points, velocities, life: 0, ttl: Math.max(1.6, ttl * 1.3), sizeStart: 6.0, sizeEnd: 12.0, colorStart: new THREE.Color(0x333333), colorEnd: new THREE.Color(0x111111), type: 'smoke' });
+    this._sparks.push({ mesh: points, velocities, life: 0, ttl: Math.max(1.6, ttl * 1.3), sizeStart: reducedFlashing ? 5.0 : 6.0, sizeEnd: reducedFlashing ? 9.0 : 12.0, colorStart: new THREE.Color(0x333333), colorEnd: new THREE.Color(0x111111), type: 'smoke' });
   }
 
   // Spawn a very short-lived muzzle particle burst in player-local space.
   _spawnMuzzleParticles(localPos, options = {}) {
-    const count = options.count || 48; // larger burst by default
+    const reducedFlashing = this._isReducedFlashing();
+    const baseCount = options.count || 48; // larger burst by default
+    const count = reducedFlashing ? Math.max(8, Math.floor(baseCount * 0.45)) : baseCount;
     const positions = new Float32Array(count * 3);
     const velocities = new Array(count);
 
@@ -2410,7 +2756,7 @@ export class Game {
 
       // local-space velocity biased forward (-Z)
       const dir = new THREE.Vector3((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, - (0.6 + Math.random() * 1.6));
-      velocities[k] = dir.multiplyScalar(18 * (0.6 + Math.random() * 0.8));
+      velocities[k] = dir.multiplyScalar((reducedFlashing ? 11 : 18) * (0.6 + Math.random() * 0.8));
     }
 
     const geom = new THREE.BufferGeometry();
@@ -2419,7 +2765,15 @@ export class Game {
     // Reuse the player's thrust sprite when available; otherwise use the shared particle texture.
     const spriteTex = this.player?._particlePoints?.material?.uniforms?.map?.value || this._particleTexture;
 
-    const mat = new THREE.PointsMaterial({ map: spriteTex, color: 0xffffff, size: options.size || 0.4, sizeAttenuation: true, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending });
+    const mat = new THREE.PointsMaterial({
+      map: spriteTex,
+      color: reducedFlashing ? 0xe9f5ff : 0xffffff,
+      size: reducedFlashing ? (options.size || 0.4) * 0.72 : (options.size || 0.4),
+      sizeAttenuation: true,
+      depthWrite: false,
+      transparent: true,
+      blending: reducedFlashing ? THREE.NormalBlending : THREE.AdditiveBlending,
+    });
     const points = new THREE.Points(geom, mat);
 
     // Parent to player so the burst stays attached while the ship moves

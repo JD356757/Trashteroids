@@ -80,6 +80,7 @@ function launchGame({ levelId, tutorialMode }) {
 
 function showCrawl(onComplete) {
   const crawl = document.getElementById('mission-crawl');
+  const stageEl = document.getElementById('crawl-stage');
   const textEl = document.getElementById('crawl-text');
   const continueBtn = document.getElementById('crawl-continue');
   if (!crawl || !textEl) { onComplete(); return; }
@@ -116,16 +117,58 @@ function showCrawl(onComplete) {
   crawl.classList.remove('hidden');
   crawl.setAttribute('aria-hidden', 'false');
   textEl.textContent = '';
+  if (stageEl) stageEl.scrollTop = 0;
   if (continueBtn) continueBtn.classList.add('hidden');
 
   let done = false;
   let i = 0;
   let timeout = null;
+  let smoothScrollRaf = null;
+  let smoothScrollTarget = 0;
+  let smoothScrollCurrent = stageEl ? stageEl.scrollTop : 0;
+
+  const stopSmoothScroll = () => {
+    if (!smoothScrollRaf) return;
+    cancelAnimationFrame(smoothScrollRaf);
+    smoothScrollRaf = null;
+  };
+
+  const runSmoothScroll = () => {
+    if (!stageEl) {
+      smoothScrollRaf = null;
+      return;
+    }
+    const maxScroll = Math.max(stageEl.scrollHeight - stageEl.clientHeight, 0);
+    smoothScrollTarget = Math.min(smoothScrollTarget, maxScroll);
+    smoothScrollCurrent += (smoothScrollTarget - smoothScrollCurrent) * 0.18;
+
+    if (Math.abs(smoothScrollTarget - smoothScrollCurrent) < 0.35) {
+      smoothScrollCurrent = smoothScrollTarget;
+    }
+
+    stageEl.scrollTop = smoothScrollCurrent;
+
+    if (Math.abs(smoothScrollTarget - smoothScrollCurrent) < 0.35) {
+      smoothScrollRaf = null;
+      return;
+    }
+
+    smoothScrollRaf = requestAnimationFrame(runSmoothScroll);
+  };
+
+  const queueScrollToBottom = () => {
+    if (!stageEl) return;
+    smoothScrollTarget = Math.max(stageEl.scrollHeight - stageEl.clientHeight, 0);
+    if (smoothScrollRaf) return;
+    smoothScrollCurrent = stageEl.scrollTop;
+    smoothScrollRaf = requestAnimationFrame(runSmoothScroll);
+  };
 
   const finish = () => {
     if (done) return;
     done = true;
     if (timeout) clearTimeout(timeout);
+    stopSmoothScroll();
     window.removeEventListener('keydown', keySkip);
     if (continueBtn) continueBtn.removeEventListener('click', finish);
     crawl.classList.add('hidden');
@@ -144,11 +187,12 @@ function showCrawl(onComplete) {
     }
     const ch = CRAWL_TEXT[i++];
     textEl.textContent += ch;
-    const delay = ch === '.' ? 420
-                : (ch === '!' || ch === '?') ? 380
-                : ch === ',' ? 110
-                : ch === '\n' ? 160
-                : 28;
+    queueScrollToBottom();
+    const delay = ch === '.' ? 620
+                : (ch === '!' || ch === '?') ? 560
+                : ch === ',' ? 170
+                : ch === '\n' ? 240
+                : 44;
     timeout = setTimeout(type, delay);
   };
 
