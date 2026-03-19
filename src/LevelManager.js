@@ -7,7 +7,7 @@ export const LEVEL_CONFIGS = {
   1: {
     label: 'LEVEL 1 - 15,000 miles to trashteroid',
     briefingTagline: 'To get closer to the trashteroid, you must clear out the giant trash fields surrounding Earth. Destroy enough of the pollution before time runs out.',
-    timer: 180,
+    timer: 120,
     mission: {
       successTitle: 'SECTOR 1 CLEARED',
       successSubtitle: 'Required objective complete.',
@@ -18,7 +18,7 @@ export const LEVEL_CONFIGS = {
       bonus: {
         fastTrashRequired: 3,
         fastSpeedDisplay: 200,
-        shieldThreshold: 90,
+        specialRequired: 5,
       },
     },
     spawn: {
@@ -42,9 +42,9 @@ export const LEVEL_CONFIGS = {
     },
   },
   2: {
-    label: 'LEVEL 2 - 15,000 miles to trashteroid',
+    label: 'LEVEL 2 - 5,000 miles to trashteroid',
     briefingTagline: 'Get to the trashteroid. Clear the path by destroying more trash.',
-    timer: 240,
+    timer: 180,
     trashteroidScale: 70,
     mission: {
       successTitle: 'SECTOR 2 CLEARED',
@@ -58,7 +58,7 @@ export const LEVEL_CONFIGS = {
       bonus: {
         fastTrashRequired: 4,
         fastSpeedDisplay: 250,
-        shieldThreshold: 90,
+        specialRequired: 15,
       },
     },
     spawn: {
@@ -95,6 +95,8 @@ export const LEVEL_CONFIGS = {
         fastTrashRequired: 0,
         fastSpeedDisplay: 300,
         shieldThreshold: 90,
+        bonusTrashRequired: 100,
+        bonusRecycleRequired: 20,
       },
     },
     boss: {

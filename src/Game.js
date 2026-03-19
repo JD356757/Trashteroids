@@ -46,6 +46,10 @@ const _worldUp = new THREE.Vector3(0, 1, 0);
 const _muzzleBurstLocal = new THREE.Vector3(0, 0.2, -1.5);
 const _debrisAway = new THREE.Vector3();
 const _popupScreenPos = new THREE.Vector3();
+const _cutsceneCamPos = new THREE.Vector3();
+const _cutsceneCamTarget = new THREE.Vector3();
+const _cutsceneDir = new THREE.Vector3();
+const _cutsceneSurfacePoint = new THREE.Vector3();
 const PLAYER_COLLISION_RADIUS = 1.1;
 const ASTEROID_BOUNCE = 0.35;
 const ASTEROID_SURFACE_FRICTION = 0.92;
@@ -67,15 +71,15 @@ const DISPLAY_DISTANCE_SCALE = 0.45;
 const TUTORIAL_TIME_SCALE = 1.0;
 const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
 const TUTORIAL_TIMED_BEAT_DURATION = 7;
-const TRASHTEROID_APPROACH_DISTANCE_WORLD = 5000 / DISPLAY_DISTANCE_SCALE;
+const TRASHTEROID_APPROACH_DISTANCE_WORLD = 20000 / DISPLAY_DISTANCE_SCALE;
 const TRASHTEROID_HIT_RADIUS = 55;
-const TRASHTEROID_COLLISION_RADIUS_SCALE = 1;
+const TRASHTEROID_COLLISION_RADIUS_SCALE = 0.7;
 const TRASHTEROID_SURFACE_OFFSET = 58;
 const TRASHTEROID_BOSS_SPEED_MULTIPLIER = 0.7;
 const TRASHTEROID_SCORE_PER_HIT = 35;
 const TRASHTEROID_SCORE_ON_DESTROY = 5000;
-const TRASHTEROID_INVULNERABLE_DURATION = 30;
-const TRASHTEROID_VULNERABLE_DURATION = 30;
+const TRASHTEROID_INVULNERABLE_DURATION = 1;
+const TRASHTEROID_VULNERABLE_DURATION = 1;
 const WRONG_BEAM_PENALTY = 2000;
 const PLAYER_SHOOT_HITSCAN = true;
 const BOOM_SFX_URL = '/boom.m4a';
@@ -94,6 +98,16 @@ const LEVEL_COMPLETE_CONTROL_LOCK_SECONDS = 2.6;
 const DEATH_SEQUENCE_DURATION = 1.25;
 const DEATH_OVERLAY_REVEAL_DELAY = 0.36;
 const GAME_OVER_RETURN_DELAY_MS = 2600;
+
+// Trashteroid destruction cutscene timing
+const CUTSCENE_CAMERA_FLY_IN = 1.6;
+const CUTSCENE_SURFACE_EXPLOSIONS = 2.8;
+const CUTSCENE_BIG_BANG_DELAY = 0.35;
+const CUTSCENE_DEBRIS_LINGER = 2.4;
+const CUTSCENE_SURFACE_EXPLOSION_INTERVAL = 0.12;
+const CUTSCENE_DEBRIS_COUNT = 12;
+const CUTSCENE_SPECIAL_DEBRIS_COUNT = 4;
+const CUTSCENE_DEBRIS_EXPLODE_DELAY = 1.6;
 const TUTORIAL_BEATS = {
   move: {
     title: 'Move & Look',
@@ -199,6 +213,7 @@ export class Game {
     this._startLevel = startLevel;
     this._tutorialMode = this._startLevel === 1 && !!options.tutorialMode;
     this._onReturnToLevelSelect = options.onReturnToLevelSelect ?? null;
+    this._onHideLevelSelect = options.onHideLevelSelect ?? null;
     this._returnToLevelSelectTimeout = null;
     this._screenFadeEl = document.getElementById('screen-fade');
     this._levelEntryFadeToken = 0;
@@ -209,8 +224,10 @@ export class Game {
     this._levelCompleteFadeSafetyTimeout = null;
     this._deathSequenceActive = false;
     this._gameOverActive = false;
+    this._timedOut = false;
     this._deathSequenceTimer = 0;
     this._deathOverlayShown = false;
+    this._destructionCutscene = null;
     this._timeScale = 1;
     this._tutorial = this._createTutorialState();
     this._handleLevelNextClick = () => this._onLevelNext();
@@ -229,6 +246,7 @@ export class Game {
     this._trashDestroyedRequired = 0;
     this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
+    this._specialTrashDestroyed = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(200);
     this._levelComplete = false;
     this._levelCompleteControlLockRemaining = 0;
@@ -430,6 +448,8 @@ export class Game {
     this.paused = true;
     this.boostActive = false;
     this._gameOverActive = false;
+    this._timedOut = false;
+    this._destructionCutscene = null;
     this._cancelLevelEntryFade();
     this._cancelLevelCompleteTransition();
     this._clearScheduledReturnToLevelSelect();
@@ -515,6 +535,29 @@ export class Game {
     if (this.hud.pauseSensitivityInput) {
       this.hud.pauseSensitivityInput.addEventListener('input', this._handlePauseSensitivityInput);
     }
+
+    this._pauseMasterVolumeInput = document.getElementById('pause-master-volume');
+    this._pauseMasterVolumeValue = document.getElementById('pause-master-volume-value');
+    this._pauseMusicVolumeInput = document.getElementById('pause-music-volume');
+    this._pauseMusicVolumeValue = document.getElementById('pause-music-volume-value');
+    this._pauseSfxVolumeInput = document.getElementById('pause-sfx-volume');
+    this._pauseSfxVolumeValue = document.getElementById('pause-sfx-volume-value');
+
+    this._pauseMasterVolumeInput?.addEventListener('input', () => {
+      const v = Number(this._pauseMasterVolumeInput.value);
+      soundtrackManager.setMasterVolume(v / 100);
+      if (this._pauseMasterVolumeValue) this._pauseMasterVolumeValue.textContent = `${v}`;
+    });
+    this._pauseMusicVolumeInput?.addEventListener('input', () => {
+      const v = Number(this._pauseMusicVolumeInput.value);
+      soundtrackManager.setMusicVolume(v / 100);
+      if (this._pauseMusicVolumeValue) this._pauseMusicVolumeValue.textContent = `${v}`;
+    });
+    this._pauseSfxVolumeInput?.addEventListener('input', () => {
+      const v = Number(this._pauseSfxVolumeInput.value);
+      soundtrackManager.setSfxVolume(v / 100);
+      if (this._pauseSfxVolumeValue) this._pauseSfxVolumeValue.textContent = `${v}`;
+    });
   }
 
   _setMouseSensitivity(value, persist = false) {
@@ -534,6 +577,20 @@ export class Game {
   _refreshPauseMenu() {
     this.hud.setPauseSensitivity(this.player.mouseSensitivity);
     this.hud.updatePauseStats(this.shotsFired, this.trashHits);
+
+    const vols = soundtrackManager.getVolumeSettings();
+    if (this._pauseMasterVolumeInput) {
+      this._pauseMasterVolumeInput.value = `${vols.master}`;
+      if (this._pauseMasterVolumeValue) this._pauseMasterVolumeValue.textContent = `${vols.master}`;
+    }
+    if (this._pauseMusicVolumeInput) {
+      this._pauseMusicVolumeInput.value = `${vols.music}`;
+      if (this._pauseMusicVolumeValue) this._pauseMusicVolumeValue.textContent = `${vols.music}`;
+    }
+    if (this._pauseSfxVolumeInput) {
+      this._pauseSfxVolumeInput.value = `${vols.sfx}`;
+      if (this._pauseSfxVolumeValue) this._pauseSfxVolumeValue.textContent = `${vols.sfx}`;
+    }
   }
 
   _isReducedFlashing() {
@@ -668,7 +725,7 @@ export class Game {
 
     const volumeJitter = (Math.random() - 0.5) * BOOM_SFX_VOLUME_VARIATION;
     const pitchJitter = (Math.random() - 0.5) * BOOM_SFX_PITCH_VARIATION;
-    selected.volume = THREE.MathUtils.clamp(BOOM_SFX_VOLUME + volumeJitter, 0, 1);
+    selected.volume = THREE.MathUtils.clamp((BOOM_SFX_VOLUME + volumeJitter) * soundtrackManager.getSfxMultiplier(), 0, 1);
     selected.playbackRate = THREE.MathUtils.clamp(1 + pitchJitter, 0.85, 1.2);
     selected.currentTime = 0;
     selected.play().catch(() => {
@@ -874,8 +931,10 @@ export class Game {
     this.boostActive = false;
     this._deathSequenceActive = false;
     this._gameOverActive = false;
+    this._timedOut = false;
     this._deathSequenceTimer = 0;
     this._deathOverlayShown = false;
+    this._destructionCutscene = null;
     this.player.mesh.visible = true;
 
     if (resetPosition) {
@@ -908,6 +967,7 @@ export class Game {
     this._trashDestroyedRequired = 0;
     this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
+    this._specialTrashDestroyed = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(fastSpeedDisplay);
     this._levelCompleteControlLockRemaining = 0;
     this._pendingLevelCompleteSummary = null;
@@ -953,7 +1013,6 @@ export class Game {
       trashteroid.active = false;
       trashteroid.group.visible = false;
       this.hud.setBossBarVisible(false);
-      this.hud.setBossAttackDebug('IDLE', false);
       this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       return;
     }
@@ -976,7 +1035,6 @@ export class Game {
     trashteroid.streamMuzzleDir = null;
     trashteroid.group.visible = true;
     this._disableTrashteroidFrustumCulling();
-    this.hud.setBossAttackDebug('IDLE', !!bossConfig);
 
     if (bossConfig) {
       trashteroid.group.scale.setScalar(configuredScale);
@@ -1250,12 +1308,10 @@ export class Game {
         trashteroid.attackType = 'ring';
         trashteroid.attackStepsRemaining = 2;
         trashteroid.streamMuzzleDir = null;
-        this.hud.setBossAttackDebug('SMOKE RING', true);
       } else {
         trashteroid.attackType = 'stream';
         trashteroid.attackStepsRemaining = 29;
         trashteroid.streamMuzzleDir = null;
-        this.hud.setBossAttackDebug('RAPID STREAM', true);
       }
     }
 
@@ -1269,7 +1325,6 @@ export class Game {
         trashteroid.shotCooldown = 0.28 * cooldownScale;
       } else {
         trashteroid.attackType = null;
-        this.hud.setBossAttackDebug('COOLDOWN', true);
         trashteroid.shotCooldown = bossConfig.shotInterval * 3 * (1.55 + Math.random() * 0.35) * cooldownScale;
       }
       return;
@@ -1288,7 +1343,6 @@ export class Game {
       trashteroid.shotCooldown = 0.065 * cooldownScale;
     } else {
       trashteroid.attackType = null;
-      this.hud.setBossAttackDebug('COOLDOWN', true);
       trashteroid.shotCooldown = bossConfig.shotInterval * 3 * (0.85 + Math.random() * 0.28) * cooldownScale;
     }
   }
@@ -1344,7 +1398,7 @@ export class Game {
     trashteroid.group.position.addScaledVector(trashteroid.velocity, delta);
 
     if (!trashteroid.vulnerabilityState) {
-      trashteroid.vulnerabilityState = 'shielded';
+      trashteroid.vulnerabilityState = 'vulnerable';
       trashteroid.vulnerabilityTimer = TRASHTEROID_INVULNERABLE_DURATION;
     }
 
@@ -1606,13 +1660,10 @@ export class Game {
       if (trashteroid.health > 0) continue;
 
       this.score += TRASHTEROID_SCORE_ON_DESTROY;
-      this._spawnExplosion(trashteroid.group.position.clone(), { count: 360, ttl: 2.5 });
-      trashteroid.active = false;
-      trashteroid.group.visible = false;
       this.hud.setBossBarVisible(false);
       this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       this._clearTrashteroidProjectiles();
-      this._finalizeLevel(true);
+      this._startDestructionCutscene();
       break;
     }
   }
@@ -1653,7 +1704,7 @@ export class Game {
     const y = onScreen ? projectedY : centerY - Math.cos(angle) * radiusY;
     const indicatorAngle = onScreen ? 0 : angle;
     const centerDist = targetPos.distanceTo(this.player.mesh.position);
-    const surfaceDistWorld = Math.max(0, centerDist - (this._trashteroid?.collisionRadius ?? 0));
+    const surfaceDistWorld = Math.max(0, centerDist - (this._trashteroid?.hitRadius ?? 0));
     const distance = toDisplayDistance(surfaceDistWorld);
 
     this.hud.updateBossIndicator(true, x, y, indicatorAngle, Math.max(1, distance), 'TRASHTEROID');
@@ -1666,6 +1717,13 @@ export class Game {
       return;
     }
 
+    // Range alert is only meaningful when the objective is to destroy the trashteroid.
+    const primary = this.levels.getCurrentConfig()?.mission?.primary ?? {};
+    if (!primary.destroyTrashteroid) {
+      this.hud.setTrashteroidRangeAlert(false);
+      return;
+    }
+
     const playerPos = this.player?.mesh?.position;
     if (!playerPos) {
       this.hud.setTrashteroidRangeAlert(false);
@@ -1674,7 +1732,7 @@ export class Game {
 
     const maxShotDistance = Math.max(1, this.projectiles?.maxDist ?? 2500);
     const targetDistanceToCenter = playerPos.distanceTo(trashteroid.group.position);
-    const targetSurfaceDistance = Math.max(0, targetDistanceToCenter - (trashteroid.collisionRadius ?? 0));
+    const targetSurfaceDistance = Math.max(0, targetDistanceToCenter - (trashteroid.hitRadius ?? 0));
     const outOfRange = targetSurfaceDistance > (maxShotDistance + PROJECTILE_HIT_PADDING);
     this.hud.setTrashteroidRangeAlert(outOfRange, 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.');
   }
@@ -1772,6 +1830,39 @@ export class Game {
         target: 1,
         complete: finalizeShield ? shieldBonus : false,
         failed: finalizeShield ? !shieldBonus : shieldFailed,
+        bonus: true,
+      });
+    }
+
+    const bonusTrashReq = bonus.bonusTrashRequired ?? 0;
+    const bonusRecycleReq = bonus.bonusRecycleRequired ?? 0;
+    if (bonusTrashReq > 0 && bonusRecycleReq > 0) {
+      const trashDone = this._trashDestroyedRequired >= bonusTrashReq;
+      const recycleDone = this._recycleCollectedRequired >= bonusRecycleReq;
+      objectives.push({
+        label: `Destroy ${bonusTrashReq} trash`,
+        current: this._trashDestroyedRequired,
+        target: bonusTrashReq,
+        complete: trashDone,
+        bonus: true,
+      });
+      objectives.push({
+        label: `Collect ${bonusRecycleReq} recyclables`,
+        current: this._recycleCollectedRequired,
+        target: bonusRecycleReq,
+        complete: recycleDone,
+        bonus: true,
+      });
+    }
+
+    const specialRequired = bonus.specialRequired;
+    if (specialRequired > 0) {
+      const specialDone = this._specialTrashDestroyed >= specialRequired;
+      objectives.push({
+        label: `Destroy ${specialRequired} special pieces of trash`,
+        current: this._specialTrashDestroyed,
+        target: specialRequired,
+        complete: specialDone,
         bonus: true,
       });
     }
@@ -2306,6 +2397,12 @@ export class Game {
 
     const rawDelta = this.clock.getDelta();
 
+    if (this._destructionCutscene) {
+      this._updateDestructionCutscene(rawDelta);
+      this.input.resetPressed();
+      return;
+    }
+
     if (this._deathSequenceActive) {
       this._updateDeathSequence(rawDelta);
       this.input.resetPressed();
@@ -2557,8 +2654,11 @@ export class Game {
     const state = this._getMissionObjectiveState(false);
     this.hud.updateObjectives(state.objectives);
 
-    if (state.primaryComplete || this._levelTimer <= 0) {
-      this._finalizeLevel(state.primaryComplete);
+    if (state.primaryComplete) {
+      this._finalizeLevel(true);
+    } else if (this._levelTimer <= 0) {
+      this._timedOut = true;
+      this._startGameOverSequence();
     }
   }
 
@@ -2720,6 +2820,7 @@ export class Game {
       this.score += bestHit.points;
       this.trashHits++;
       this._trashDestroyedRequired++;
+      this._specialTrashDestroyed++;
       this._noteTutorialTrashDestroyed();
       this._noteTutorialSpecialDestroyed();
       if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
@@ -2798,13 +2899,10 @@ export class Game {
       if (trashteroid.health > 0) return true;
 
       this.score += TRASHTEROID_SCORE_ON_DESTROY;
-      this._spawnExplosion(trashteroid.group.position.clone(), { count: 360, ttl: 2.5 });
-      trashteroid.active = false;
-      trashteroid.group.visible = false;
       this.hud.setBossBarVisible(false);
       this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       this._clearTrashteroidProjectiles();
-      this._finalizeLevel(true);
+      this._startDestructionCutscene();
       return true;
     }
 
@@ -2867,6 +2965,7 @@ export class Game {
           this.score += points;
           this.trashHits++;
           this._trashDestroyedRequired++;
+          this._specialTrashDestroyed++;
           this._noteTutorialTrashDestroyed();
           this._noteTutorialSpecialDestroyed();
           if (this.player.velocity.length() >= this._bonusFastThresholdWorld) {
@@ -3151,7 +3250,7 @@ export class Game {
 
     if (title) {
       title.textContent = reqDone
-        ? (mission?.successTitle ?? `SECTOR ${this.levels.current} CLEARED`)
+        ? (mission?.successTitle ?? `LEVEL ${this.levels.current} CLEARED`)
         : 'TIME UP';
     }
 
@@ -3188,7 +3287,7 @@ export class Game {
       this._scoreCounterRaf = requestAnimationFrame(tick);
     }
 
-    if (nextBtn) nextBtn.textContent = 'SECTOR MAP';
+    if (nextBtn) nextBtn.textContent = 'CONTINUE';
     if (retryBtn) retryBtn.textContent = 'RETRY';
 
     el.classList.remove('hidden', 'level-complete-reveal');
@@ -3210,6 +3309,7 @@ export class Game {
   _onLevelRetry() {
     this._cancelLevelCompleteTransition();
     this._levelCompleteEl?.classList.add('hidden');
+    this._pauseUnlockArmed = false;
     this._enterLevel(this.levels.current, {
       resetPlayerPosition: true,
       resetRunStats: true,
@@ -3243,12 +3343,362 @@ export class Game {
       this.crosshair.classList.add('hidden');
     }
     if (!overlayAlreadyShown) {
-      this.hud.showMessage('GAME OVER', {
+      this.hud.showMessage(this._timedOut ? "TIME'S UP" : 'GAME OVER', {
         animateIn: true,
         keepDamageVignette: true,
+        onPlayAgain: () => {
+          document.activeElement?.blur();
+          this.hud.overlay?.classList.add('hidden');
+          if (typeof this._onHideLevelSelect === 'function') {
+            this._onHideLevelSelect();
+          }
+          this._pauseUnlockArmed = false;
+          this._enterLevel(this.levels.current, {
+            resetPlayerPosition: true,
+            resetRunStats: true,
+          });
+          if (this.crosshair) this.crosshair.classList.remove('hidden');
+          this.canvas.requestPointerLock();
+        },
       });
     }
-    this._scheduleReturnToLevelSelect(GAME_OVER_RETURN_DELAY_MS, { outcome: 'game_over' });
+    // No auto-return — player uses the PLAY AGAIN button.
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+   *  Trashteroid destruction cutscene
+   * ════════════════════════════════════════════════════════════════════════ */
+
+  _startDestructionCutscene() {
+    const t = this._trashteroid;
+    if (!t) return;
+
+    // Freeze player & hide UI
+    this.boostActive = false;
+    this._pauseUnlockArmed = false;
+    this.input.releaseAll();
+    this.player.velocity.set(0, 0, 0);
+
+    // Hide boss UI
+    this.hud.setBossBarVisible(false);
+    this.hud.updateBossIndicator(false, 0, 0, 0, 0);
+
+    // Store camera start for lerp
+    const camStartPos = this.camera.position.clone();
+    const camStartLook = _camLookTarget.clone();
+
+    // Compute a cinematic camera position: offset to the side & above the trashteroid
+    const bossPos = t.group.position.clone();
+    const toPlayer = this.player.mesh.position.clone().sub(bossPos).normalize();
+    // Camera goes to ~3.5x collision radius away, offset up and to the right
+    const viewDist = (t.collisionRadius || 60) * 3.5;
+    const camRight = new THREE.Vector3().crossVectors(toPlayer, _worldUp).normalize();
+    const camEndPos = bossPos.clone()
+      .addScaledVector(toPlayer, viewDist * 0.7)
+      .addScaledVector(camRight, viewDist * 0.4)
+      .addScaledVector(_worldUp, viewDist * 0.35);
+
+    const surfaceRadius = t.collisionRadius || t.hitRadius || 55;
+    const scaleRef = t.group.scale.x || 1; // configured scale for sizing explosions
+
+    // Compute orbit basis from the fly-in end position
+    const orbitOffset = camEndPos.clone().sub(bossPos);
+    // Use XZ-plane distance for the orbit radius (Y handled separately)
+    const orbitDist = Math.sqrt(orbitOffset.x * orbitOffset.x + orbitOffset.z * orbitOffset.z);
+    const orbitAngle0 = Math.atan2(orbitOffset.z, orbitOffset.x);
+    const orbitY = camEndPos.y;
+
+    this._destructionCutscene = {
+      phase: 'camera-fly-in',
+      elapsed: 0,
+      phaseTime: 0,
+      camStartPos,
+      camStartLook,
+      camEndPos,
+      bossPos,
+      surfaceRadius,
+      scaleRef,
+      orbitDist,
+      orbitAngle0,
+      orbitY,
+      surfaceExplosionTimer: 0,
+      bigBangFired: false,
+      debrisSpawned: false,
+      debrisExploded: false,
+      debrisPositions: [],
+    };
+
+    // Stop the trashteroid from moving/attacking but keep it visible
+    t.active = false;
+
+    this._playBoomSfx();
+  }
+
+  _updateDestructionCutscene(rawDelta) {
+    const dt = Math.max(0, rawDelta);
+    const cs = this._destructionCutscene;
+    if (!cs) return;
+
+    cs.elapsed += dt;
+    cs.phaseTime += dt;
+
+    const t = this._trashteroid;
+    const bossPos = cs.bossPos;
+
+    // Keep rendering the world (particles, starfield, background)
+    soundtrackManager.setBoosting(false);
+    soundtrackManager.setThrusting(false);
+
+    // Update subsystems so particles & asteroids keep moving visually
+    this._updateEffects(dt);
+    this._updateBackground(dt);
+    this.starfield.update(dt, this.camera);
+    this.asteroidField.update(dt, this.player.mesh.position);
+
+    // Slowly rotate the trashteroid for dramatic effect
+    if (t && t.group.visible) {
+      t.group.rotation.y += 0.15 * dt;
+      t.group.rotation.x += 0.05 * dt;
+    }
+
+    // ── Phase: Camera fly-in ──
+    if (cs.phase === 'camera-fly-in') {
+      const progress = Math.min(cs.phaseTime / CUTSCENE_CAMERA_FLY_IN, 1);
+      // Smooth ease-in-out
+      const ease = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+      this.camera.position.lerpVectors(cs.camStartPos, cs.camEndPos, ease);
+      _cutsceneCamTarget.copy(bossPos);
+      this.camera.lookAt(_cutsceneCamTarget);
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 45, 1 - Math.exp(-2 * dt));
+      this.camera.updateProjectionMatrix();
+
+      if (progress >= 1) {
+        cs.phase = 'surface-explosions';
+        cs.phaseTime = 0;
+        cs.surfaceExplosionTimer = 0;
+      }
+    }
+
+    // ── Phase: Surface explosions ──
+    else if (cs.phase === 'surface-explosions') {
+      // Camera gently orbits, continuing from fly-in end angle
+      const orbitAngle = cs.orbitAngle0 + cs.phaseTime * 0.3;
+      this.camera.position.set(
+        bossPos.x + Math.cos(orbitAngle) * cs.orbitDist,
+        cs.orbitY + Math.sin(cs.phaseTime * 0.5) * cs.orbitDist * 0.04,
+        bossPos.z + Math.sin(orbitAngle) * cs.orbitDist
+      );
+      this.camera.lookAt(bossPos);
+
+      // Spawn surface explosions at random points on the surface
+      cs.surfaceExplosionTimer += dt;
+      while (cs.surfaceExplosionTimer >= CUTSCENE_SURFACE_EXPLOSION_INTERVAL) {
+        cs.surfaceExplosionTimer -= CUTSCENE_SURFACE_EXPLOSION_INTERVAL;
+        // Random point on sphere surface
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        _cutsceneSurfacePoint.set(
+          Math.sin(phi) * Math.cos(theta),
+          Math.sin(phi) * Math.sin(theta),
+          Math.cos(phi)
+        ).multiplyScalar(cs.surfaceRadius * 0.95).add(bossPos);
+
+        const explosionSize = 0.4 + Math.random() * 0.6;
+        this._spawnExplosion(_cutsceneSurfacePoint.clone(), {
+          count: Math.floor(300 * explosionSize),
+          ttl: 1.0 + Math.random() * 0.8,
+          sizeScale: cs.scaleRef * 1.8 * explosionSize,
+          velocityScale: cs.scaleRef * 1.2 * explosionSize,
+          smokeSizeMultiplier: 0.3,
+        });
+
+        // Occasional boom SFX
+        if (Math.random() < 0.35) {
+          this._playBoomSfx();
+        }
+      }
+
+      // Shake the trashteroid increasingly
+      if (t && t.group.visible) {
+        const shakeIntensity = cs.phaseTime / CUTSCENE_SURFACE_EXPLOSIONS;
+        const shakeAmount = shakeIntensity * shakeIntensity * cs.scaleRef * 0.6;
+        t.group.position.set(
+          bossPos.x + (Math.random() - 0.5) * shakeAmount,
+          bossPos.y + (Math.random() - 0.5) * shakeAmount,
+          bossPos.z + (Math.random() - 0.5) * shakeAmount
+        );
+      }
+
+      if (cs.phaseTime >= CUTSCENE_SURFACE_EXPLOSIONS) {
+        cs.phase = 'big-bang';
+        cs.phaseTime = 0;
+        // Snap position back
+        if (t) t.group.position.copy(bossPos);
+      }
+    }
+
+    // ── Phase: Big bang ──
+    else if (cs.phase === 'big-bang') {
+      this.camera.lookAt(bossPos);
+
+      if (!cs.bigBangFired && cs.phaseTime >= CUTSCENE_BIG_BANG_DELAY) {
+        cs.bigBangFired = true;
+
+        // Massive explosion
+        this._spawnExplosion(bossPos.clone(), {
+          count: 500,
+          ttl: 3.0,
+          sizeScale: cs.scaleRef * 4.5,
+          velocityScale: cs.scaleRef * 6,
+          smokeSizeMultiplier: 0.2,
+        });
+
+        this._playBoomSfx();
+        // Queue a second boom slightly delayed for a double-crack effect
+        setTimeout(() => this._playBoomSfx(), 150);
+
+        // Hide the trashteroid
+        if (t) {
+          t.group.visible = false;
+        }
+
+        // Clear existing debris from the boss fight so slots are free
+        this.debris.clear();
+        this.specialDebris.clear();
+        this.recycleDebris.clear();
+
+        // Spawn debris flying outward
+        cs.debrisPositions = [];
+        let _dbgSpawned = 0;
+        let _dbgFailed = 0;
+        for (let i = 0; i < CUTSCENE_DEBRIS_COUNT; i++) {
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          _cutsceneDir.set(
+            Math.sin(phi) * Math.cos(theta),
+            Math.sin(phi) * Math.sin(theta),
+            Math.cos(phi)
+          );
+          const spawnPt = bossPos.clone().addScaledVector(_cutsceneDir, cs.surfaceRadius * 0.3);
+          const speed = (60 + Math.random() * 80) * cs.scaleRef;
+          const ok = this.debris.spawnDirected(spawnPt, _cutsceneDir.clone(), speed, {
+            scaleMultiplier: cs.scaleRef * (1.5 + Math.random() * 1.5),
+          });
+          if (ok) _dbgSpawned++; else _dbgFailed++;
+          cs.debrisPositions.push(spawnPt.clone().addScaledVector(_cutsceneDir, speed * 0.8));
+        }
+        let _dbgSpecialSpawned = 0;
+        let _dbgSpecialFailed = 0;
+        for (let i = 0; i < CUTSCENE_SPECIAL_DEBRIS_COUNT; i++) {
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          _cutsceneDir.set(
+            Math.sin(phi) * Math.cos(theta),
+            Math.sin(phi) * Math.sin(theta),
+            Math.cos(phi)
+          );
+          const spawnPt = bossPos.clone().addScaledVector(_cutsceneDir, cs.surfaceRadius * 0.3);
+          const speed = (50 + Math.random() * 70) * cs.scaleRef;
+          const ok2 = this.specialDebris.spawnDirected(spawnPt, _cutsceneDir.clone(), speed, {
+            scaleMultiplier: cs.scaleRef * (1.2 + Math.random()),
+          });
+          if (ok2) _dbgSpecialSpawned++; else _dbgSpecialFailed++;
+          cs.debrisPositions.push(spawnPt.clone().addScaledVector(_cutsceneDir, speed * 0.8));
+        }
+
+        console.log('[CUTSCENE] debris spawned:', _dbgSpawned, 'failed:', _dbgFailed,
+          '| special spawned:', _dbgSpecialSpawned, 'failed:', _dbgSpecialFailed,
+          '| debris.active:', this.debris.getActive().length,
+          '| specialDebris.active:', this.specialDebris.getActive().length,
+          '| bossPos:', bossPos.toArray(),
+          '| surfaceRadius:', cs.surfaceRadius, '| scaleRef:', cs.scaleRef);
+
+        cs.debrisSpawned = true;
+        cs.phase = 'debris-burst';
+        cs.phaseTime = 0;
+      }
+    }
+
+    // ── Phase: Debris burst (debris flies outward then explodes) ──
+    if (cs.phase === 'debris-burst') {
+      // Camera continues gentle orbit around the explosion center
+      const orbitAngle = cs.orbitAngle0 + (cs.elapsed - CUTSCENE_CAMERA_FLY_IN) * 0.25;
+      this.camera.position.set(
+        bossPos.x + Math.cos(orbitAngle) * cs.orbitDist,
+        cs.orbitY,
+        bossPos.z + Math.sin(orbitAngle) * cs.orbitDist
+      );
+      this.camera.lookAt(bossPos);
+
+      // Update debris so they keep flying — use bossPos as anchor so
+      // the despawn-distance check doesn't cull them instantly
+      const spawnConfig = this.levels.getSpawnConfig();
+      const cutsceneConfig = Object.assign({}, spawnConfig, {
+        despawnDistance: cs.surfaceRadius * 4,
+        recycleBehindDistance: cs.surfaceRadius * 4,
+      });
+      const playerQuat = this.player.baseQuaternion;
+      this.debris.update(dt, cutsceneConfig, bossPos, playerQuat);
+      this.specialDebris.update(dt, cutsceneConfig, bossPos, playerQuat);
+
+      // After delay, explode all remaining debris
+      if (!cs.debrisExploded && cs.phaseTime >= CUTSCENE_DEBRIS_EXPLODE_DELAY) {
+        cs.debrisExploded = true;
+
+        // Explode each debris piece
+        const activeDebris = this.debris.getActive();
+        for (let i = activeDebris.length - 1; i >= 0; i--) {
+          this._spawnExplosion(activeDebris[i].position.clone(), {
+            count: 400,
+            ttl: 1.6,
+            sizeScale: cs.scaleRef * 2,
+            velocityScale: cs.scaleRef * 1.5,
+            smokeSizeMultiplier: 0.3,
+          });
+        }
+        const activeSpecial = this.specialDebris.getActive();
+        for (let i = activeSpecial.length - 1; i >= 0; i--) {
+          const pos = activeSpecial[i].mesh ? activeSpecial[i].mesh.position.clone() : activeSpecial[i].position.clone();
+          this._spawnExplosion(pos, {
+            count: 500,
+            ttl: 1.8,
+            sizeScale: cs.scaleRef * 2.5,
+            velocityScale: cs.scaleRef * 1.75,
+            smokeSizeMultiplier: 0.4,
+          });
+        }
+
+        this.debris.clear();
+        this.specialDebris.clear();
+        this._playBoomSfx();
+      }
+
+      if (cs.phaseTime >= CUTSCENE_DEBRIS_LINGER) {
+        cs.phase = 'done';
+        cs.phaseTime = 0;
+      }
+    }
+
+    // ── Phase: Done — hand off to level complete ──
+    else if (cs.phase === 'done') {
+      if (!cs.finalized) {
+        cs.finalized = true;
+        this._finalizeLevel(true);
+        // Show summary after a short pause so explosion can settle
+        this._levelCompleteControlLockRemaining = 2.5;
+      }
+      // Hold camera in place; tick down the lock and show summary when ready
+      this._updatePendingLevelComplete(dt);
+      if (this._levelComplete && !this._pendingLevelCompleteSummary) {
+        // Summary screen shown — cutscene is over
+        this._destructionCutscene = null;
+      }
+    }
+
+    this.renderer.render(this.scene, this.camera);
   }
 
   _startGameOverSequence() {
@@ -3308,9 +3758,23 @@ export class Game {
     const revealThreshold = Math.max(0, DEATH_SEQUENCE_DURATION - DEATH_OVERLAY_REVEAL_DELAY);
     if (!this._deathOverlayShown && this._deathSequenceTimer <= revealThreshold) {
       this._deathOverlayShown = true;
-      this.hud.showMessage('GAME OVER', {
+      this.hud.showMessage(this._timedOut ? "TIME'S UP" : 'GAME OVER', {
         animateIn: true,
         keepDamageVignette: true,
+        onPlayAgain: () => {
+          document.activeElement?.blur();
+          this.hud.overlay?.classList.add('hidden');
+          if (typeof this._onHideLevelSelect === 'function') {
+            this._onHideLevelSelect();
+          }
+          this._pauseUnlockArmed = false;
+          this._enterLevel(this.levels.current, {
+            resetPlayerPosition: true,
+            resetRunStats: true,
+          });
+          if (this.crosshair) this.crosshair.classList.remove('hidden');
+          this.canvas.requestPointerLock();
+        },
       });
     }
 

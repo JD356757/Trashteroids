@@ -22,9 +22,9 @@ const DEFAULT_ACCESSIBILITY_SETTINGS = {
 };
 
 const LEVEL_DATA = [
-  { id: 1, label: 'LEVEL 1', sub: '15,000 mi — Debris Field', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
-  { id: 2, label: 'LEVEL 2', sub: '15,000 mi — Junk Belt',   color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
-  { id: 3, label: 'LEVEL 3', sub: '1 mi — BOSS',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
+  { id: 1, label: 'LEVEL 1', sub: '15,000 mi from trashteroid', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
+  { id: 2, label: 'LEVEL 2', sub: '5,000 mi from trashteroid',   color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
+  { id: 3, label: 'LEVEL 3', sub: '1 mi from trashteroid — BOSS FIGHT',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
 ];
 
 function formatTrashLabel(count) {
@@ -229,6 +229,12 @@ export class LevelSelect {
     this._settingsReducedMotion = document.getElementById('level-select-reduced-motion');
     this._settingsReducedFlashing = document.getElementById('level-select-reduced-flashing');
     this._settingsMusicVisualizer = document.getElementById('level-select-music-visualizer');
+    this._settingsMasterVolume = document.getElementById('level-select-master-volume');
+    this._settingsMasterVolumeValue = document.getElementById('level-select-master-volume-value');
+    this._settingsMusicVolume = document.getElementById('level-select-music-volume');
+    this._settingsMusicVolumeValue = document.getElementById('level-select-music-volume-value');
+    this._settingsSfxVolume = document.getElementById('level-select-sfx-volume');
+    this._settingsSfxVolumeValue = document.getElementById('level-select-sfx-volume-value');
     this._musicVisualizer = document.getElementById('music-visualizer');
     this._musicVisualizerBars = this._musicVisualizer
       ? Array.from(this._musicVisualizer.querySelectorAll('.visualizer-bar'))
@@ -252,6 +258,9 @@ export class LevelSelect {
     this._settingsReducedMotion?.addEventListener('change', this._onSettingsInput);
     this._settingsReducedFlashing?.addEventListener('change', this._onSettingsInput);
     this._settingsMusicVisualizer?.addEventListener('change', this._onSettingsInput);
+    this._settingsMasterVolume?.addEventListener('input', this._onSettingsInput);
+    this._settingsMusicVolume?.addEventListener('input', this._onSettingsInput);
+    this._settingsSfxVolume?.addEventListener('input', this._onSettingsInput);
 
     this._syncSettingsControls();
     this._applyAccessibilityPreview();
@@ -280,7 +289,7 @@ export class LevelSelect {
     this._orbitAngle = 0;
     this._hidePopup();
     if (this._briefingTutorialToggle) {
-      this._briefingTutorialToggle.checked = false;
+      this._briefingTutorialToggle.checked = true;
     }
     if (this._settingsBtn) {
       this._settingsBtn.classList.remove('hidden');
@@ -576,6 +585,20 @@ export class LevelSelect {
     if (this._settingsMusicVisualizer) {
       this._settingsMusicVisualizer.checked = this._accessibilitySettings.musicVisualizer;
     }
+
+    const vols = soundtrackManager.getVolumeSettings();
+    if (this._settingsMasterVolume) {
+      this._settingsMasterVolume.value = `${vols.master}`;
+      if (this._settingsMasterVolumeValue) this._settingsMasterVolumeValue.textContent = `${vols.master}`;
+    }
+    if (this._settingsMusicVolume) {
+      this._settingsMusicVolume.value = `${vols.music}`;
+      if (this._settingsMusicVolumeValue) this._settingsMusicVolumeValue.textContent = `${vols.music}`;
+    }
+    if (this._settingsSfxVolume) {
+      this._settingsSfxVolume.value = `${vols.sfx}`;
+      if (this._settingsSfxVolumeValue) this._settingsSfxVolumeValue.textContent = `${vols.sfx}`;
+    }
   }
 
   _applyAccessibilityPreview() {
@@ -680,6 +703,22 @@ export class LevelSelect {
       soundtrackManager.start();
     }
     this._applyAccessibilityPreview();
+
+    if (this._settingsMasterVolume) {
+      const v = Number(this._settingsMasterVolume.value);
+      soundtrackManager.setMasterVolume(v / 100);
+      if (this._settingsMasterVolumeValue) this._settingsMasterVolumeValue.textContent = `${v}`;
+    }
+    if (this._settingsMusicVolume) {
+      const v = Number(this._settingsMusicVolume.value);
+      soundtrackManager.setMusicVolume(v / 100);
+      if (this._settingsMusicVolumeValue) this._settingsMusicVolumeValue.textContent = `${v}`;
+    }
+    if (this._settingsSfxVolume) {
+      const v = Number(this._settingsSfxVolume.value);
+      soundtrackManager.setSfxVolume(v / 100);
+      if (this._settingsSfxVolumeValue) this._settingsSfxVolumeValue.textContent = `${v}`;
+    }
   }
 
   /* ── popup ── */
@@ -731,7 +770,7 @@ export class LevelSelect {
       this._briefingOptions.classList.toggle('hidden', id !== 1);
     }
     if (this._briefingTutorialToggle) {
-      this._briefingTutorialToggle.checked = false;
+      this._briefingTutorialToggle.checked = true;
     }
 
     this._briefingEl.classList.remove('hidden');
@@ -846,24 +885,26 @@ export class LevelSelect {
   }
 
   _makeStarsSprite(text) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 96;
-    const ctx = canvas.getContext('2d');
-    ctx.font = 'bold 42px "Orbitron", sans-serif';
-    ctx.fillStyle = '#ffe799';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = '#ffe799';
-    ctx.shadowBlur = 14;
-    ctx.fillText(text, 128, 50);
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 112;
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 64px "Orbitron", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Thin outline
+  ctx.strokeStyle = '#c8a800';
+  ctx.lineWidth = 1.2;
+  // Fill
+  ctx.fillStyle = '#ffe799';
+  ctx.fillText(text, 160, 58);
 
-    const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
-    const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(3.2, 1.0, 1);
-    return sprite;
-  }
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(4.0, 1.2, 1);
+  return sprite;
+}
 
   _getLevelStars(levelId) {
     return this._levelStars?.[String(levelId)] ?? 0;
