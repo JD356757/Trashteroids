@@ -70,6 +70,7 @@ function launchGame({ levelId, tutorialMode }) {
   game = new Game(canvas, levelId, {
     tutorialMode,
     onReturnToLevelSelect: (payload) => {
+      const outcome = payload?.outcome ?? null;
       const focusLevel = payload?.level ?? null;
       runScreenFade(() => {
         game?.dispose?.();
@@ -80,7 +81,13 @@ function launchGame({ levelId, tutorialMode }) {
         crosshair.classList.add('hidden');
         overlay.classList.add('hidden');
         introScene.showBackground();
-        levelSelect.show({ focusLevel });
+        // After a game-over (especially on boss), return to map without forcing
+        // a selected-level popup so the level-select flow resets cleanly.
+        if (outcome === 'game_over') {
+          levelSelect.show();
+        } else {
+          levelSelect.show({ focusLevel });
+        }
       });
     },
   });

@@ -176,6 +176,9 @@ function toDisplayDistance(worldDistance) {
 }
 
 const EARTH_BACKGROUND_OFFSET = new THREE.Vector3(-1200, -600, -3500);
+const EARTH_ROTATION_X = Math.PI/10;
+const EARTH_ROTATION_Y =  - Math.PI / 3;
+const EARTH_ROTATION_Z = 0;
 // Keep the sun well separated from Earth in view direction (>= 120 degrees).
 const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, 3600);
 
@@ -3909,7 +3912,7 @@ export class Game {
         camPos.y + EARTH_BACKGROUND_OFFSET.y,
         camPos.z + EARTH_BACKGROUND_OFFSET.z
       );
-      // Earth does not rotate
+      this.planet.rotation.set(EARTH_ROTATION_X, EARTH_ROTATION_Y, EARTH_ROTATION_Z);
     }
   }
 
@@ -3924,6 +3927,7 @@ export class Game {
     const planetGeo = new THREE.SphereGeometry(1600, 64, 64);
     const planetMat = new THREE.MeshBasicMaterial({
       map: diffuse,
+      color: 0x8ea7b9,
       fog: false,
       depthWrite: false,
       depthTest: true,
@@ -3932,6 +3936,7 @@ export class Game {
     this.planet.frustumCulled = false;
     this.planet.renderOrder = -1000;
     this.planet.position.copy(EARTH_BACKGROUND_OFFSET);
+    this.planet.rotation.set(EARTH_ROTATION_X, EARTH_ROTATION_Y, EARTH_ROTATION_Z);
     this.scene.add(this.planet);
 
     this.cloudMesh = null;

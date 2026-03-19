@@ -26,7 +26,8 @@ export class Starfield {
     });
 
     this.points = new THREE.Points(geometry, material);
-    this.points.renderOrder = -1;
+    // Render stars before the planet so the planet always occludes them.
+    this.points.renderOrder = -2000;
     scene.add(this.points);
   }
 
