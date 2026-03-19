@@ -115,10 +115,20 @@ export class IntroScene {
 
   _buildBackdrop() {
     const stars = new Float32Array(1800 * 3);
+    // Camera starts at (0, 1.5, 16). Reject any star closer than 20 units to
+    // prevent near-camera stars from rendering large and moving fast.
+    const camX = 0, camY = 1.5, camZ = 16;
+    const minDist2 = 20 * 20;
     for (let i = 0; i < 1800; i++) {
-      stars[i * 3 + 0] = (Math.random() - 0.5) * 160;
-      stars[i * 3 + 1] = (Math.random() - 0.5) * 100;
-      stars[i * 3 + 2] = (Math.random() - 0.5) * 160;
+      let x, y, z;
+      do {
+        x = (Math.random() - 0.5) * 160;
+        y = (Math.random() - 0.5) * 100;
+        z = (Math.random() - 0.5) * 160;
+      } while ((x - camX) ** 2 + (y - camY) ** 2 + (z - camZ) ** 2 < minDist2);
+      stars[i * 3 + 0] = x;
+      stars[i * 3 + 1] = y;
+      stars[i * 3 + 2] = z;
     }
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute('position', new THREE.BufferAttribute(stars, 3));

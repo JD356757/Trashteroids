@@ -8,7 +8,30 @@ const startBtn = document.getElementById('start-btn');
 const canvas = document.getElementById('game-canvas');
 const crosshair = document.getElementById('crosshair');
 const screenFade = document.getElementById('screen-fade');
+const winScreen = document.getElementById('win-screen');
+const winMenuBtn = document.getElementById('win-screen-menu-btn');
 const SCREEN_FADE_MS = 420;
+
+function showWinScreen() {
+  if (!winScreen) return;
+  winScreen.classList.remove('hidden');
+  winScreen.setAttribute('aria-hidden', 'false');
+}
+
+function hideWinScreen() {
+  if (!winScreen) return;
+  winScreen.classList.add('hidden');
+  winScreen.setAttribute('aria-hidden', 'true');
+}
+
+winMenuBtn?.addEventListener('click', () => {
+  runScreenFade(() => {
+    hideWinScreen();
+    overlay.classList.add('hidden');
+    introScene.showBackground();
+    levelSelect.show();
+  });
+});
 
 let game = null;
 const introScene = new IntroScene(canvas);
@@ -80,6 +103,12 @@ function launchGame({ levelId, tutorialMode }) {
         }
         crosshair.classList.add('hidden');
         overlay.classList.add('hidden');
+        // Level 3 completed → show the You Win screen instead of level select.
+        if (focusLevel === 3 && outcome === 'complete') {
+          introScene.showBackground();
+          showWinScreen();
+          return;
+        }
         introScene.showBackground();
         // After a game-over (especially on boss), return to map without forcing
         // a selected-level popup so the level-select flow resets cleanly.
@@ -90,6 +119,7 @@ function launchGame({ levelId, tutorialMode }) {
         }
       });
     },
+    onHideLevelSelect: () => levelSelect.hide(),
   });
   game.start();
 }
@@ -104,20 +134,20 @@ function showCrawl(onComplete) {
   const CRAWL_TEXT = 
     'THE YEAR IS 2162.\n\n' +
     'FOR OVER A CENTURY, HUMANITY CELEBRATED\n' +
-    'THE "GREAT CLEANSING"—\n' +
+    'THE "GREAT CLEANSING": \n' +
     'A REVOLUTIONARY WASTE DISPOSAL PROGRAM\n' +
     'THAT LAUNCHED EARTH\'S GARBAGE\n' +
-    'INTO ORBIT VIA MASSIVE RAIL CANNONS.\n\n' +
+    'INTO ORBIT VIA MASSIVE CANNONS.\n\n' +
     'CITIES GLEAMED.\n' +
     'OCEANS CLEARED.\n' +
     'WE THOUGHT WE SOLVED THE TRASH PROBLEM FOREVER.\n\n' +
     'WE WERE CATASTROPHICALLY WRONG.\n\n' +
-    'TWO WEEKS AGO, THE INTERNATIONAL SPACY AGENCY DETECTED\n' +
+    'LAST NIGHT, THE INTERNATIONAL SPACY AGENCY DETECTED\n' +
     'A MOON-SIZED ANOMALY HURTLING TOWARD EARTH:\n' +
     'THE TRASHTEROID.\n\n' +
     'A COLOSSAL BODY OF COMPRESSED WASTE,\n' +
     'A VIOLENT PROJECTILE BORN FROM OUR OWN FILTH.\n\n' +
-    'ESTIMATED IMPACT: 13 DAYS.\n\n' +
+    'ESTIMATED IMPACT: 14 HOURS.\n\n' +
     'THE RESULTING EXTINCTION-LEVEL EVENT\n' +
     'WILL POISON THE ATMOSPHERE AND RENDER\n' +
     'OUR HOME UNINHABITABLE FOR CENTURIES.\n\n' +
@@ -230,6 +260,7 @@ function showLevelSelect() {
 }
 
 startBtn.addEventListener('click', () => {
+  if (game) return; // Ignore if the button is reused as PLAY AGAIN during a game
   soundtrackManager.start();
   overlay.classList.add('hidden');
   showCrawl(() => {

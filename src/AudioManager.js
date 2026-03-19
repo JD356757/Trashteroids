@@ -11,6 +11,17 @@ const AMBIENCE_THRUST_RELEASE_FADE_MS = 320;
 const BOOST_VOLUME = 0.62;
 const BOOST_FADE_OUT_MS = 500;
 const BOOST_FADE_IN_MS = 120;
+const VOLUME_STORAGE_KEY = 'trashteroid_volumes';
+
+function _loadVolumes() {
+  try {
+    const raw = window.localStorage.getItem(VOLUME_STORAGE_KEY);
+    if (!raw) return { master: 100, music: 100, sfx: 100 };
+    const p = JSON.parse(raw);
+    const clamp = (v) => Math.max(0, Math.min(100, Number.isFinite(+v) ? Math.round(+v) : 100));
+    return { master: clamp(p.master), music: clamp(p.music), sfx: clamp(p.sfx) };
+  } catch { return { master: 100, music: 100, sfx: 100 }; }
+}
 
 class SoundtrackManager {
   constructor() {
@@ -55,6 +66,14 @@ class SoundtrackManager {
     this._bandRangeKey = '';
     this._peakFollower = 0.72;
     this._playing = false;
+
+    const vols = _loadVolumes();
+    this._masterVolume = vols.master / 100;
+    this._musicVolume = vols.music / 100;
+    this._sfxVolume = vols.sfx / 100;
+    this._musicMultiplier = this._masterVolume * this._musicVolume;
+    this._sfxMultiplier = this._masterVolume * this._sfxVolume;
+    this._audioEl.volume = MAIN_MENU_VOLUME * this._musicMultiplier;
   }
 
   _clamp(value, min, max) {
@@ -270,7 +289,7 @@ class SoundtrackManager {
       return;
     }
 
-    this._fadeAudioElementVolume(primary, primary.volume, AMBIENCE_IN_LEVEL_VOLUME, 650, '_ambientFadeRaf');
+    this._fadeAudioElementVolume(primary, primary.volume, AMBIENCE_IN_LEVEL_VOLUME * this._musicMultiplier, 650, '_ambientFadeRaf');
     this._scheduleAmbientCrossfade();
   }
 
@@ -298,8 +317,8 @@ class SoundtrackManager {
       const elapsed = performance.now() - startTime;
       const t = this._clamp(elapsed / overlapMs, 0, 1);
       const eased = 1 - Math.pow(1 - t, 3);
-      from.volume = AMBIENCE_IN_LEVEL_VOLUME * (1 - eased);
-      to.volume = AMBIENCE_IN_LEVEL_VOLUME * eased;
+      from.volume = AMBIENCE_IN_LEVEL_VOLUME * this._musicMultiplier * (1 - eased);
+      to.volume = AMBIENCE_IN_LEVEL_VOLUME * this._musicMultiplier * eased;
 
       if (t < 1) {
         this._ambientFadeRaf = requestAnimationFrame(step);
@@ -309,7 +328,7 @@ class SoundtrackManager {
       from.pause();
       from.currentTime = 0;
       from.volume = 0;
-      to.volume = AMBIENCE_IN_LEVEL_VOLUME;
+      to.volume = AMBIENCE_IN_LEVEL_VOLUME * this._musicMultiplier;
       this._ambientPrimaryIndex = 1 - this._ambientPrimaryIndex;
       this._ambientFadeRaf = null;
       this._scheduleAmbientCrossfade();
@@ -334,7 +353,7 @@ class SoundtrackManager {
   setInLevel(inLevel) {
     this._inLevel = !!inLevel;
 
-    const targetMainVolume = this._inLevel ? MAIN_IN_LEVEL_VOLUME : MAIN_MENU_VOLUME;
+    const targetMainVolume = (this._inLevel ? MAIN_IN_LEVEL_VOLUME : MAIN_MENU_VOLUME) * this._musicMultiplier;
     this._fadeAudioElementVolume(this._audioEl, this._audioEl.volume, targetMainVolume, 700, '_mainFadeRaf');
 
     if (this._inLevel && this._thrusting) {
@@ -367,7 +386,7 @@ class SoundtrackManager {
       this._boostEl.play().catch(() => {
         // Ignore autoplay/gesture restrictions; it will retry next boost frame.
       });
-      this._fadeBoost(BOOST_VOLUME, BOOST_FADE_IN_MS);
+      this._fadeBoost(BOOST_VOLUME * this._musicMultiplier, BOOST_FADE_IN_MS);
       return;
     }
 
@@ -376,6 +395,62 @@ class SoundtrackManager {
       this._boostEl.pause();
       this._boostEl.currentTime = 0;
     });
+  }
+
+  _reapplyMusicVolume() {
+    const m = this._musicMultiplier;
+    this._cancelAnimationFrame('_mainFadeRaf');
+    this._audioEl.volume = (this._inLevel ? MAIN_IN_LEVEL_VOLUME : MAIN_MENU_VOLUME) * m;
+    for (const el of this._ambientEls) {
+      if (!el.paused) el.volume = AMBIENCE_IN_LEVEL_VOLUME * m;
+    }
+    if (this._boosting) {
+      this._cancelAnimationFrame('_boostFadeRaf');
+      this._boostEl.volume = BOOST_VOLUME * m;
+    }
+  }
+
+  setMasterVolume(v) {
+    this._masterVolume = Math.max(0, Math.min(1, v));
+    this._musicMultiplier = this._masterVolume * this._musicVolume;
+    this._sfxMultiplier = this._masterVolume * this._sfxVolume;
+    this._reapplyMusicVolume();
+    this._persistVolumes();
+  }
+
+  setMusicVolume(v) {
+    this._musicVolume = Math.max(0, Math.min(1, v));
+    this._musicMultiplier = this._masterVolume * this._musicVolume;
+    this._reapplyMusicVolume();
+    this._persistVolumes();
+  }
+
+  setSfxVolume(v) {
+    this._sfxVolume = Math.max(0, Math.min(1, v));
+    this._sfxMultiplier = this._masterVolume * this._sfxVolume;
+    this._persistVolumes();
+  }
+
+  getSfxMultiplier() {
+    return this._sfxMultiplier;
+  }
+
+  getVolumeSettings() {
+    return {
+      master: Math.round(this._masterVolume * 100),
+      music: Math.round(this._musicVolume * 100),
+      sfx: Math.round(this._sfxVolume * 100),
+    };
+  }
+
+  _persistVolumes() {
+    try {
+      window.localStorage.setItem(VOLUME_STORAGE_KEY, JSON.stringify({
+        master: Math.round(this._masterVolume * 100),
+        music: Math.round(this._musicVolume * 100),
+        sfx: Math.round(this._sfxVolume * 100),
+      }));
+    } catch {}
   }
 
   getBandLevels(count = DEFAULT_BAND_COUNT) {

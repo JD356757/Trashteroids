@@ -48,11 +48,6 @@ export class HUD {
       this.minimapCtx = this.minimapCanvas.getContext('2d');
     }
     this.damageVignette = document.getElementById('damage-vignette');
-    this.bossAttackDebugEl = document.createElement('div');
-    this.bossAttackDebugEl.id = 'boss-attack-debug';
-    this.bossAttackDebugEl.classList.add('hidden');
-    this.bossAttackDebugEl.setAttribute('aria-live', 'polite');
-    this.bossAttackDebugEl.textContent = 'BOSS ATTACK: IDLE';
     this.trashteroidRangeAlertEl = document.createElement('div');
     this.trashteroidRangeAlertEl.id = 'trashteroid-range-alert';
     this.trashteroidRangeAlertEl.classList.add('hidden');
@@ -64,7 +59,6 @@ export class HUD {
     this.bossVulnerabilityEl.setAttribute('aria-live', 'polite');
     this.bossVulnerabilityEl.textContent = 'SHIELDED - 30S';
     if (this.hudRoot) {
-      this.hudRoot.appendChild(this.bossAttackDebugEl);
       this.hudRoot.appendChild(this.trashteroidRangeAlertEl);
       this.hudRoot.appendChild(this.bossVulnerabilityEl);
     }
@@ -112,16 +106,9 @@ export class HUD {
     if (this.bossContainer) this.bossContainer.classList.add('hidden');
     if (this.minimap) this.minimap.classList.add('hidden');
     if (this.bossIndicator) this.bossIndicator.classList.add('hidden');
-    if (this.bossAttackDebugEl) this.bossAttackDebugEl.classList.add('hidden');
     if (this.trashteroidRangeAlertEl) this.trashteroidRangeAlertEl.classList.add('hidden');
     if (this.bossVulnerabilityEl) this.bossVulnerabilityEl.classList.add('hidden');
     if (this.tutorialCallout) this.tutorialCallout.classList.add('hidden');
-  }
-
-  setBossAttackDebug(label = 'IDLE', visible = true) {
-    if (!this.bossAttackDebugEl) return;
-    this.bossAttackDebugEl.textContent = `BOSS ATTACK: ${label}`;
-    this.bossAttackDebugEl.classList.toggle('hidden', !visible);
   }
 
   setTrashteroidRangeAlert(visible = false, message = 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.') {
@@ -701,6 +688,7 @@ export class HUD {
   showMessage(text, options = {}) {
     const animateIn = !!options.animateIn;
     const keepDamageVignette = !!options.keepDamageVignette;
+    const onPlayAgain = options.onPlayAgain ?? (() => window.location.reload());
 
     if (keepDamageVignette) {
       this.setDeathVignette(true);
@@ -724,6 +712,6 @@ export class HUD {
 
     const btn = this.overlay.querySelector('#start-btn');
     btn.textContent = 'PLAY AGAIN';
-    btn.onclick = () => window.location.reload();
+    btn.onclick = onPlayAgain;
   }
 }

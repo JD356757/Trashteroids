@@ -98,15 +98,27 @@
   <div id="pause-screen" class="hidden" aria-hidden="true">
     <div class="pause-backdrop"></div>
     <div class="pause-panel">
-      <div class="pause-kicker">Flight Systems Holding Pattern</div>
       <h2>Mission Paused</h2>
-      <p class="pause-subtitle">Retune your aim, check your accuracy, and jump back in when you're ready.</p>
+      <p class="pause-subtitle">Adjust your settings and jump back in when you're ready.</p>
 
       <div class="pause-grid">
-        <section class="pause-card pause-card-emphasis">
-          <div class="pause-label">Trash Accuracy</div>
-          <div id="pause-accuracy-value" class="pause-stat-value">0%</div>
-          <div id="pause-accuracy-detail" class="pause-stat-detail">0 trash cleared / 0 vaporize bursts</div>
+        <section class="pause-card">
+          <div class="pause-label">Sound</div>
+          <label class="pause-volume-row">
+            <span class="pause-volume-label">Master</span>
+            <input id="pause-master-volume" type="range" min="0" max="100" step="1" value="100" />
+            <span id="pause-master-volume-value" class="pause-volume-value">100</span>
+          </label>
+          <label class="pause-volume-row">
+            <span class="pause-volume-label">Music</span>
+            <input id="pause-music-volume" type="range" min="0" max="100" step="1" value="100" />
+            <span id="pause-music-volume-value" class="pause-volume-value">100</span>
+          </label>
+          <label class="pause-volume-row">
+            <span class="pause-volume-label">SFX</span>
+            <input id="pause-sfx-volume" type="range" min="0" max="100" step="1" value="100" />
+            <span id="pause-sfx-volume-value" class="pause-volume-value">100</span>
+          </label>
         </section>
 
         <section class="pause-card">
@@ -141,7 +153,7 @@
       </div>
       <div id="briefing-options" class="hidden">
         <label id="briefing-tutorial-toggle" for="briefing-tutorial-mode">
-          <input id="briefing-tutorial-mode" type="checkbox" />
+          <input id="briefing-tutorial-mode" type="checkbox" checked />
           <span class="briefing-toggle-title">Tutorial Mode</span>
         </label>
       </div>
@@ -167,6 +179,20 @@
       <label class="level-select-setting-label" for="level-select-mouse-sensitivity">Mouse Sensitivity</label>
       <input id="level-select-mouse-sensitivity" type="range" min="8" max="60" step="1" value="24" />
       <div id="level-select-mouse-sensitivity-value">24</div>
+
+      <div class="level-select-settings-section">Volume</div>
+
+      <label class="level-select-setting-label" for="level-select-master-volume">Master Volume</label>
+      <input id="level-select-master-volume" type="range" min="0" max="100" step="1" value="100" />
+      <div id="level-select-master-volume-value">100</div>
+
+      <label class="level-select-setting-label" for="level-select-music-volume">Music Volume</label>
+      <input id="level-select-music-volume" type="range" min="0" max="100" step="1" value="100" />
+      <div id="level-select-music-volume-value">100</div>
+
+      <label class="level-select-setting-label" for="level-select-sfx-volume">SFX Volume</label>
+      <input id="level-select-sfx-volume" type="range" min="0" max="100" step="1" value="100" />
+      <div id="level-select-sfx-volume-value">100</div>
 
       <label class="level-select-setting-toggle" for="level-select-reduced-motion">
         <input id="level-select-reduced-motion" type="checkbox" />
@@ -211,13 +237,22 @@
         <span class="lc-star"></span>
         <span class="lc-star"></span>
       </div>
-      <div id="level-complete-title">SECTOR 1 CLEARED</div>
+      <div id="level-complete-title">LEVEL 1 CLEARED</div>
       <div id="level-complete-objectives"></div>
       <div id="level-complete-score">000000</div>
       <div id="level-complete-actions">
         <button id="level-retry-btn">RETRY</button>
-        <button id="level-next-btn">SECTOR MAP</button>
+        <button id="level-next-btn">CONTINUE</button>
       </div>
+    </div>
+  </div>
+
+  <div id="win-screen" class="hidden" aria-hidden="true">
+    <div id="win-screen-bg"></div>
+    <div id="win-screen-content">
+      <div id="win-screen-title">YOU WIN!</div>
+      <div id="win-screen-sub">Earth is saved. The Trashteroid is no more.</div>
+      <button id="win-screen-menu-btn">BACK TO MENU</button>
     </div>
   </div>
 
