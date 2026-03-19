@@ -731,7 +731,7 @@ body::before {
 
 #tutorial-callout {
   position: fixed;
-  top: calc(50vh - 172px);
+  top: calc(50vh - 272px);
   left: 50%;
   width: min(420px, calc(100vw - 48px));
   transform: translateX(-50%) translateY(0) scale(1);
@@ -751,8 +751,41 @@ body::before {
   text-align: center;
   transition:
     opacity 180ms ease,
-    transform 220ms cubic-bezier(0.22, 0.9, 0.3, 1),
+    transform 400ms ease-out,
     filter 220ms ease;
+}
+
+#tutorial-callout-timer {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  pointer-events: none;
+}
+
+#tutorial-callout-timer svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+#tutorial-callout-timer-track,
+#tutorial-callout-timer-progress {
+  fill: none;
+  stroke-linecap: round;
+}
+
+#tutorial-callout-timer-track {
+  stroke: rgba(170, 214, 238, 0.26);
+  stroke-width: 3;
+}
+
+#tutorial-callout-timer-progress {
+  stroke: rgba(143, 247, 239, 0.96);
+  stroke-width: 3.4;
+  filter: drop-shadow(0 0 6px rgba(143, 247, 239, 0.45));
+  transition: stroke-dashoffset 90ms linear;
 }
 
 #tutorial-callout[data-placement='top-left'] {
@@ -761,6 +794,16 @@ body::before {
   width: min(340px, calc(100vw - 36px));
   transform: translateY(0) scale(1);
   text-align: left;
+}
+
+#tutorial-callout.tutorial-callout-routing-top-left {
+  transition:
+    top 420ms cubic-bezier(0.2, 0.85, 0.3, 1),
+    left 420ms cubic-bezier(0.2, 0.85, 0.3, 1),
+    width 420ms cubic-bezier(0.2, 0.85, 0.3, 1),
+    opacity 180ms ease,
+    transform 420ms cubic-bezier(0.2, 0.85, 0.3, 1),
+    filter 220ms ease;
 }
 
 #tutorial-callout.tutorial-callout-entering,
@@ -1939,6 +1982,13 @@ body::before {
     top: 112px;
     left: 12px;
     width: min(300px, calc(100vw - 24px));
+  }
+
+  #tutorial-callout-timer {
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
   }
 
   #tutorial-callout-title {

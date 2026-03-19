@@ -37,6 +37,9 @@ export class HUD {
     this.tutorialCalloutTitle = document.getElementById('tutorial-callout-title');
     this.tutorialCalloutText = document.getElementById('tutorial-callout-text');
     this.tutorialCalloutRequirements = document.getElementById('tutorial-callout-requirements');
+    this.tutorialCalloutTimer = document.getElementById('tutorial-callout-timer');
+    this.tutorialCalloutTimerProgress = document.getElementById('tutorial-callout-timer-progress');
+    this.tutorialCalloutTimerTrack = document.getElementById('tutorial-callout-timer-track');
     this.musicVisualizer = document.getElementById('music-visualizer');
     this.musicVisualizerBars = this.musicVisualizer
       ? Array.from(this.musicVisualizer.querySelectorAll('.visualizer-bar'))
@@ -69,6 +72,7 @@ export class HUD {
     this._speedSamples = [];
     this._tutorialCalloutHideTimer = null;
     this._tutorialCalloutAnimationFrame = null;
+    this._tutorialCalloutRouteTimer = null;
     this._reducedMotion = false;
     this._reducedFlashing = false;
     this._musicVisualizerEnabled = false;
@@ -523,25 +527,91 @@ export class HUD {
     }
   }
 
+  _setTutorialCalloutTimer(progress = null, visible = false) {
+    if (!this.tutorialCalloutTimer) return;
+
+    if (!visible || progress == null) {
+      this.tutorialCalloutTimer.classList.add('hidden');
+      return;
+    }
+
+    const clamped = THREE.MathUtils.clamp(progress, 0, 1);
+    const circumference = 100;
+    const offset = (1 - clamped) * circumference;
+
+    if (this.tutorialCalloutTimerProgress) {
+      this.tutorialCalloutTimerProgress.style.strokeDasharray = `${circumference}`;
+      this.tutorialCalloutTimerProgress.style.strokeDashoffset = `${offset}`;
+    }
+    if (this.tutorialCalloutTimerTrack) {
+      this.tutorialCalloutTimerTrack.style.strokeDasharray = `${circumference}`;
+      this.tutorialCalloutTimerTrack.style.strokeDashoffset = `0`;
+    }
+
+    this.tutorialCalloutTimer.classList.remove('hidden');
+  }
+
   showTutorialCallout(title, text, options = {}) {
     if (!this.tutorialCallout || !this.tutorialCalloutTitle || !this.tutorialCalloutText) return;
     const placement = options.placement ?? 'center';
     const animate = this._reducedMotion ? false : (options.animate ?? false);
+    const keepTopLeftRoute =
+      !animate
+      && placement === 'top-left'
+      && this.tutorialCallout.classList.contains('tutorial-callout-routing-top-left');
 
-    if (this._tutorialCalloutHideTimer) {
-      clearTimeout(this._tutorialCalloutHideTimer);
-      this._tutorialCalloutHideTimer = null;
-    }
-    if (this._tutorialCalloutAnimationFrame) {
-      cancelAnimationFrame(this._tutorialCalloutAnimationFrame);
-      this._tutorialCalloutAnimationFrame = null;
+    if (!keepTopLeftRoute) {
+      if (this._tutorialCalloutHideTimer) {
+        clearTimeout(this._tutorialCalloutHideTimer);
+        this._tutorialCalloutHideTimer = null;
+      }
+      if (this._tutorialCalloutAnimationFrame) {
+        cancelAnimationFrame(this._tutorialCalloutAnimationFrame);
+        this._tutorialCalloutAnimationFrame = null;
+      }
+      if (this._tutorialCalloutRouteTimer) {
+        clearTimeout(this._tutorialCalloutRouteTimer);
+        this._tutorialCalloutRouteTimer = null;
+      }
     }
 
     this.tutorialCalloutTitle.textContent = title;
     this.tutorialCalloutText.textContent = text;
     this._renderTutorialRequirements(options.requirements ?? []);
+    this._setTutorialCalloutTimer(options.timerProgress ?? null, !!options.showTimer);
+
+    if (keepTopLeftRoute) {
+      this.tutorialCallout.classList.remove('hidden', 'tutorial-callout-entering', 'tutorial-callout-leaving');
+      return;
+    }
+
+    this.tutorialCallout.classList.remove(
+      'hidden',
+      'tutorial-callout-leaving',
+      'tutorial-callout-entering',
+      'tutorial-callout-routing-top-left'
+    );
+
+    if (animate && placement === 'top-left') {
+      delete this.tutorialCallout.dataset.placement;
+      this.tutorialCallout.classList.add('tutorial-callout-routing-top-left');
+      this.tutorialCallout.classList.remove('hidden');
+      // Force the center state to be committed before moving to top-left.
+      void this.tutorialCallout.offsetWidth;
+      this._tutorialCalloutAnimationFrame = window.requestAnimationFrame(() => {
+        this._tutorialCalloutAnimationFrame = window.requestAnimationFrame(() => {
+          this.tutorialCallout.dataset.placement = 'top-left';
+          this._tutorialCalloutAnimationFrame = null;
+          this._tutorialCalloutRouteTimer = window.setTimeout(() => {
+            this.tutorialCallout.classList.remove('tutorial-callout-routing-top-left');
+            this._tutorialCalloutRouteTimer = null;
+          }, 460);
+        });
+      });
+      return;
+    }
+
     this.tutorialCallout.dataset.placement = placement;
-    this.tutorialCallout.classList.remove('hidden', 'tutorial-callout-leaving', 'tutorial-callout-entering');
 
     if (animate) {
       this.tutorialCallout.classList.add('tutorial-callout-entering');
@@ -566,19 +636,29 @@ export class HUD {
       cancelAnimationFrame(this._tutorialCalloutAnimationFrame);
       this._tutorialCalloutAnimationFrame = null;
     }
+    if (this._tutorialCalloutRouteTimer) {
+      clearTimeout(this._tutorialCalloutRouteTimer);
+      this._tutorialCalloutRouteTimer = null;
+    }
 
     if (!animated) {
-      this.tutorialCallout.classList.remove('tutorial-callout-entering', 'tutorial-callout-leaving');
+      this.tutorialCallout.classList.remove(
+        'tutorial-callout-entering',
+        'tutorial-callout-leaving',
+        'tutorial-callout-routing-top-left'
+      );
       this.tutorialCallout.classList.add('hidden');
+      this._setTutorialCalloutTimer(null, false);
       delete this.tutorialCallout.dataset.placement;
       return;
     }
 
-    this.tutorialCallout.classList.remove('tutorial-callout-entering');
+    this.tutorialCallout.classList.remove('tutorial-callout-entering', 'tutorial-callout-routing-top-left');
     this.tutorialCallout.classList.add('tutorial-callout-leaving');
     this._tutorialCalloutHideTimer = window.setTimeout(() => {
       this.tutorialCallout.classList.add('hidden');
       this.tutorialCallout.classList.remove('tutorial-callout-leaving');
+      this._setTutorialCalloutTimer(null, false);
       delete this.tutorialCallout.dataset.placement;
       this._tutorialCalloutHideTimer = null;
     }, 220);

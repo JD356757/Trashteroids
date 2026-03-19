@@ -1,13 +1,13 @@
 const SOUNDTRACK_URL = '/audioloop.wav';
 const SPACE_AMBIENCE_URL = '/space.m4a';
-const BOOST_URL = '/boostcut.m4a';
-const BOOST_BASS_URL = '/boostbass.m4a';
+const BOOST_URL = '/boostbass.m4a';
 const DEFAULT_BAND_COUNT = 14;
 const DEFAULT_AMBIENCE_DURATION = 10;
 const MAIN_MENU_VOLUME = 0.68;
 const MAIN_IN_LEVEL_VOLUME = 0.06;
 const AMBIENCE_IN_LEVEL_VOLUME = 0.78;
 const AMBIENCE_OVERLAP_SECONDS = 1.25;
+const AMBIENCE_THRUST_RELEASE_FADE_MS = 320;
 const BOOST_VOLUME = 0.62;
 const BOOST_FADE_OUT_MS = 500;
 const BOOST_FADE_IN_MS = 120;
@@ -37,16 +37,12 @@ class SoundtrackManager {
     this._inLevel = false;
     this._thrusting = false;
 
-    this._boostEls = [document.createElement('audio'), document.createElement('audio')];
-    this._boostEls[0].src = BOOST_URL;
-    this._boostEls[1].src = BOOST_BASS_URL;
-    for (let i = 0; i < this._boostEls.length; i++) {
-      const boostAudio = this._boostEls[i];
-      boostAudio.loop = true;
-      boostAudio.preload = 'auto';
-      boostAudio.crossOrigin = 'anonymous';
-      boostAudio.volume = 0;
-    }
+    this._boostEl = document.createElement('audio');
+    this._boostEl.src = BOOST_URL;
+    this._boostEl.loop = true;
+    this._boostEl.preload = 'auto';
+    this._boostEl.crossOrigin = 'anonymous';
+    this._boostEl.volume = 0;
     this._boosting = false;
     this._boostFadeRaf = null;
 
@@ -185,35 +181,57 @@ class SoundtrackManager {
   }
 
   _fadeBoost(toVolume, durationMs, onComplete = null) {
-    this._cancelAnimationFrame('_boostFadeRaf');
+    this._fadeAudioElementVolume(
+      this._boostEl,
+      this._boostEl.volume,
+      toVolume,
+      durationMs,
+      '_boostFadeRaf',
+      onComplete
+    );
+  }
 
+  _fadeOutSpaceAmbience(durationMs = AMBIENCE_THRUST_RELEASE_FADE_MS) {
+    this._clearAmbientSwapTimer();
+    this._cancelAnimationFrame('_ambientFadeRaf');
+
+    const primary = this._ambientEls[this._ambientPrimaryIndex];
+    const secondary = this._ambientEls[1 - this._ambientPrimaryIndex];
+    const fromPrimary = primary.volume;
+    const fromSecondary = secondary.volume;
     const safeDurationMs = Math.max(1, durationMs);
     const startTime = performance.now();
-    const fromVolume = this._boostEls[0]?.volume ?? 0;
 
     const step = () => {
       const elapsed = performance.now() - startTime;
       const t = this._clamp(elapsed / safeDurationMs, 0, 1);
       const eased = 1 - Math.pow(1 - t, 3);
-      const volume = fromVolume + (toVolume - fromVolume) * eased;
+      const scalar = 1 - eased;
 
-      for (let i = 0; i < this._boostEls.length; i++) {
-        this._boostEls[i].volume = volume;
-      }
+      primary.volume = fromPrimary * scalar;
+      secondary.volume = fromSecondary * scalar;
 
       if (t < 1) {
-        this._boostFadeRaf = requestAnimationFrame(step);
+        this._ambientFadeRaf = requestAnimationFrame(step);
         return;
       }
 
-      this._boostFadeRaf = null;
-      for (let i = 0; i < this._boostEls.length; i++) {
-        this._boostEls[i].volume = toVolume;
+      this._ambientFadeRaf = null;
+      if (this._inLevel && this._thrusting) {
+        this._startSpaceAmbience();
+        return;
       }
-      onComplete?.();
+
+      primary.pause();
+      secondary.pause();
+      primary.currentTime = 0;
+      secondary.currentTime = 0;
+      primary.volume = 0;
+      secondary.volume = 0;
+      this._ambientPrimaryIndex = 0;
     };
 
-    this._boostFadeRaf = requestAnimationFrame(step);
+    this._ambientFadeRaf = requestAnimationFrame(step);
   }
 
   _scheduleAmbientCrossfade() {
@@ -335,7 +353,7 @@ class SoundtrackManager {
     if (this._inLevel && this._thrusting) {
       this._startSpaceAmbience();
     } else {
-      this._stopSpaceAmbience();
+      this._fadeOutSpaceAmbience();
     }
   }
 
@@ -345,24 +363,18 @@ class SoundtrackManager {
     this._boosting = wantsBoost;
 
     if (wantsBoost) {
-      for (let i = 0; i < this._boostEls.length; i++) {
-        const boostAudio = this._boostEls[i];
-        boostAudio.currentTime = 0;
-        boostAudio.play().catch(() => {
-          // Ignore autoplay/gesture restrictions; it will retry next boost frame.
-        });
-      }
+      this._boostEl.currentTime = 0;
+      this._boostEl.play().catch(() => {
+        // Ignore autoplay/gesture restrictions; it will retry next boost frame.
+      });
       this._fadeBoost(BOOST_VOLUME, BOOST_FADE_IN_MS);
       return;
     }
 
     this._fadeBoost(0, BOOST_FADE_OUT_MS, () => {
       if (this._boosting) return;
-      for (let i = 0; i < this._boostEls.length; i++) {
-        const boostAudio = this._boostEls[i];
-        boostAudio.pause();
-        boostAudio.currentTime = 0;
-      }
+      this._boostEl.pause();
+      this._boostEl.currentTime = 0;
     });
   }
 

@@ -41,8 +41,8 @@ const ASTEROID_COLOR_SHADE = new THREE.Color(0xb19bb3);
 const ASTEROID_OUTLINE_COLOR = 0x211626;
 const ASTEROID_OUTLINE_SCALE = 1.035;
 
-// Normalized sun direction (matches Game.js sunLight.position)
-const SUN_DIR = new THREE.Vector3(2000, 1000, -3000).normalize();
+// Normalized sun direction (matches Game.js SUN_BACKGROUND_OFFSET / sunLight.position)
+const SUN_DIR = new THREE.Vector3(1800, 900, 3600).normalize();
 
 // Two-tone unlit shader: lit color on sun-facing side, shadow color on the other
 function makeTwoToneMaterial() {
