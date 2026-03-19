@@ -67,9 +67,9 @@ const DISPLAY_DISTANCE_SCALE = 0.45;
 const TUTORIAL_TIME_SCALE = 1.0;
 const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
 const TUTORIAL_TIMED_BEAT_DURATION = 7;
-const TRASHTEROID_APPROACH_DISTANCE_WORLD = 15000 / DISPLAY_DISTANCE_SCALE;
-const TRASHTEROID_HIT_RADIUS = 72;
-const TRASHTEROID_COLLISION_RADIUS_SCALE = 0.68;
+const TRASHTEROID_APPROACH_DISTANCE_WORLD = 5000 / DISPLAY_DISTANCE_SCALE;
+const TRASHTEROID_HIT_RADIUS = 55;
+const TRASHTEROID_COLLISION_RADIUS_SCALE = 1;
 const TRASHTEROID_SURFACE_OFFSET = 58;
 const TRASHTEROID_BOSS_SPEED_MULTIPLIER = 0.7;
 const TRASHTEROID_SCORE_PER_HIT = 35;
@@ -90,6 +90,10 @@ const LEVEL_ENTRY_FADE_HOLD_MS = 280;
 const LEVEL_ENTRY_FADE_MS = 420;
 const LEVEL_COMPLETE_FADE_HOLD_MS = 220;
 const LEVEL_COMPLETE_FADE_MS = 1000;
+const LEVEL_COMPLETE_CONTROL_LOCK_SECONDS = 2.6;
+const DEATH_SEQUENCE_DURATION = 1.25;
+const DEATH_OVERLAY_REVEAL_DELAY = 0.36;
+const GAME_OVER_RETURN_DELAY_MS = 2600;
 const TUTORIAL_BEATS = {
   move: {
     title: 'Move & Look',
@@ -200,6 +204,10 @@ export class Game {
     this._levelCompleteFadeToken = 0;
     this._levelCompleteFadeHoldTimeout = null;
     this._levelCompleteFadeSafetyTimeout = null;
+    this._deathSequenceActive = false;
+    this._gameOverActive = false;
+    this._deathSequenceTimer = 0;
+    this._deathOverlayShown = false;
     this._timeScale = 1;
     this._tutorial = this._createTutorialState();
     this._handleLevelNextClick = () => this._onLevelNext();
@@ -220,6 +228,9 @@ export class Game {
     this._trashDestroyedFast = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(200);
     this._levelComplete = false;
+    this._levelCompleteControlLockRemaining = 0;
+    this._pendingLevelCompleteSummary = null;
+    this._scoreCounterRaf = null;
     this.clock = new THREE.Clock();
     this.crosshair = document.getElementById('crosshair');
 
@@ -415,6 +426,7 @@ export class Game {
     this.running = false;
     this.paused = true;
     this.boostActive = false;
+    this._gameOverActive = false;
     this._cancelLevelEntryFade();
     this._cancelLevelCompleteTransition();
     this._clearScheduledReturnToLevelSelect();
@@ -741,7 +753,7 @@ export class Game {
       health: 1,
       maxHealth: 1,
       hitRadius: TRASHTEROID_HIT_RADIUS - 6,
-      collisionRadius: TRASHTEROID_HIT_RADIUS - 10,
+      collisionRadius: TRASHTEROID_HIT_RADIUS,
       active: false,
       mode: 'approach',
       time: 0,
@@ -857,6 +869,11 @@ export class Game {
     this.playerHitCooldown = 0;
     this.boostCharge = 1;
     this.boostActive = false;
+    this._deathSequenceActive = false;
+    this._gameOverActive = false;
+    this._deathSequenceTimer = 0;
+    this._deathOverlayShown = false;
+    this.player.mesh.visible = true;
 
     if (resetPosition) {
       this.player.mesh.position.set(0, 0, 10);
@@ -865,6 +882,10 @@ export class Game {
 
     this.player.mesh.quaternion.copy(this.player.baseQuaternion);
     this._prevPlayerPos.copy(this.player.mesh.position);
+
+    if (typeof this.hud?.setDeathVignette === 'function') {
+      this.hud.setDeathVignette(false);
+    }
   }
 
   _enterLevel(levelNumber, { resetPlayerPosition = false, resetRunStats = false } = {}) {
@@ -885,6 +906,12 @@ export class Game {
     this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(fastSpeedDisplay);
+    this._levelCompleteControlLockRemaining = 0;
+    this._pendingLevelCompleteSummary = null;
+    if (this._scoreCounterRaf) {
+      cancelAnimationFrame(this._scoreCounterRaf);
+      this._scoreCounterRaf = null;
+    }
 
     if (resetRunStats) {
       this.score = 0;
@@ -952,7 +979,7 @@ export class Game {
       trashteroid.group.scale.setScalar(configuredScale);
       trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * configuredScale;
       trashteroid.collisionRadius =
-        (bossConfig.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6)) *
+        (bossConfig.collisionRadius ?? TRASHTEROID_HIT_RADIUS) *
         configuredScale *
         TRASHTEROID_COLLISION_RADIUS_SCALE;
       trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * configuredScale;
@@ -1388,7 +1415,7 @@ export class Game {
     const trashteroid = this._trashteroid;
     if (!trashteroid?.active || !asteroids?.length) return;
 
-    const collisionRadius = trashteroid.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6);
+    const collisionRadius = trashteroid.collisionRadius;
 
     for (let i = 0; i < asteroids.length; i++) {
       const ast = asteroids[i];
@@ -1472,6 +1499,7 @@ export class Game {
     if (!trashteroid?.active) return;
 
     const bossConfig = this.levels.getCurrentConfig().boss ?? null;
+    console.log(trashteroid.collisionRadius);
     const collisionRadius = trashteroid.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6);
     const minDistance = PLAYER_COLLISION_RADIUS + collisionRadius;
 
@@ -1621,7 +1649,9 @@ export class Game {
     const x = onScreen ? projectedX : centerX + Math.sin(angle) * radiusX;
     const y = onScreen ? projectedY : centerY - Math.cos(angle) * radiusY;
     const indicatorAngle = onScreen ? 0 : angle;
-    const distance = toDisplayDistance(targetPos.distanceTo(this.player.mesh.position));
+    const centerDist = targetPos.distanceTo(this.player.mesh.position);
+    const surfaceDistWorld = Math.max(0, centerDist - (this._trashteroid?.collisionRadius ?? 0));
+    const distance = toDisplayDistance(surfaceDistWorld);
 
     this.hud.updateBossIndicator(true, x, y, indicatorAngle, Math.max(1, distance), 'TRASHTEROID');
   }
@@ -1641,7 +1671,7 @@ export class Game {
 
     const maxShotDistance = Math.max(1, this.projectiles?.maxDist ?? 2500);
     const targetDistanceToCenter = playerPos.distanceTo(trashteroid.group.position);
-    const targetSurfaceDistance = Math.max(0, targetDistanceToCenter - (trashteroid.hitRadius ?? 0));
+    const targetSurfaceDistance = Math.max(0, targetDistanceToCenter - (trashteroid.collisionRadius ?? 0));
     const outOfRange = targetSurfaceDistance > (maxShotDistance + PROJECTILE_HIT_PADDING);
     this.hud.setTrashteroidRangeAlert(outOfRange, 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.');
   }
@@ -1682,12 +1712,13 @@ export class Game {
       const targetPos = this._getMissionTargetPosition();
       const reachDistanceDisplay = primary.reachDistanceDisplay ?? 60;
       const reachDistanceWorld = toWorldDistance(reachDistanceDisplay);
-      const distanceDisplay = targetPos
-        ? toDisplayDistance(targetPos.distanceTo(this.player.mesh.position))
+      const trashteroidSurfaceRadius = this._trashteroid?.collisionRadius ?? 0;
+      const centerDist = targetPos ? targetPos.distanceTo(this.player.mesh.position) : null;
+      const surfaceDist = centerDist != null ? Math.max(0, centerDist - trashteroidSurfaceRadius) : null;
+      const distanceDisplay = surfaceDist != null
+        ? toDisplayDistance(surfaceDist)
         : reachDistanceDisplay;
-      const reached = targetPos
-        ? targetPos.distanceTo(this.player.mesh.position) <= reachDistanceWorld
-        : false;
+      const reached = surfaceDist != null ? surfaceDist <= reachDistanceWorld : false;
 
       objectives.push({
         label: reached
@@ -1742,24 +1773,27 @@ export class Game {
       });
     }
 
-    const completedObjectives = objectives.reduce((count, objective) => count + (objective.complete ? 1 : 0), 0);
+    const completedObjectives = objectives.reduce((count, obj) => count + (obj.complete ? 1 : 0), 0);
     const totalObjectives = objectives.length;
+    const bonusObjectives = objectives.filter(obj => obj.bonus);
+    const completedBonus = bonusObjectives.reduce((count, obj) => count + (obj.complete ? 1 : 0), 0);
+    const totalBonus = bonusObjectives.length;
 
     return {
       objectives,
       primaryComplete,
-      fastDone,
-      shieldBonus,
       completedObjectives,
       totalObjectives,
+      completedBonus,
+      totalBonus,
     };
   }
 
-  _calculateMissionStars(primaryComplete, completedObjectives, totalObjectives) {
+  _calculateMissionStars(primaryComplete, completedBonus, totalBonus) {
     if (!primaryComplete) return 0;
-    if (totalObjectives <= 0) return 3;
-    if (completedObjectives >= totalObjectives) return 3;
-    if (completedObjectives >= Math.ceil((totalObjectives * 2) / 3)) return 2;
+    if (totalBonus <= 0) return 3;
+    if (completedBonus >= totalBonus) return 3;
+    if (completedBonus > 0) return 2;
     return 1;
   }
 
@@ -1769,8 +1803,14 @@ export class Game {
     const state = this._getMissionObjectiveState(true);
     this._levelComplete = true;
     this._levelTimerRunning = false;
-    this.paused = true;
+    this.paused = false;
     this.boostActive = false;
+    this._levelCompleteControlLockRemaining = LEVEL_COMPLETE_CONTROL_LOCK_SECONDS;
+    this._pendingLevelCompleteSummary = null;
+    this.input.releaseAll();
+    this.player.turnInputYaw = 0;
+    this.player.turnInputPitch = 0;
+    this.player.manualRollInput = 0;
     this.hud.updateObjectives(state.objectives);
     this.hud.hideTimer();
     this.hud.setBossBarVisible(false);
@@ -1778,13 +1818,36 @@ export class Game {
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
     const earnedStars = this._calculateMissionStars(
       primaryComplete,
-      state.completedObjectives,
-      state.totalObjectives
+      state.completedBonus,
+      state.totalBonus
     );
-    this._showLevelCompleteScreen(primaryComplete, state.fastDone, state.shieldBonus, {
+    this._pendingLevelCompleteSummary = {
+      primaryComplete,
       stars: earnedStars,
       completedObjectives: state.completedObjectives,
       totalObjectives: state.totalObjectives,
+    };
+  }
+
+  _updatePendingLevelComplete(delta) {
+    if (!this._levelComplete || this.paused) return;
+    if (this._levelCompleteControlLockRemaining <= 0) return;
+
+    this._levelCompleteControlLockRemaining = Math.max(
+      0,
+      this._levelCompleteControlLockRemaining - delta
+    );
+
+    if (this._levelCompleteControlLockRemaining > 0 || !this._pendingLevelCompleteSummary) {
+      return;
+    }
+
+    const summary = this._pendingLevelCompleteSummary;
+    this._pendingLevelCompleteSummary = null;
+    this._showLevelCompleteScreen(summary.primaryComplete, {
+      stars: summary.stars,
+      completedObjectives: summary.completedObjectives,
+      totalObjectives: summary.totalObjectives,
     });
   }
 
@@ -2239,6 +2302,19 @@ export class Game {
     requestAnimationFrame(() => this._loop());
 
     const rawDelta = this.clock.getDelta();
+
+    if (this._deathSequenceActive) {
+      this._updateDeathSequence(rawDelta);
+      this.input.resetPressed();
+      return;
+    }
+
+    if (this._gameOverActive) {
+      this._updateGameOverBackground(rawDelta);
+      this.input.resetPressed();
+      return;
+    }
+
     const hadPointerLock = this._pauseUnlockArmed;
     const hasPointerLock = this.input.pointerLocked;
 
@@ -2275,40 +2351,60 @@ export class Game {
     // store player position before this frame's movement for continuous collisions
     this._prevPlayerPos.copy(this.player.mesh.position);
 
+    const controlLockActive = this._levelComplete && this._levelCompleteControlLockRemaining > 0;
+
     // Mouse → pitch / yaw
-    const { dx, dy } = this.input.consumeMouseDelta();
-    this.player.rotate(dx, dy, rawDelta);
-    const thrustHeld = this.input.isDown('w');
-    soundtrackManager.setThrusting(thrustHeld);
+    let dx = 0;
+    let dy = 0;
+    let thrustHeld = false;
+    let wantsBoost = false;
+    let rollSeen = false;
+    let fired = 0;
+    let vaporizerFired = 0;
 
-    // W → forward thrust
-    const wantsBoost = thrustHeld && this.input.isDown(' ') && this.boostCharge > 0;
-    this.boostActive = wantsBoost;
-    if (thrustHeld) {
-      const boostMultiplier = wantsBoost ? this.player.boostMultiplier : 1;
-      this.player.thrust(delta, boostMultiplier);
-    }
-
-    if (wantsBoost) {
-      this.boostCharge = Math.max(0, this.boostCharge - BOOST_DRAIN_RATE * delta);
-      if (this.boostCharge === 0) {
-        this.boostActive = false;
-      }
+    if (controlLockActive) {
+      this.input.consumeMouseDelta();
+      this.boostActive = false;
+      this.player.turnInputYaw = 0;
+      this.player.turnInputPitch = 0;
+      this.player.manualRollInput = 0;
+      soundtrackManager.setThrusting(false);
+      soundtrackManager.setBoosting(false);
     } else {
-      this.boostCharge = Math.min(1, this.boostCharge + BOOST_RECHARGE_RATE * delta);
+      ({ dx, dy } = this.input.consumeMouseDelta());
+      this.player.rotate(dx, dy, rawDelta);
+      thrustHeld = this.input.isDown('w');
+      soundtrackManager.setThrusting(thrustHeld);
+
+      // W → forward thrust
+      wantsBoost = thrustHeld && this.input.isDown(' ') && this.boostCharge > 0;
+      this.boostActive = wantsBoost;
+      if (thrustHeld) {
+        const boostMultiplier = wantsBoost ? this.player.boostMultiplier : 1;
+        this.player.thrust(delta, boostMultiplier);
+      }
+
+      if (wantsBoost) {
+        this.boostCharge = Math.max(0, this.boostCharge - BOOST_DRAIN_RATE * delta);
+        if (this.boostCharge === 0) {
+          this.boostActive = false;
+        }
+      } else {
+        this.boostCharge = Math.min(1, this.boostCharge + BOOST_RECHARGE_RATE * delta);
+      }
+      soundtrackManager.setBoosting(this.boostActive);
+
+      // A / D → manual roll
+      let rollInput = 0;
+      if (this.input.isDown('a')) rollInput += 1;   // roll left
+      if (this.input.isDown('d')) rollInput -= 1;   // roll right
+      rollSeen = rollInput !== 0 || this.input.wasPressed('a') || this.input.wasPressed('d');
+      this.player.manualRollInput = rollInput;
+
+      // Fire regular beam with mouse-left and vaporizer beam with Shift.
+      fired = this.input.isDown('mouseleft') ? this._firePlayerBeam('normal', rawDelta) : 0;
+      vaporizerFired = this.input.isDown('shift') ? this._firePlayerBeam('vaporizer', rawDelta) : 0;
     }
-    soundtrackManager.setBoosting(this.boostActive);
-
-    // A / D → manual roll
-    let rollInput = 0;
-    if (this.input.isDown('a')) rollInput += 1;   // roll left
-    if (this.input.isDown('d')) rollInput -= 1;   // roll right
-    const rollSeen = rollInput !== 0 || this.input.wasPressed('a') || this.input.wasPressed('d');
-    this.player.manualRollInput = rollInput;
-
-    // Fire regular beam with mouse-left and vaporizer beam with Shift.
-    const fired = this.input.isDown('mouseleft') ? this._firePlayerBeam('normal', rawDelta) : 0;
-    const vaporizerFired = this.input.isDown('shift') ? this._firePlayerBeam('vaporizer', rawDelta) : 0;
 
     this._updateActiveTutorialProgress({
       dx,
@@ -2326,18 +2422,36 @@ export class Game {
     const playerPos = this.player.mesh.position;
     const playerQuat = this.player.baseQuaternion;
     const levelConfig = this.levels.getCurrentConfig();
-    this.asteroidField.setTargetCount(levelConfig?.boss?.asteroidTarget);
-    this.asteroidField.update(delta, playerPos);
+    const hasBossLevel = !!levelConfig.boss;
     const spawnConfig = this.levels.getSpawnConfig();
     const missionConfig = this.levels.getMissionConfig();
-    const hasBossLevel = !!this.levels.getCurrentConfig().boss;
     const reachTrashteroidObjective = !!missionConfig?.primary?.reachTrashteroid;
     const noSpawnNearTarget = !hasBossLevel && reachTrashteroidObjective && this._trashteroid?.active;
-    const trashteroidCollisionRadius = this._trashteroid?.collisionRadius ?? 0;
-    const noSpawnRadius = trashteroidCollisionRadius * 2;
+
+    // Suppress new asteroid spawning when close to trashteroid surface (1000 display-units).
+    const ASTEROID_SUPPRESS_DISTANCE_WORLD = toWorldDistance(1000);
+    const trashteroidSurfaceRadius = this._trashteroid?.collisionRadius ?? 0;
+    const distToTrashteroidSurface = (noSpawnNearTarget && this._trashteroid?.group?.position)
+      ? Math.max(0, this._trashteroid.group.position.distanceTo(playerPos) - trashteroidSurfaceRadius)
+      : Infinity;
+    const nearTrashteroid = distToTrashteroidSurface <= ASTEROID_SUPPRESS_DISTANCE_WORLD;
+    if (nearTrashteroid) {
+      // Freeze the target at the current count so no new asteroids spawn,
+      // but existing ones are not forcibly removed.
+      this.asteroidField.setTargetCount(this.asteroidField.instances.length);
+    } else {
+      this.asteroidField.setTargetCount(levelConfig?.boss?.asteroidTarget);
+    }
+    this.asteroidField.setNoSpawnZone(
+      noSpawnNearTarget ? this._trashteroid.group.position : null,
+      noSpawnNearTarget ? trashteroidSurfaceRadius * 2 : 0,
+    );
+    this.asteroidField.update(delta, playerPos);
+    const noSpawnRadius = trashteroidSurfaceRadius * 1.7;
+    // Lock debris spawning when the player is within one collisionRadius of the trashteroid surface.
     const nearTargetSpawnLock = noSpawnNearTarget
-      && noSpawnRadius > 0
-      && this._trashteroid.group.position.distanceTo(playerPos) <= noSpawnRadius;
+      && trashteroidSurfaceRadius > 0
+      && Math.max(0, this._trashteroid.group.position.distanceTo(playerPos) - trashteroidSurfaceRadius) <= trashteroidSurfaceRadius;
     const runtimeSpawnConfig = noSpawnNearTarget
       ? {
         ...spawnConfig,
@@ -2424,6 +2538,7 @@ export class Game {
     const bandLevels = soundtrackManager.getBandLevels(this.hud.musicVisualizerBars?.length || 14);
     this.hud.updateMusicVisualizer(bandLevels, rawDelta);
     this._updateMissionObjectives(delta);
+    this._updatePendingLevelComplete(delta);
     this.input.resetPressed();
     this.renderer.render(this.scene, this.camera);
   }
@@ -2846,7 +2961,7 @@ export class Game {
       const d = debrisList[i];
       const hitRadius = Math.max(d.hitRadius || 1, d.collisionRadius || 0);
       // Slightly larger effective radius makes collisions feel less late.
-      const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 2.0;
+      const hitDistance = PLAYER_COLLISION_RADIUS + hitRadius * 1.2;
       // Count a miss a bit earlier once debris slips behind the ship.
       const passDistance = hitRadius + 20;
       // Nearby debris gets pushed away even without direct contact.
@@ -2922,7 +3037,7 @@ export class Game {
 
     for (let i = 0; i < asteroids.length; i++) {
       const sphere = asteroids[i].boundingSphere;
-      const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius * 0.9; // slight forgiveness on asteroid radius for better feel
+      const minDistance = PLAYER_COLLISION_RADIUS + sphere.radius * 0.82; // slight forgiveness on asteroid radius for better feel
 
       _collisionNormal.copy(playerPos).sub(sphere.center);
       const distanceSq = _collisionNormal.lengthSq();
@@ -2976,6 +3091,10 @@ export class Game {
     if (arguments.length > 0) damage = arguments[0] || 0;
     damage = Math.max(0, Math.round(damage));
 
+    if (this._levelComplete) {
+      return false;
+    }
+
     if (this.playerHitCooldown > 0 || this.lives <= 0) {
       return false;
     }
@@ -2991,15 +3110,15 @@ export class Game {
     }
 
     if (this.lives <= 0) {
-      this._gameOver();
+      this._startGameOverSequence();
     }
 
     return true;
   }
 
-  _showLevelCompleteScreen(reqDone, fastDone, shieldBonus, starSummary = {}) {
+  _showLevelCompleteScreen(reqDone, starSummary = {}) {
     this.paused = true;
-    this.hud.setGameplayVisible(false);
+    this.hud.setGameplayVisible(true);
     this.hud.hideTimer();
     if (this.crosshair) this.crosshair.classList.add('hidden');
     if (document.pointerLockElement) document.exitPointerLock();
@@ -3012,134 +3131,77 @@ export class Game {
     const stars = Math.min(3, Math.max(0, Math.floor(starSummary.stars ?? 0)));
     const completedObjectives = Math.max(0, Math.floor(starSummary.completedObjectives ?? 0));
     const totalObjectives = Math.max(0, Math.floor(starSummary.totalObjectives ?? 0));
-    const starIcons = `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`;
 
     if (reqDone && nextLevel) {
       unlockLevel(nextLevel);
     }
-
     if (reqDone) {
       recordLevelStars(this.levels.current, stars);
     }
 
     const title = el.querySelector('#level-complete-title');
-    const sub = el.querySelector('#level-complete-subtitle');
-    const starsEl = el.querySelector('#level-complete-stars');
-    const bonuses = el.querySelector('#level-complete-bonuses');
+    const starSpans = el.querySelectorAll('.lc-star');
+    const objectivesEl = el.querySelector('#level-complete-objectives');
+    const scoreEl = el.querySelector('#level-complete-score');
     const nextBtn = el.querySelector('#level-next-btn');
     const retryBtn = el.querySelector('#level-retry-btn');
-    const actions = el.querySelector('#level-complete-actions');
-    const cutsceneKicker = el.querySelector('#cutscene-kicker');
-    const cutsceneFrom = el.querySelector('#cutscene-from-label');
-    const cutsceneTo = el.querySelector('#cutscene-to-label');
-    const autoReturn = typeof this._onReturnToLevelSelect === 'function';
-
-    const currentSectorLabel = `SECTOR ${String(this.levels.current).padStart(2, '0')}`;
-    const destinationLabel = autoReturn
-      ? 'SECTOR MAP'
-      : reqDone
-        ? (nextLevel ? `SECTOR ${String(nextLevel).padStart(2, '0')}` : 'MISSION COMPLETE')
-        : 'RETRY SECTOR';
 
     if (title) {
       title.textContent = reqDone
         ? (mission?.successTitle ?? `SECTOR ${this.levels.current} CLEARED`)
         : 'TIME UP';
     }
-    if (sub) {
-      sub.textContent = reqDone
-        ? `${mission?.successSubtitle ?? 'Primary objectives complete.'}${autoReturn ? ' Returning to the sector map...' : ''}`
-        : `You ran out of time before the primary objectives were complete.${autoReturn ? ' Returning to the sector map...' : ''}`;
-    }
-    if (starsEl) {
-      starsEl.textContent = `STAR RATING ${starIcons}  (${completedObjectives}/${totalObjectives} OBJECTIVES)`;
-    }
-    if (bonuses) {
-      const earned = [
-        fastDone && 'Fast Destroyer bonus',
-        shieldBonus && 'Full Shield bonus',
-      ].filter(Boolean);
-      bonuses.textContent = earned.length ? earned.join('   ') : 'No bonus objectives completed.';
+
+    starSpans.forEach((span, i) => {
+      const filled = i < stars;
+      span.textContent = filled ? '★' : '☆';
+      span.classList.toggle('filled', filled);
+    });
+
+    if (objectivesEl) {
+      objectivesEl.textContent = `${completedObjectives}/${totalObjectives} objectives completed`;
     }
 
-    if (actions) {
-      actions.classList.toggle('hidden', autoReturn);
-    }
-
-    if (nextBtn) {
-      nextBtn.classList.toggle('hidden', autoReturn || !nextLevel);
-      nextBtn.textContent = nextLevel ? 'NEXT SECTOR' : 'MISSION COMPLETE';
-    }
-
-    if (retryBtn) {
-      retryBtn.classList.toggle('hidden', autoReturn);
-      retryBtn.textContent = reqDone && !nextLevel ? 'PLAY AGAIN' : 'RETRY SECTOR';
-    }
-
-    if (cutsceneKicker) {
-      cutsceneKicker.textContent = reqDone
-        ? (autoReturn ? 'RETURNING TO SECTOR MAP' : (nextLevel ? 'SECTOR TRANSITION' : 'MISSION COMPLETE'))
-        : (autoReturn ? 'MISSION FAILED' : 'RETRY LOCK');
-    }
-    if (cutsceneFrom) cutsceneFrom.textContent = currentSectorLabel;
-    if (cutsceneTo) cutsceneTo.textContent = destinationLabel;
-
-    const revealCompleteScreen = () => {
-      el.classList.remove('hidden');
-
-      if (autoReturn) {
-        this._scheduleReturnToLevelSelect(2400, { outcome: reqDone ? 'complete' : 'failed' });
+    const finalScore = Math.max(0, Math.floor(this.score));
+    if (scoreEl) {
+      scoreEl.textContent = '0'.padStart(6, '0');
+      // Cancel any previous counter
+      if (this._scoreCounterRaf) {
+        cancelAnimationFrame(this._scoreCounterRaf);
+        this._scoreCounterRaf = null;
       }
-    };
-
-    if (!this._screenFadeEl) {
-      revealCompleteScreen();
-      return;
+      const COUNTER_START_DELAY = 1100;
+      const COUNTER_DURATION = 1500;
+      const startTime = performance.now();
+      const tick = (now) => {
+        const elapsed = now - startTime - COUNTER_START_DELAY;
+        if (elapsed < 0) { this._scoreCounterRaf = requestAnimationFrame(tick); return; }
+        const progress = Math.min(1, elapsed / COUNTER_DURATION);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        scoreEl.textContent = Math.round(eased * finalScore).toString().padStart(6, '0');
+        if (progress < 1) this._scoreCounterRaf = requestAnimationFrame(tick);
+        else this._scoreCounterRaf = null;
+      };
+      this._scoreCounterRaf = requestAnimationFrame(tick);
     }
 
-    this._cancelLevelCompleteTransition();
-    this._setScreenFadeDuration(LEVEL_COMPLETE_FADE_MS);
-    this._levelCompleteFadeToken += 1;
-    const token = this._levelCompleteFadeToken;
+    if (nextBtn) nextBtn.textContent = 'SECTOR MAP';
+    if (retryBtn) retryBtn.textContent = 'RETRY';
 
-    this._screenFadeEl.classList.remove('hidden');
-    this._screenFadeEl.classList.add('visible');
-
-    this._levelCompleteFadeHoldTimeout = window.setTimeout(() => {
-      this._levelCompleteFadeHoldTimeout = null;
-      if (token !== this._levelCompleteFadeToken) return;
-
-      revealCompleteScreen();
-
-      requestAnimationFrame(() => {
-        if (token !== this._levelCompleteFadeToken) return;
-        this._screenFadeEl.classList.remove('visible');
-
-        const finish = () => {
-          if (token !== this._levelCompleteFadeToken) return;
-          if (this._levelCompleteFadeSafetyTimeout != null) {
-            window.clearTimeout(this._levelCompleteFadeSafetyTimeout);
-            this._levelCompleteFadeSafetyTimeout = null;
-          }
-          this._setScreenFadeDuration(LEVEL_ENTRY_FADE_MS);
-          this._screenFadeEl.classList.add('hidden');
-        };
-
-        this._screenFadeEl.addEventListener('transitionend', finish, { once: true });
-        this._levelCompleteFadeSafetyTimeout = window.setTimeout(finish, LEVEL_COMPLETE_FADE_MS + 100);
-      });
-    }, LEVEL_COMPLETE_FADE_HOLD_MS);
+    el.classList.remove('hidden', 'level-complete-reveal');
+    void el.offsetWidth;
+    el.classList.add('level-complete-reveal');
   }
 
   _onLevelNext() {
-    const nextLevel = this.levels.getNextLevel();
-    if (!nextLevel) return;
-
     this._cancelLevelCompleteTransition();
     this._levelCompleteEl?.classList.add('hidden');
-    this._enterLevel(nextLevel);
-    if (this.crosshair) this.crosshair.classList.remove('hidden');
-    this.canvas.requestPointerLock();
+    const completedLevel = this.levels.current;
+    if (typeof this._onReturnToLevelSelect === 'function') {
+      this._onReturnToLevelSelect({ level: completedLevel, outcome: 'complete' });
+    } else {
+      window.location.reload();
+    }
   }
 
   _onLevelRetry() {
@@ -3167,14 +3229,118 @@ export class Game {
 
 
   _gameOver() {
-    this.running = false;
+    const overlayAlreadyShown = this._deathOverlayShown;
+    this._deathSequenceActive = false;
+    this._gameOverActive = true;
+    this._deathSequenceTimer = 0;
+    this._deathOverlayShown = false;
     this.hud.setGameplayVisible(false);
     this.hud.setPauseVisible(false);
     if (this.crosshair) {
       this.crosshair.classList.add('hidden');
     }
-    this.hud.showMessage('GAME OVER');
-    this._scheduleReturnToLevelSelect(1800, { outcome: 'game_over' });
+    if (!overlayAlreadyShown) {
+      this.hud.showMessage('GAME OVER', {
+        animateIn: true,
+        keepDamageVignette: true,
+      });
+    }
+    this._scheduleReturnToLevelSelect(GAME_OVER_RETURN_DELAY_MS, { outcome: 'game_over' });
+  }
+
+  _startGameOverSequence() {
+    if (this._deathSequenceActive || !this.running) return;
+
+    this._deathSequenceActive = true;
+    this._gameOverActive = false;
+    this._deathSequenceTimer = DEATH_SEQUENCE_DURATION;
+    this._deathOverlayShown = false;
+    this.boostActive = false;
+    this._pauseUnlockArmed = false;
+    this.player.velocity.set(0, 0, 0);
+    this.input.releaseAll();
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+    if (this.crosshair) {
+      this.crosshair.classList.add('hidden');
+    }
+
+    const shipPos = this.player.mesh.position.clone();
+    this.player.mesh.visible = false;
+    this._spawnExplosion(shipPos, {
+      count: 380,
+      ttl: 1.2,
+      sizeScale: 1.0,
+      smokeSizeMultiplier: 1.05,
+      velocityScale: 1.1,
+    });
+    // this._spawnSparks(shipPos, {
+    //   count: 90,
+    //   ttl: 1.05,
+    //   speed: 34,
+    //   color: 0xff8855,
+    //   size: 2.2,
+    //   sizeScale: 1.6,
+    //   colorEnd: 0x1d0f09,
+    // });
+    this._playBoomSfx();
+
+    if (typeof this.hud?.setDeathVignette === 'function') {
+      this.hud.setDeathVignette(true);
+    }
+  }
+
+  _updateDeathSequence(rawDelta) {
+    soundtrackManager.setBoosting(false);
+    soundtrackManager.setThrusting(false);
+    this.hud.updateBoostBar(this.boostCharge, false);
+
+    // Keep effects simulating while player controls are locked out.
+    this._updateEffects(rawDelta);
+    this.renderer.render(this.scene, this.camera);
+
+    this._deathSequenceTimer = Math.max(0, this._deathSequenceTimer - Math.max(0, rawDelta));
+
+    const revealThreshold = Math.max(0, DEATH_SEQUENCE_DURATION - DEATH_OVERLAY_REVEAL_DELAY);
+    if (!this._deathOverlayShown && this._deathSequenceTimer <= revealThreshold) {
+      this._deathOverlayShown = true;
+      this.hud.showMessage('GAME OVER', {
+        animateIn: true,
+        keepDamageVignette: true,
+      });
+    }
+
+    if (this._deathSequenceTimer <= 0) {
+      this._gameOver();
+    }
+  }
+
+  _updateGameOverBackground(rawDelta) {
+    const delta = Math.max(0, rawDelta);
+
+    soundtrackManager.setBoosting(false);
+    soundtrackManager.setThrusting(false);
+
+    const playerPos = this.player.mesh.position;
+    const playerQuat = this.player.baseQuaternion;
+    const levelConfig = this.levels.getCurrentConfig();
+    const spawnConfig = this.levels.getSpawnConfig();
+
+    this.projectiles.update(delta);
+    this.asteroidField.setTargetCount(levelConfig?.boss?.asteroidTarget);
+    this.asteroidField.update(delta, playerPos);
+    this.debris.update(delta, spawnConfig, playerPos, playerQuat);
+    this.specialDebris.update(delta, spawnConfig, playerPos, playerQuat);
+    this.recycleDebris.update(delta, spawnConfig, playerPos, playerQuat);
+    this._updateTrashteroid(delta, rawDelta);
+    this._updateTrashteroidProjectiles(delta);
+
+    this._updateCamera(delta);
+    this._updateBackground(delta);
+    this.starfield.update(delta, this.camera);
+    this._updateEffects(delta);
+    this.renderer.render(this.scene, this.camera);
   }
 
   _victory() {

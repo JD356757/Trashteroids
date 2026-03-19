@@ -12,7 +12,7 @@ export const LEVEL_CONFIGS = {
       successTitle: 'SECTOR 1 CLEARED',
       successSubtitle: 'Required objective complete.',
       primary: {
-        trashRequired: 30,
+        trashRequired: 20,
         recycleRequired: 9,
       },
       bonus: {
@@ -53,7 +53,7 @@ export const LEVEL_CONFIGS = {
         trashRequired: 40,
         recycleRequired: 15,
         reachTrashteroid: true,
-        reachDistanceDisplay: 60,
+        reachDistanceDisplay: 1500,
       },
       bonus: {
         fastTrashRequired: 4,
