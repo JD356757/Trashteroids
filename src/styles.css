@@ -875,10 +875,10 @@ body::before {
 }
 
 #tutorial-callout[data-placement='top-left'] {
-  top: 148px;
+  top: 63%;
   left: 18px;
   width: min(340px, calc(100vw - 36px));
-  transform: translateY(0) scale(1);
+  transform: translateY(-50%) scale(1);
   text-align: left;
 }
 
@@ -901,7 +901,7 @@ body::before {
 
 #tutorial-callout[data-placement='top-left'].tutorial-callout-entering,
 #tutorial-callout[data-placement='top-left'].tutorial-callout-leaving {
-  transform: translateY(-10px) scale(0.97);
+  transform: translateY(calc(-50% - 10px)) scale(0.97);
 }
 
 #tutorial-callout-kicker {
@@ -2298,9 +2298,10 @@ body::before {
   }
 
   #tutorial-callout[data-placement='top-left'] {
-    top: 240px;
+    top: 50%;
     left: 12px;
     width: min(300px, calc(100vw - 24px));
+    transform: translateY(-50%) scale(1);
   }
 
   #tutorial-callout-timer {

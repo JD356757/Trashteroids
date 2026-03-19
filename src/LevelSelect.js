@@ -22,9 +22,9 @@ const DEFAULT_ACCESSIBILITY_SETTINGS = {
 };
 
 const LEVEL_DATA = [
-  { id: 1, label: 'LEVEL 1', sub: '15,000 mi from trashteroid', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
-  { id: 2, label: 'LEVEL 2', sub: '5,000 mi from trashteroid',   color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
-  { id: 3, label: 'LEVEL 3', sub: '1 mi from trashteroid — BOSS FIGHT',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
+  { id: 1, label: 'LEVEL 1', sub: '25,000 km from trashteroid', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
+  { id: 2, label: 'LEVEL 2', sub: '25,000 km from trashteroid',   color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
+  { id: 3, label: 'LEVEL 3', sub: '10 km from trashteroid — BOSS FIGHT',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
 ];
 
 function formatTrashLabel(count) {

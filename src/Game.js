@@ -60,6 +60,8 @@ const AIM_LOWERING = 0.035;
 const MIN_AIM_DISTANCE = 1.0; // ignore intersections closer than this to the camera
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
+const BASE_PLAYER_HEALTH = 100;
+const BOSS_PLAYER_HEALTH_MULTIPLIER = 2;
 const PLAYER_SENSITIVITY_STORAGE_KEY = 'trashteroid_mouse_sensitivity';
 const ACCESSIBILITY_SETTINGS_STORAGE_KEY = 'trashteroid_accessibility_settings';
 const DEFAULT_ACCESSIBILITY_SETTINGS = Object.freeze({
@@ -68,6 +70,7 @@ const DEFAULT_ACCESSIBILITY_SETTINGS = Object.freeze({
   musicVisualizer: false,
 });
 const DISPLAY_DISTANCE_SCALE = 0.45;
+const DISPLAY_KM_PER_MILE = 10;
 const TUTORIAL_TIME_SCALE = 1.0;
 const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
 const TUTORIAL_TIMED_BEAT_DURATION = 7;
@@ -111,7 +114,7 @@ const CUTSCENE_DEBRIS_EXPLODE_DELAY = 1.6;
 const TUTORIAL_BEATS = {
   move: {
     title: 'Move & Look',
-    message: 'Move the mouse to look around. Hold W to fly forward.',
+    message: 'Move the mouse to look around. Hold W to fly forward. Press Esc at any time to pause the game.',
     placement: 'center',
     requirements: [
       { id: 'look', label: 'Look around with the mouse' },
@@ -172,7 +175,7 @@ const TUTORIAL_BEATS = {
   },
   objectives: {
     title: 'Objectives',
-    message: 'Look at the top-left to view your objectives. Some are optional, but to earn three stars you must complete them too. That\'s it for the tutorial... you\'re on your own now!.',
+    message: 'Look at the top-left to view your objectives. Some are optional, but to earn three stars you must complete them too. You can press the escape key at any time to pause the game. That\'s it for the tutorial... you\'re on your own now!.',
     placement: 'top-left',
   },
 };
@@ -186,7 +189,9 @@ function toWorldDistance(displayDistance) {
 }
 
 function toDisplayDistance(worldDistance) {
-  return Math.max(0, Math.round(worldDistance * DISPLAY_DISTANCE_SCALE));
+  const kmDistance = Math.max(0, worldDistance * DISPLAY_DISTANCE_SCALE * DISPLAY_KM_PER_MILE);
+  const roundStep = kmDistance >= 1000 ? 100 : kmDistance >= 100 ? 10 : kmDistance >= 20 ? 5 : 1;
+  return Math.round(kmDistance / roundStep) * roundStep;
 }
 
 const EARTH_BACKGROUND_OFFSET = new THREE.Vector3(-1200, -600, -3500);
@@ -202,7 +207,8 @@ export class Game {
     this.running = false;
     this._elapsed = 0;
     this.score = 0;
-    this.lives = 100;
+    this._playerMaxHealth = BASE_PLAYER_HEALTH;
+    this.lives = this._playerMaxHealth;
     this.playerHitCooldown = 0;
     this.boostCharge = 1;
     this.boostActive = false;
@@ -211,7 +217,7 @@ export class Game {
     this.trashHits = 0;
     this._pauseUnlockArmed = false;
     this._startLevel = startLevel;
-    this._tutorialMode = this._startLevel === 1 && !!options.tutorialMode;
+    this._tutorialMode = this._startLevel === 1 && (options.tutorialMode ?? true);
     this._onReturnToLevelSelect = options.onReturnToLevelSelect ?? null;
     this._onHideLevelSelect = options.onHideLevelSelect ?? null;
     this._returnToLevelSelectTimeout = null;
@@ -950,10 +956,23 @@ export class Game {
     }
   }
 
+  _getPlayerMaxHealthForLevel(levelConfig) {
+    return levelConfig?.boss
+      ? BASE_PLAYER_HEALTH * BOSS_PLAYER_HEALTH_MULTIPLIER
+      : BASE_PLAYER_HEALTH;
+  }
+
+  _getPlayerHullPercent() {
+    const maxHealth = Math.max(1, this._playerMaxHealth || BASE_PLAYER_HEALTH);
+    return THREE.MathUtils.clamp((this.lives / maxHealth) * 100, 0, 100);
+  }
+
   _enterLevel(levelNumber, { resetPlayerPosition = false, resetRunStats = false } = {}) {
     const levelConfig = this.levels.getConfig(levelNumber);
     const mission = levelConfig.mission ?? {};
     const fastSpeedDisplay = mission.bonus?.fastSpeedDisplay ?? 200;
+    const previousMaxHealth = this._playerMaxHealth;
+    this._playerMaxHealth = this._getPlayerMaxHealthForLevel(levelConfig);
 
     this._clearScheduledReturnToLevelSelect();
     this._cancelLevelCompleteTransition();
@@ -978,10 +997,14 @@ export class Game {
 
     if (resetRunStats) {
       this.score = 0;
-      this.lives = 100;
+      this.lives = this._playerMaxHealth;
       this.shotsFired = 0;
       this.trashHits = 0;
+    } else if (previousMaxHealth > 0 && previousMaxHealth !== this._playerMaxHealth) {
+      const hullRatio = THREE.MathUtils.clamp(this.lives / previousMaxHealth, 0, 1);
+      this.lives = Math.round(hullRatio * this._playerMaxHealth);
     }
+    this.lives = THREE.MathUtils.clamp(this.lives, 0, this._playerMaxHealth);
 
     this.projectiles.clear();
     this.debris.clear();
@@ -994,7 +1017,7 @@ export class Game {
     this.hud.setBossBarVisible(!!levelConfig.boss);
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
     this.score = Math.max(0, this.score);
-    this.hud.update(this.score, this.levels.current, this.lives);
+    this.hud.update(this.score, this.levels.current, this._getPlayerHullPercent());
     this.hud.updateTimer(this._levelTimer);
     this.hud.updateObjectives(this._getMissionObjectiveState(false).objectives);
     this._refreshPauseMenu();
@@ -1784,7 +1807,7 @@ export class Game {
       objectives.push({
         label: reached
           ? 'Reach Trashteroid'
-          : `Reach Trashteroid (${distanceDisplay} mi out)`,
+          : `Reach Trashteroid (${distanceDisplay} km out)`,
         current: reached ? 1 : 0,
         target: 1,
         complete: reached,
@@ -1821,8 +1844,9 @@ export class Game {
     }
 
     const shieldThreshold = bonus.shieldThreshold;
-    const shieldBonus = shieldThreshold != null ? this.lives > shieldThreshold : false;
-    const shieldFailed = shieldThreshold != null ? this.lives <= shieldThreshold : false;
+    const currentHullPercent = this._getPlayerHullPercent();
+    const shieldBonus = shieldThreshold != null ? currentHullPercent > shieldThreshold : false;
+    const shieldFailed = shieldThreshold != null ? currentHullPercent <= shieldThreshold : false;
     if (shieldThreshold != null) {
       objectives.push({
         label: `Finish with over ${shieldThreshold}% shield`,
@@ -2632,7 +2656,7 @@ export class Game {
     this._updateMinimap();
 
     this.score = Math.max(0, this.score);
-    this.hud.update(this.score, this.levels.current, this.lives);
+    this.hud.update(this.score, this.levels.current, this._getPlayerHullPercent());
     this.hud.updateBoostBar(this.boostCharge, this.boostActive);
     this.hud.updateSpeedometer(this.player.velocity.length());
     const bandLevels = soundtrackManager.getBandLevels(this.hud.musicVisualizerBars?.length || 14);
@@ -3208,7 +3232,7 @@ export class Game {
     // trigger HUD damage flash and low-health indicator
     if (this.hud) {
       if (typeof this.hud.flashDamage === 'function') this.hud.flashDamage();
-      if (typeof this.hud.setLowHealth === 'function') this.hud.setLowHealth(this.lives <= 20);
+      if (typeof this.hud.setLowHealth === 'function') this.hud.setLowHealth(this._getPlayerHullPercent() <= 20);
     }
 
     if (this.lives <= 0) {
