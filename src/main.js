@@ -69,7 +69,8 @@ function launchGame({ levelId, tutorialMode }) {
   game?.dispose?.();
   game = new Game(canvas, levelId, {
     tutorialMode,
-    onReturnToLevelSelect: () => {
+    onReturnToLevelSelect: (payload) => {
+      const focusLevel = payload?.level ?? null;
       runScreenFade(() => {
         game?.dispose?.();
         game = null;
@@ -79,7 +80,7 @@ function launchGame({ levelId, tutorialMode }) {
         crosshair.classList.add('hidden');
         overlay.classList.add('hidden');
         introScene.showBackground();
-        levelSelect.show();
+        levelSelect.show({ focusLevel });
       });
     },
   });

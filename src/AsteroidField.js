@@ -111,6 +111,14 @@ export class AsteroidField {
     this._isInitialLoad = true;
 
     this._loadModels();
+
+    this._noSpawnCenter = null;
+    this._noSpawnRadius = 0;
+  }
+
+  setNoSpawnZone(center, radius) {
+    this._noSpawnCenter = center ?? null;
+    this._noSpawnRadius = radius ?? 0;
   }
 
   setTargetCount(count) {
@@ -178,6 +186,10 @@ export class AsteroidField {
   // Spawn helpers
   // ═══════════════════════════════════════════════════════════════════════════
   _canSpawnAt(center, radius, playerPosition, initialLoad) {
+    if (this._noSpawnCenter && this._noSpawnRadius > 0) {
+      if (center.distanceTo(this._noSpawnCenter) < this._noSpawnRadius) return false;
+    }
+
     if (!initialLoad) {
       const minPlayerDistance = MIN_SPAWN_DISTANCE + radius;
       if (center.distanceToSquared(playerPosition) < minPlayerDistance * minPlayerDistance) {

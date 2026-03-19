@@ -9,7 +9,7 @@ const _spawnOffset = new THREE.Vector3();
 const _offsets = [0.28, -0.28];
 const PROJECTILE_COLORS = {
   normal: { core: 0x00ff44, glow: 0x66ff88 },
-  vaporizer: { core: 0xffe600, glow: 0xfff27a },
+  vaporizer: { core: 0x47b8ed, glow: 0x89cff0 },
 };
 
 export class ProjectileManager {

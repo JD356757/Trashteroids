@@ -366,8 +366,22 @@ export class HUD {
   clearDamageIndicators() {
     if (!this.damageVignette) return;
     this._lowHealth = false;
-    this.damageVignette.classList.remove('low', 'pulsing', 'flashing', 'flash');
+    this.damageVignette.classList.remove('low', 'pulsing', 'flashing', 'flash', 'death');
     this.damageVignette.style.opacity = '0';
+  }
+
+  setDeathVignette(enabled) {
+    if (!this.damageVignette) return;
+
+    if (!enabled) {
+      this.damageVignette.classList.remove('death');
+      this.damageVignette.style.opacity = '0';
+      return;
+    }
+
+    this.damageVignette.classList.remove('flashing', 'pulsing');
+    this.damageVignette.classList.add('death');
+    this.damageVignette.style.opacity = '1';
   }
 
   updateBossBar(health, maxHealth) {
@@ -684,12 +698,30 @@ export class HUD {
     this.pauseSensitivityValue.textContent = `${displayValue}`;
   }
 
-  showMessage(text) {
-    this.clearDamageIndicators();
+  showMessage(text, options = {}) {
+    const animateIn = !!options.animateIn;
+    const keepDamageVignette = !!options.keepDamageVignette;
+
+    if (keepDamageVignette) {
+      this.setDeathVignette(true);
+    } else {
+      this.clearDamageIndicators();
+    }
     this.setGameplayVisible(false);
     this.setPauseVisible(false);
+
+    if (this.overlay) {
+      this.overlay.classList.remove('overlay-reveal');
+    }
+
     this.overlay.classList.remove('hidden');
     this.overlay.querySelector('h1').textContent = text;
+
+    if (animateIn && this.overlay) {
+      void this.overlay.offsetWidth;
+      this.overlay.classList.add('overlay-reveal');
+    }
+
     const btn = this.overlay.querySelector('#start-btn');
     btn.textContent = 'PLAY AGAIN';
     btn.onclick = () => window.location.reload();

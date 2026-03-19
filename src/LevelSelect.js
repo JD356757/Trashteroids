@@ -262,7 +262,7 @@ export class LevelSelect {
 
   /* ════════════════  public API  ════════════════ */
 
-  show() {
+  show({ focusLevel } = {}) {
     soundtrackManager.start();
     soundtrackManager.setInLevel(false);
     this.active = true;
@@ -292,6 +292,20 @@ export class LevelSelect {
     window.addEventListener('resize', this._onResize);
     this._clock.start();
     this._frame();
+
+    if (focusLevel != null) {
+      const levelData = LEVEL_DATA.find(l => l.id === focusLevel);
+      if (levelData && this._isLevelUnlocked(levelData.id)) {
+        const landingPos = levelData.pos.clone().add(new THREE.Vector3(0, 2, 0));
+        this.ship.position.copy(landingPos);
+        this._flightFrom.copy(landingPos);
+        this._flightTo.copy(landingPos);
+        this._flightProgress = 1;
+        this._selectedLevel = levelData;
+        this._shipArrived = true;
+        this._showPopup();
+      }
+    }
   }
 
   hide() {
