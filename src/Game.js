@@ -66,7 +66,7 @@ const DEFAULT_ACCESSIBILITY_SETTINGS = Object.freeze({
 const DISPLAY_DISTANCE_SCALE = 0.45;
 const TUTORIAL_TIME_SCALE = 1.0;
 const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
-const TUTORIAL_OBJECTIVES_HINT_DURATION = 3.2;
+const TUTORIAL_TIMED_BEAT_DURATION = 7;
 const TRASHTEROID_APPROACH_DISTANCE_WORLD = 15000 / DISPLAY_DISTANCE_SCALE;
 const TRASHTEROID_HIT_RADIUS = 72;
 const TRASHTEROID_COLLISION_RADIUS_SCALE = 0.68;
@@ -78,6 +78,14 @@ const TRASHTEROID_INVULNERABLE_DURATION = 30;
 const TRASHTEROID_VULNERABLE_DURATION = 30;
 const WRONG_BEAM_PENALTY = 2000;
 const PLAYER_SHOOT_HITSCAN = true;
+const BOOM_SFX_URL = '/boom.m4a';
+const BOOM_SFX_POOL_SIZE = 6;
+const BOOM_SFX_VOLUME = 0.72;
+const BOOM_SFX_VOLUME_VARIATION = 0.14;
+const BOOM_SFX_PITCH_VARIATION = 0.08;
+const PICKUP_SFX_URL = '/pickup.m4a';
+const PICKUP_SFX_POOL_SIZE = 6;
+const PICKUP_SFX_VOLUME = 0.7;
 const LEVEL_ENTRY_FADE_HOLD_MS = 280;
 const LEVEL_ENTRY_FADE_MS = 420;
 const LEVEL_COMPLETE_FADE_HOLD_MS = 220;
@@ -94,7 +102,7 @@ const TUTORIAL_BEATS = {
   },
   roll: {
     title: 'Roll',
-    message: 'Press A or D to roll your ship to the side.',
+    message: 'Press A or D while moving to roll your ship to the side.',
     placement: 'center',
     requirements: [
       { id: 'roll', label: 'Press A or D to roll' },
@@ -102,7 +110,7 @@ const TUTORIAL_BEATS = {
   },
   boost: {
     title: 'Boost',
-    message: 'Hold Space while flying forward to boost. Use it wisely — it drains while active, and recharges when not in use.',
+    message: 'Hold Space while flying forward to boost. Use it wisely: it drains while active, and recharges when not in use.',
     placement: 'center',
     requirements: [
       { id: 'boost', label: 'Hold Space while moving forward' },
@@ -110,7 +118,7 @@ const TUTORIAL_BEATS = {
   },
   fire: {
     title: 'Vaporizer',
-    message: 'Hold left click to fire the Vaporizer beam at regular trash!',
+    message: 'Hold left click to fire the Vaporizer beam at trash!',
     placement: 'center',
     requirements: [
       { id: 'fire', label: 'Hold left click to fire the Vaporizer' },
@@ -119,7 +127,7 @@ const TUTORIAL_BEATS = {
   },
   special: {
     title: 'Special Trash',
-    message: 'Yellow-outlined debris gives a huge bonus — use the Vaporizer (left click) to destroy it!',
+    message: 'Special types of trash, outlined in yellow, give you a huge bonus when vaporized. However, they are much rarer, so you\'ll have to search for them!',
     placement: 'center',
     requirements: [
       { id: 'special-trash', label: 'Destroy 1 special piece of trash' },
@@ -127,17 +135,27 @@ const TUTORIAL_BEATS = {
   },
   recycle: {
     title: 'Recycle Beam',
-    message: 'Cyan-outlined bins are recyclable — don\'t vaporize them! Hold Shift to fire the Recycle Beam and collect them for points.',
+    message: 'Blue-outlined bins are recyclable! Hold Shift to fire the Recycle Beam and collect them.',
     placement: 'center',
     requirements: [
       { id: 'recycle-fire', label: 'Hold Shift to fire the Recycle Beam' },
       { id: 'recycle-trash', label: 'Collect 1 recyclable with the Recycle Beam' },
     ],
   },
+  penalty: {
+    title: 'Penalties',
+    message: 'Try not to recycle green or yellow trash, or vaporize blue recyclables. If you do, you\'ll lose some of your score!',
+    placement: 'center',
+  },
+  crashing: {
+    title: 'Crashing',
+    message: 'Don\'t crash into space rocks or trash... it hurts!',
+    placement: 'bottom',
+  },
   objectives: {
     title: 'Objectives',
-    message: 'Look at the top-left to view your objectives. That\'s it for the tutorial... you\'re on your own now!.',
-    placement: 'center',
+    message: 'Look at the top-left to view your objectives. Some are optional, but to earn three stars you must complete them too. That\'s it for the tutorial... you\'re on your own now!.',
+    placement: 'top-left',
   },
 };
 
@@ -325,6 +343,26 @@ export class Game {
     this._popups = [];
     this._muzzles = [];
     this._enemyProjectiles = [];
+    this._boomSfxPool = [];
+    this._boomSfxCursor = 0;
+    for (let i = 0; i < BOOM_SFX_POOL_SIZE; i++) {
+      const boomSfx = document.createElement('audio');
+      boomSfx.src = BOOM_SFX_URL;
+      boomSfx.preload = 'auto';
+      boomSfx.crossOrigin = 'anonymous';
+      boomSfx.volume = BOOM_SFX_VOLUME;
+      this._boomSfxPool.push(boomSfx);
+    }
+    this._pickupSfxPool = [];
+    this._pickupSfxCursor = 0;
+    for (let i = 0; i < PICKUP_SFX_POOL_SIZE; i++) {
+      const pickupSfx = document.createElement('audio');
+      pickupSfx.src = PICKUP_SFX_URL;
+      pickupSfx.preload = 'auto';
+      pickupSfx.crossOrigin = 'anonymous';
+      pickupSfx.volume = PICKUP_SFX_VOLUME;
+      this._pickupSfxPool.push(pickupSfx);
+    }
     this._enemyTrashProjectileGeometriesByType = {
       normal: [
         new THREE.BoxGeometry(1.25, 0.95, 1.6),
@@ -398,6 +436,16 @@ export class Game {
     this.hud.hideTutorialCallout();
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
     this.hud.setBossBarVisible(false);
+    for (let i = 0; i < this._boomSfxPool.length; i++) {
+      const boomSfx = this._boomSfxPool[i];
+      boomSfx.pause();
+      boomSfx.currentTime = 0;
+    }
+    for (let i = 0; i < this._pickupSfxPool.length; i++) {
+      const pickupSfx = this._pickupSfxPool[i];
+      pickupSfx.pause();
+      pickupSfx.currentTime = 0;
+    }
     this._levelCompleteEl?.classList.add('hidden');
     this.hud.overlay?.classList.add('hidden');
     if (document.pointerLockElement === this.canvas) {
@@ -582,6 +630,62 @@ export class Game {
       muzzle.mesh.material?.dispose?.();
     }
     this._muzzles.length = 0;
+  }
+
+  _playBoomSfx() {
+    if (!this._boomSfxPool.length) return;
+
+    let selected = null;
+    for (let i = 0; i < this._boomSfxPool.length; i++) {
+      const index = (this._boomSfxCursor + i) % this._boomSfxPool.length;
+      const candidate = this._boomSfxPool[index];
+      if (candidate.paused || candidate.ended) {
+        selected = candidate;
+        this._boomSfxCursor = (index + 1) % this._boomSfxPool.length;
+        break;
+      }
+    }
+
+    if (!selected) {
+      selected = this._boomSfxPool[this._boomSfxCursor];
+      this._boomSfxCursor = (this._boomSfxCursor + 1) % this._boomSfxPool.length;
+    }
+
+    const volumeJitter = (Math.random() - 0.5) * BOOM_SFX_VOLUME_VARIATION;
+    const pitchJitter = (Math.random() - 0.5) * BOOM_SFX_PITCH_VARIATION;
+    selected.volume = THREE.MathUtils.clamp(BOOM_SFX_VOLUME + volumeJitter, 0, 1);
+    selected.playbackRate = THREE.MathUtils.clamp(1 + pitchJitter, 0.85, 1.2);
+    selected.currentTime = 0;
+    selected.play().catch(() => {
+      // Ignore autoplay/gesture restrictions and continue gameplay.
+    });
+  }
+
+  _playPickupSfx() {
+    if (!this._pickupSfxPool.length) return;
+
+    let selected = null;
+    for (let i = 0; i < this._pickupSfxPool.length; i++) {
+      const index = (this._pickupSfxCursor + i) % this._pickupSfxPool.length;
+      const candidate = this._pickupSfxPool[index];
+      if (candidate.paused || candidate.ended) {
+        selected = candidate;
+        this._pickupSfxCursor = (index + 1) % this._pickupSfxPool.length;
+        break;
+      }
+    }
+
+    if (!selected) {
+      selected = this._pickupSfxPool[this._pickupSfxCursor];
+      this._pickupSfxCursor = (this._pickupSfxCursor + 1) % this._pickupSfxPool.length;
+    }
+
+    selected.volume = PICKUP_SFX_VOLUME;
+    selected.playbackRate = 1;
+    selected.currentTime = 0;
+    selected.play().catch(() => {
+      // Ignore autoplay/gesture restrictions and continue gameplay.
+    });
   }
 
   _createTrashteroid() {
@@ -1693,6 +1797,8 @@ export class Game {
       fireShown: false,
       specialShown: false,
       recycleShown: false,
+      penaltyShown: false,
+      crashingShown: false,
       objectivesShown: false,
       transitionRemaining: 0,
       activeBeatId: null,
@@ -1727,7 +1833,9 @@ export class Game {
     if (beatId === 'fire') return { fired: false, trashDestroyed: false };
     if (beatId === 'special') return { specialDestroyed: false };
     if (beatId === 'recycle') return { recycleFired: false, recycleDestroyed: false };
-    if (beatId === 'objectives') return { remaining: TUTORIAL_OBJECTIVES_HINT_DURATION };
+    if (beatId === 'penalty' || beatId === 'crashing' || beatId === 'objectives') {
+      return { remaining: TUTORIAL_TIMED_BEAT_DURATION, duration: TUTORIAL_TIMED_BEAT_DURATION };
+    }
     return {};
   }
 
@@ -1780,9 +1888,20 @@ export class Game {
     const beat = TUTORIAL_BEATS[beatId];
     if (!beat) return;
 
+    const progress = this._tutorial.activeBeatProgress;
+    const isTimedBeat = (beatId === 'penalty' || beatId === 'crashing' || beatId === 'objectives')
+      && progress
+      && Number.isFinite(progress.duration)
+      && progress.duration > 0;
+    const timerProgress = isTimedBeat
+      ? THREE.MathUtils.clamp((progress.remaining ?? 0) / progress.duration, 0, 1)
+      : null;
+
     this.hud.showTutorialCallout(beat.title, beat.message, {
       placement: beat.placement,
       requirements: this._getTutorialRequirementStates(beatId, this._tutorial.activeBeatProgress),
+      showTimer: !!isTimedBeat,
+      timerProgress,
       animate,
     });
   }
@@ -1857,7 +1976,19 @@ export class Game {
       return;
     }
 
-    if (!this._tutorial.objectivesShown && this._tutorial.recycleShown) {
+    if (!this._tutorial.penaltyShown && this._tutorial.recycleShown) {
+      this._tutorial.penaltyShown = true;
+      this._startTutorialBeat('penalty');
+      return;
+    }
+
+    if (!this._tutorial.crashingShown && this._tutorial.penaltyShown) {
+      this._tutorial.crashingShown = true;
+      this._startTutorialBeat('crashing');
+      return;
+    }
+
+    if (!this._tutorial.objectivesShown && this._tutorial.crashingShown) {
       this._tutorial.objectivesShown = true;
       this._startTutorialBeat('objectives');
     }
@@ -1879,9 +2010,16 @@ export class Game {
       this._tutorial.transitionRemaining = Math.max(0, this._tutorial.transitionRemaining - rawDelta);
     }
 
-    if (this._tutorial.activeBeatId === 'objectives' && this._tutorial.activeBeatProgress) {
-      this._tutorial.activeBeatProgress.remaining -= rawDelta;
-      if (this._tutorial.activeBeatProgress.remaining <= 0) {
+    const tutorialProgress = this._tutorial.activeBeatProgress;
+    if (
+      tutorialProgress
+      && Number.isFinite(tutorialProgress.remaining)
+      && Number.isFinite(tutorialProgress.duration)
+      && tutorialProgress.duration > 0
+    ) {
+      tutorialProgress.remaining -= rawDelta;
+      this._updateTutorialBeatDisplay();
+      if (tutorialProgress.remaining <= 0) {
         this._completeActiveTutorialBeat();
         return;
       }
@@ -2265,6 +2403,7 @@ export class Game {
       this._checkProjectileDebrisCollisions(this.debris, 'normal');
       this._checkProjectileDebrisCollisions(this.recycleDebris, 'vaporizer');
       this._checkProjectileSpecialRewardCollisions();
+      this._checkProjectileSpecialPenaltyCollisions();
       this._checkProjectileRecyclePenaltyCollisions();
       this._checkProjectileTrashPenaltyCollisions();
     }
@@ -2343,6 +2482,7 @@ export class Game {
     const hitRadiusScale = 1.5;
     const canHitRegularTrash = type === 'normal';
     const canHitSpecialTrash = type === 'normal';
+    const canPenaltySpecialTrash = type === 'vaporizer';
     const canHitRecycleTrash = type === 'vaporizer';
     const canPenaltyRecycleTrash = type === 'normal';
     const canPenaltyRegularTrash = type === 'vaporizer';
@@ -2367,7 +2507,7 @@ export class Game {
       }
     }
 
-    if (canHitSpecialTrash) {
+    if (canHitSpecialTrash || canPenaltySpecialTrash) {
       const specialList = this.specialDebris.getActive();
       for (let i = 0; i < specialList.length; i++) {
         const radius = (specialList[i].hitRadius || 1) * hitRadiusScale + PROJECTILE_HIT_PADDING;
@@ -2375,7 +2515,7 @@ export class Game {
         if (distance >= bestDistance) continue;
         bestDistance = distance;
         bestHit = {
-          kind: 'special-reward',
+          kind: canHitSpecialTrash ? 'special-reward' : 'special-penalty',
           manager: this.specialDebris,
           index: i,
           position: specialList[i].position,
@@ -2452,6 +2592,7 @@ export class Game {
       }
       this._refreshPauseMenu();
       this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._playBoomSfx();
       this._spawnScorePopup(impactPoint.clone(), bestHit.points);
       bestHit.manager.remove(bestHit.index);
       return true;
@@ -2468,6 +2609,7 @@ export class Game {
       }
       this._refreshPauseMenu();
       this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._playBoomSfx();
       this._spawnScorePopup(impactPoint.clone(), bestHit.points);
       bestHit.manager.remove(bestHit.index);
       return true;
@@ -2479,17 +2621,22 @@ export class Game {
       this._recycleCollectedRequired++;
       this._noteTutorialRecycleDestroyed();
       this._refreshPauseMenu();
-      this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._playPickupSfx();
       this._spawnScorePopup(impactPoint.clone(), bestHit.points);
       bestHit.manager.remove(bestHit.index);
       return true;
     }
 
-    if (bestHit.kind === 'recycle-penalty' || bestHit.kind === 'normal-penalty') {
+    if (
+      bestHit.kind === 'recycle-penalty'
+      || bestHit.kind === 'normal-penalty'
+      || bestHit.kind === 'special-penalty'
+    ) {
       const penalty = WRONG_BEAM_PENALTY;
       this.score = Math.max(0, this.score - penalty);
       this._refreshPauseMenu();
       this._spawnExplosion(impactPoint.clone(), { count: 220, ttl: 1.4 });
+      this._playBoomSfx();
       this._spawnScorePopup(impactPoint.clone(), -penalty, { color: '#ff3b30' });
       bestHit.manager.remove(bestHit.index);
       return true;
@@ -2571,7 +2718,14 @@ export class Game {
             }
           }
           this._refreshPauseMenu();
-          this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          if (debrisManager !== this.recycleDebris) {
+            this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          }
+          if (debrisManager === this.recycleDebris) {
+            this._playPickupSfx();
+          } else {
+            this._playBoomSfx();
+          }
           this._spawnScorePopup(_closestPoint.clone(), points);
           this.projectiles.remove(i);
           debrisManager.remove(j);
@@ -2602,7 +2756,32 @@ export class Game {
           }
           this._refreshPauseMenu();
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          this._playBoomSfx();
           this._spawnScorePopup(_closestPoint.clone(), points);
+          this.projectiles.remove(i);
+          this.specialDebris.remove(j);
+          break;
+        }
+      }
+    }
+  }
+
+  _checkProjectileSpecialPenaltyCollisions() {
+    const projectiles = this.projectiles.getActive();
+    const debrisList = this.specialDebris.getActive();
+    const hitRadiusScale = 1.5;
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      if (projectiles[i].type !== 'vaporizer') continue;
+      for (let j = debrisList.length - 1; j >= 0; j--) {
+        const hitRadius = (debrisList[j].hitRadius || 1) * hitRadiusScale;
+        if (this._projectileHitsSphere(projectiles[i], debrisList[j].position, hitRadius)) {
+          const penalty = WRONG_BEAM_PENALTY;
+          this.score = Math.max(0, this.score - penalty);
+          this._refreshPauseMenu();
+          this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          this._playBoomSfx();
+          this._spawnScorePopup(_closestPoint.clone(), -penalty, { color: '#ff3b30' });
           this.projectiles.remove(i);
           this.specialDebris.remove(j);
           break;
@@ -2625,6 +2804,7 @@ export class Game {
           this.score = Math.max(0, this.score - penalty);
           this._refreshPauseMenu();
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          this._playBoomSfx();
           this._spawnScorePopup(_closestPoint.clone(), -penalty, { color: '#ff3b30' });
           this.projectiles.remove(i);
           this.recycleDebris.remove(j);
@@ -2648,6 +2828,7 @@ export class Game {
           this.score = Math.max(0, this.score - penalty);
           this._refreshPauseMenu();
           this._spawnExplosion(_closestPoint.clone(), { count: 220, ttl: 1.4 });
+          this._playBoomSfx();
           this._spawnScorePopup(_closestPoint.clone(), -penalty, { color: '#ff3b30' });
           this.projectiles.remove(i);
           this.debris.remove(j);
