@@ -208,7 +208,7 @@ export class HUD {
     this.bossIndicator.style.top = `${y}px`;
     this.bossIndicator.style.transform = `translate(-50%, -50%) rotate(${angle}rad)`;
     this.bossIndicatorDist.style.transform = `translateX(-50%) rotate(${-angle}rad)`;
-    this.bossIndicatorDist.textContent = `${label} ${distance} mi`;
+    this.bossIndicatorDist.textContent = `${label} ${distance} km`;
   }
 
   updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids) {
@@ -318,8 +318,8 @@ export class HUD {
 
     // Level label
     const labels = {
-      1: 'SECTOR 01 / 15,000 MI',
-      2: 'SECTOR 02 / 5,000 MI',
+      1: 'SECTOR 01 / 25,000 KM',
+      2: 'SECTOR 02 / 25,000 KM',
       3: 'SECTOR 03 / BOSS VEIL',
     };
     this.levelEl.textContent = labels[level] || `SECTOR ${level}`;
@@ -492,6 +492,12 @@ export class HUD {
 
   updateBoostBar(charge, active) {
     if (!this.boostBarFill || !this.boostBarContainer) return;
+
+    if (!this._gameplayVisible) {
+      this.boostBarContainer.classList.add('hidden');
+      return;
+    }
+
     this.boostBarContainer.classList.remove('hidden');
     const pct = Math.max(0, Math.min(1, charge)) * 100;
     this.boostBarFill.style.width = `${pct}%`;

@@ -5,7 +5,7 @@
 
 export const LEVEL_CONFIGS = {
   1: {
-    label: 'LEVEL 1 - 15,000 miles to trashteroid',
+    label: 'LEVEL 1 - 25,000 km to trashteroid',
     briefingTagline: 'To get closer to the trashteroid, you must clear out the giant trash fields surrounding Earth. Destroy enough of the pollution before time runs out.',
     timer: 120,
     mission: {
@@ -42,7 +42,7 @@ export const LEVEL_CONFIGS = {
     },
   },
   2: {
-    label: 'LEVEL 2 - 5,000 miles to trashteroid',
+    label: 'LEVEL 2 - 25,000 km to trashteroid',
     briefingTagline: 'Get to the trashteroid. Clear the path by destroying more trash.',
     timer: 180,
     trashteroidScale: 70,
@@ -82,7 +82,7 @@ export const LEVEL_CONFIGS = {
     },
   },
   3: {
-    label: 'LEVEL 3 - 0.1 mi from the trashteroid',
+    label: 'LEVEL 3 - 10 km from the trashteroid',
     briefingTagline: 'The trashteroid is heading for Earth, and chunks of trash are flying off of it. Destroy the trashteroid and its byproducts before it reaches Earth. Be quick… TIME IS RUNNING OUT!',
     timer: 300,
     mission: {
