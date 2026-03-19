@@ -8,7 +8,12 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "keywords": ["threejs", "game", "arcade", "space"],
+  "keywords": [
+    "threejs",
+    "game",
+    "arcade",
+    "space"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
