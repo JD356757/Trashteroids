@@ -11,9 +11,6 @@ import { HUD } from './HUD.js';
 import { Starfield } from './Starfield.js';
 import { AsteroidField } from './AsteroidField.js';
 import { soundtrackManager } from './AudioManager.js';
-
-// Reusable vectors for camera follow
-// Offset: higher + further back so ship sits in the lower portion of the screen
 const _camOffset = new THREE.Vector3(0, 6, 22);
 const _camTarget = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
@@ -57,7 +54,7 @@ const PLAYER_HIT_COOLDOWN = 1.0;
 const PROJECTILE_HIT_PADDING = 0.45;
 const AIM_FALLBACK_DISTANCE = 800;
 const AIM_LOWERING = 0.035;
-const MIN_AIM_DISTANCE = 1.0; // ignore intersections closer than this to the camera
+const MIN_AIM_DISTANCE = 1.0;
 const BOOST_DRAIN_RATE = 0.38;
 const BOOST_RECHARGE_RATE = 0.2;
 const BASE_PLAYER_HEALTH = 100;
