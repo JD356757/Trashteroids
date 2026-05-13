@@ -64,7 +64,9 @@ export const LEVEL_CONFIGS = {
         weakSpotsRequired: 6,
         weakSpotsTotal: 10,
       },
-      bonus: {},
+      bonus: {
+        shieldThreshold: 90,
+      },
     },
     spawn: {
       maxActive: 0,
@@ -150,24 +152,24 @@ export const LEVEL_CONFIGS = {
 
 export const LEVEL_BRIEFINGS = {
   1: [
-    { speaker: 'MISSION_CONTROL', text: "Pilot, you've just entered Earth orbit. The first thing you should do is complete your flight tutorial to get a feel for the ship's controls." },
-    { speaker: 'MISSION_CONTROL', text: "Once you've done that, your real mission begins. Destroy 5 trash clusters and collect 5 recyclables. This will clear a path for you to get to the Trashteroid. Once you get there, we'll send you into its core to destroy it from the inside out." },
-    { speaker: 'PILOT', text: "Roger that. Finish the tutorial, clear out the debris, and get to the Trashteroid." },
+    { speaker: 'MISSION_CONTROL', text: "Pilot, you've just entered Earth orbit. The first thing you should do is complete your flight tutorial to get a feel for the ship's controls.", voiceover: '/voiceovers/level1mc1cut.mp3' },
+    { speaker: 'MISSION_CONTROL', text: "Once you've done that, your real mission begins. Destroy 5 trash clusters and collect 5 recyclables. This will clear a path for you to get to the Trashteroid. Once you get there, we'll send you into its core to destroy it from the inside out.", voiceover: '/voiceovers/level1mc2cut.mp3' },
+    { speaker: 'PILOT', text: "Roger that. Finish the tutorial, clear out the debris, and get to the Trashteroid.", voiceover: '/voiceovers/level1pilot1cut.mp3' },
   ],
   2: [
-    { speaker: 'MISSION_CONTROL', text: "We identified structural weaknesses inside the Trashteroid's core. To destroy them, we've guided you inside the core, through a breach in the Trashteroid's surface." },
-    { speaker: 'PILOT', text: "I am inside. Radar is showing narrow, branching tunnels, large chambers, and debris scattered all around." },
-    { speaker: 'MISSION_CONTROL', text: "Ten weak spots are distributed throughout the tunnels. They'll glow red once you get close. Destroy at least six of them to weaken the Trashteroid." },
-    { speaker: 'MISSION_CONTROL', text: "Keep your speed under control and try to stay clear of the tunnel walls. We wouldn't want you crashing, now, would we..." },
-    { speaker: 'PILOT', text: "Understood. Going after the weak spots now." },
+    { speaker: 'MISSION_CONTROL', text: "We identified structural weaknesses inside the Trashteroid's core. To destroy them, we've guided you inside the core, through a breach in the Trashteroid's surface.", voiceover: '/voiceovers/level2mc1cut.mp3' },
+    { speaker: 'PILOT', text: "I am inside. Radar is showing narrow, branching tunnels, large chambers, and debris scattered all around.", voiceover: '/voiceovers/level2pilot1cut.mp3' },
+    { speaker: 'MISSION_CONTROL', text: "Ten weak spots are distributed throughout the tunnels. They'll glow red once you get close. Destroy at least six of them to weaken the Trashteroid.", voiceover: '/voiceovers/level2mc2cut.mp3' },
+    { speaker: 'MISSION_CONTROL', text: "Keep your speed under control and try to stay clear of the tunnel walls. We wouldn't want you crashing, now, would we...", voiceover: '/voiceovers/level2mc3cut.mp3' },
+    { speaker: 'PILOT', text: "Understood. Going after the weak spots now.", voiceover: '/voiceovers/level2pilot2cut.mp3' },
   ],
   3: [
-    { speaker: 'MISSION_CONTROL', text: "The interior collapse blew you back outside, but it did exactly what we needed. The Trashteroid's outer shell is breaking apart." },
-    { speaker: 'PILOT', text: "I can see that. The whole surface has debris shooting out of it." },
-    { speaker: 'MISSION_CONTROL', text: "Perfect, that means the job's half done. We just need you to finish it off. Here's the plan: you have to --- [STATIC] --- so that --- [STATIC] --- blow --- [STATIC]." },
-    { speaker: 'PILOT', text: "Mission Control, you're cutting out. I think the interior explosion must have damaged my comms system." },
-    { speaker: 'MISSION_CONTROL', text: "[STATIC]" },
-    { speaker: 'PILOT', text: "I'm on my own. If I keep grinding at the Trashteroid with my Vaporizer beam, I should be able to blow it up." },
+    { speaker: 'MISSION_CONTROL', text: "The interior collapse blew you back outside, but it did exactly what we needed. The Trashteroid's outer shell is breaking apart.", voiceover: '/voiceovers/level3mc1cut.mp3' },
+    { speaker: 'PILOT', text: "I can see that. The whole surface has debris shooting out of it.", voiceover: '/voiceovers/level3pilot1cut.mp3' },
+    { speaker: 'MISSION_CONTROL', text: "Perfect, that means the job's half done. We just need you to finish it off. Here's the plan: you have to --- [STATIC] --- so that --- [STATIC] --- blow --- [STATIC].", voiceover: '/voiceovers/level3mc2cut.mp3' },
+    { speaker: 'PILOT', text: "Mission Control, you're cutting out. I think the interior explosion must have damaged my comms system.", voiceover: '/voiceovers/level3pilot2cut.mp3' },
+    { speaker: 'MISSION_CONTROL', text: "[STATIC]", voiceover: '/voiceovers/static.mp3' },
+    { speaker: 'PILOT', text: "I'm on my own. If I keep grinding at the Trashteroid with my Vaporizer beam, I should be able to blow it up.", voiceover: '/voiceovers/level3pilot3cut.mp3' },
   ],
 };
 

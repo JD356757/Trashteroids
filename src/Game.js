@@ -383,6 +383,7 @@ export class Game {
     this._levelStatsSummary = null;
     this._commsAdvanceClickHandler = null;
     this._commsAdvanceKeyHandler = null;
+    this._commsVoiceoverAudio = null;
     this.clock = new THREE.Clock();
     this.crosshair = document.getElementById('crosshair');
 
@@ -1264,10 +1265,12 @@ export class Game {
       v.z += result.normal.z * reflect;
     }
 
-    // Small shield drain on scrape; cooldown-gated so continuous scraping
+    // Shield drain on impact scales with how hard the player hit the wall
+    // (inward velocity component). Cooldown-gated so continuous scraping
     // doesn't drain instantly.
     if (this._tunnelWallCooldown <= 0 && this.playerHitCooldown <= 0 && this.lives > 0) {
-      const damage = 2;
+      const impactSpeed = Math.max(0, -vDotN);
+      const damage = THREE.MathUtils.clamp(Math.round(3 + (impactSpeed / 120) * 7), 3, 10);
       this.lives = Math.max(0, this.lives - damage);
       this._tunnelWallCooldown = 0.45;
       if (this.hud) {
@@ -2349,11 +2352,11 @@ export class Game {
 
     const shieldThreshold = bonus.shieldThreshold;
     const currentHullPercent = this._getPlayerHullPercent();
-    const shieldBonus = shieldThreshold != null ? currentHullPercent > shieldThreshold : false;
-    const shieldFailed = shieldThreshold != null ? currentHullPercent <= shieldThreshold : false;
+    const shieldBonus = shieldThreshold != null ? currentHullPercent >= shieldThreshold : false;
+    const shieldFailed = shieldThreshold != null ? currentHullPercent < shieldThreshold : false;
     if (shieldThreshold != null) {
       objectives.push({
-        label: `Finish with over ${shieldThreshold}% shield`,
+        label: `Finish with ${shieldThreshold} shield`,
         current: 0,
         target: 1,
         complete: finalizeShield ? shieldBonus : false,
@@ -4277,6 +4280,37 @@ export class Game {
       window.removeEventListener('keydown', this._commsAdvanceKeyHandler);
       this._commsAdvanceKeyHandler = null;
     }
+    this._stopCommsVoiceover();
+  }
+
+  _playCommsVoiceover(url) {
+    this._stopCommsVoiceover();
+    if (!url) return;
+    let audio = this._commsVoiceoverAudio;
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.preload = 'auto';
+      audio.crossOrigin = 'anonymous';
+      audio.volume = 0.95;
+      this._commsVoiceoverAudio = audio;
+    }
+    if (audio.src !== new URL(url, window.location.href).href) {
+      audio.src = url;
+    }
+    try { audio.currentTime = 0; } catch (_) {}
+    const playPromise = audio.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {});
+    }
+  }
+
+  _stopCommsVoiceover() {
+    const audio = this._commsVoiceoverAudio;
+    if (!audio) return;
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch (_) {}
   }
 
   _addCommsMessageBubble(lineIndex) {
@@ -4286,6 +4320,8 @@ export class Game {
     if (!el || !line) return;
     const messagesEl = el.querySelector('#comms-messages');
     if (!messagesEl) return;
+
+    this._playCommsVoiceover(line.voiceover);
 
     // Ensure the continue prompt is visible from the moment a line begins
     // typing — not only after the line finishes. The launch label and the
