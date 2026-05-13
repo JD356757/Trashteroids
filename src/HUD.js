@@ -382,9 +382,9 @@ export class HUD {
 
     // Level label
     const labels = {
-      1: 'SECTOR 01 / 25,000 KM',
-      2: 'SECTOR 02 / 25,000 KM',
-      3: 'SECTOR 03 / BOSS VEIL',
+      1: 'SECTOR 01 / OUTER FIELD',
+      2: 'SECTOR 02 / TUNNEL GRID',
+      3: 'SECTOR 03 / FINAL ASSAULT',
     };
     this.levelEl.textContent = labels[level] || `SECTOR ${level}`;
 
