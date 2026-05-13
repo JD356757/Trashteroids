@@ -1957,24 +1957,6 @@ body::before {
   transform: translateX(-50%);
 }
 
-#weakspot-counter {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 12;
-  pointer-events: none;
-  font-family: 'Orbitron', sans-serif;
-  font-size: 12px;
-  letter-spacing: 0.2em;
-  color: #ffd0d8;
-  background: rgba(40, 8, 16, 0.55);
-  border: 1px solid rgba(255, 80, 100, 0.55);
-  border-radius: 4px;
-  padding: 6px 14px;
-  text-shadow: 0 0 8px rgba(255, 80, 100, 0.6);
-  box-shadow: 0 0 14px rgba(255, 80, 100, 0.25) inset;
-}
 
 #crosshair {
   position: fixed;

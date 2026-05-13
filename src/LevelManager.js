@@ -43,7 +43,7 @@ export const LEVEL_CONFIGS = {
   },
   2: {
     label: 'LEVEL 2 - Inside the trashteroid',
-    briefingTagline: "Breach the trashteroid's shell and destroy 7 of its 10 weak spots to weaken its core. Find them lodged in the tunnel walls.",
+    briefingTagline: "Breach the trashteroid's shell and destroy 6 of its 10 weak spots to weaken its core. Find them lodged in the tunnel walls.",
     timer: 180,
     interior: true,
     tunnelData: 'level2',
@@ -52,7 +52,7 @@ export const LEVEL_CONFIGS = {
       successTitle: 'CORE STRUCTURE COMPROMISED',
       successSubtitle: 'Trashteroid weakened. Final assault window open.',
       primary: {
-        weakSpotsRequired: 7,
+        weakSpotsRequired: 6,
         weakSpotsTotal: 10,
       },
       bonus: {},

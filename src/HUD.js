@@ -79,11 +79,6 @@ export class HUD {
       if (this.hudRoot) this.hudRoot.appendChild(wrap);
       this.weakSpotIndicators.push({ wrap, arrow, label });
     }
-    this.weakSpotCounter = document.createElement('div');
-    this.weakSpotCounter.id = 'weakspot-counter';
-    this.weakSpotCounter.className = 'hidden';
-    this.weakSpotCounter.textContent = '';
-    if (this.hudRoot) this.hudRoot.appendChild(this.weakSpotCounter);
     this._lowHealth = false;
     this._speedSamples = [];
     this._tutorialCalloutHideTimer = null;
@@ -131,7 +126,6 @@ export class HUD {
     if (this.weakSpotIndicators) {
       for (const ind of this.weakSpotIndicators) ind.wrap.classList.add('hidden');
     }
-    if (this.weakSpotCounter) this.weakSpotCounter.classList.add('hidden');
     if (this.trashteroidRangeAlertEl) this.trashteroidRangeAlertEl.classList.add('hidden');
     if (this.bossVulnerabilityEl) this.bossVulnerabilityEl.classList.add('hidden');
     if (this.tutorialCallout) this.tutorialCallout.classList.add('hidden');
@@ -237,7 +231,7 @@ export class HUD {
     this.bossIndicatorDist.textContent = `${label} ${distance} km`;
   }
 
-  updateWeakSpotIndicators(indicators, remaining, totalAlive) {
+  updateWeakSpotIndicators(indicators) {
     if (!this.weakSpotIndicators) return;
     for (let i = 0; i < this.weakSpotIndicators.length; i++) {
       const slot = this.weakSpotIndicators[i];
@@ -256,23 +250,12 @@ export class HUD {
       slot.label.style.transform = `rotate(${-data.angle}rad)`;
       slot.label.textContent = data.label;
     }
-
-    if (this.weakSpotCounter) {
-      if (typeof remaining !== 'number') {
-        this.weakSpotCounter.classList.add('hidden');
-      } else {
-        this.weakSpotCounter.classList.remove('hidden');
-        const aliveText = typeof totalAlive === 'number' ? ` (${totalAlive} marked)` : '';
-        this.weakSpotCounter.textContent = `WEAK SPOTS: ${remaining} REMAINING${aliveText}`;
-      }
-    }
   }
 
   hideWeakSpotIndicators() {
     if (this.weakSpotIndicators) {
       for (const slot of this.weakSpotIndicators) slot.wrap.classList.add('hidden');
     }
-    if (this.weakSpotCounter) this.weakSpotCounter.classList.add('hidden');
   }
 
   updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids) {
