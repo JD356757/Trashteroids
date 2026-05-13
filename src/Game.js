@@ -50,6 +50,10 @@ const _cutsceneCamTarget = new THREE.Vector3();
 const _cutsceneDir = new THREE.Vector3();
 const _cutsceneSurfacePoint = new THREE.Vector3();
 const PLAYER_COLLISION_RADIUS = 1.1;
+// Effective sphere radius for tunnel-wall push-out. Larger than the player
+// hitbox so the camera (which trails ~22 units behind) and the displaced
+// baked-mesh walls stay clear.
+const TUNNEL_WALL_PLAYER_RADIUS = 55;
 const ASTEROID_BOUNCE = 0.35;
 const ASTEROID_SURFACE_FRICTION = 0.92;
 const PLAYER_HIT_COOLDOWN = 1.0;
@@ -1048,6 +1052,132 @@ export class Game {
     }
   }
 
+  _resolveTunnelPlayerCollision(delta) {
+    const maze = this._tunnelMaze;
+    if (!maze || typeof maze.pushOutSphere !== 'function') return;
+
+    this._tunnelWallCooldown = Math.max(0, (this._tunnelWallCooldown ?? 0) - delta);
+
+    if (!this._tunnelCollisionResult) {
+      this._tunnelCollisionResult = {
+        pos: new THREE.Vector3(),
+        normal: new THREE.Vector3(),
+        hit: false,
+      };
+    }
+    const result = this._tunnelCollisionResult;
+    const playerPos = this.player.mesh.position;
+    maze.pushOutSphere(playerPos, TUNNEL_WALL_PLAYER_RADIUS, result);
+    if (!result.hit) return;
+
+    playerPos.copy(result.pos);
+
+    // Reflect velocity along inward normal (bounce with restitution)
+    const v = this.player.velocity;
+    const vDotN = v.x * result.normal.x + v.y * result.normal.y + v.z * result.normal.z;
+    if (vDotN < 0) {
+      const reflect = -vDotN * (1 + ASTEROID_BOUNCE);
+      v.x += result.normal.x * reflect;
+      v.y += result.normal.y * reflect;
+      v.z += result.normal.z * reflect;
+    }
+
+    // Small shield drain on scrape; cooldown-gated so continuous scraping
+    // doesn't drain instantly.
+    if (this._tunnelWallCooldown <= 0 && this.playerHitCooldown <= 0 && this.lives > 0) {
+      const damage = 2;
+      this.lives = Math.max(0, this.lives - damage);
+      this._tunnelWallCooldown = 0.45;
+      if (this.hud) {
+        if (typeof this.hud.flashDamage === 'function') this.hud.flashDamage();
+        if (typeof this.hud.setLowHealth === 'function') {
+          this.hud.setLowHealth(this._getPlayerHullPercent() <= 20);
+        }
+      }
+      if (this.lives <= 0 && !this._deathSequenceActive && !this._gameOverActive) {
+        this._startGameOverSequence();
+      }
+    }
+  }
+
+  _resolveTunnelProjectileCollisions() {
+    const maze = this._tunnelMaze;
+    if (!maze || typeof maze.segmentVsWalls !== 'function') return;
+
+    const projectiles = this.projectiles?.getActive?.();
+    if (!projectiles || projectiles.length === 0) return;
+
+    if (!this._projectileWallResult) {
+      this._projectileWallResult = {
+        hit: false,
+        t: 0,
+        point: new THREE.Vector3(),
+        normal: new THREE.Vector3(),
+      };
+    }
+    const result = this._projectileWallResult;
+
+    const weakSpots = typeof maze.getWeakSpots === 'function' ? maze.getWeakSpots() : null;
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      if (p.moveDelayFrames > 0) continue;
+
+      // Check weak spots first — they sit inward of the walls, so a bullet
+      // that hits a spot necessarily hits it before reaching the wall.
+      let consumedBySpot = false;
+      if (weakSpots) {
+        for (let j = 0; j < weakSpots.length; j++) {
+          const ws = weakSpots[j];
+          if (!ws.alive) continue;
+          if (this._segmentIntersectsSphere(p.prevPosition, p.position, ws.mesh.position, ws.hitRadius)) {
+            const hitPoint = _closestPoint.clone();
+            const damage = 20;
+            const outcome = maze.damageWeakSpot(j, damage);
+            if (outcome.destroyed) {
+              this._weakSpotsDestroyed = (this._weakSpotsDestroyed ?? 0) + 1;
+              this._spawnExplosion(ws.mesh.position.clone(), {
+                count: 90,
+                ttl: 2.2,
+                sizeScale: 6.5,
+                velocityScale: 9.6,
+                smokeSizeMultiplier: 4.5,
+              });
+              this._playBoomSfx();
+              this.score += 500;
+            } else {
+              this._spawnSparks(hitPoint, {
+                count: 22,
+                speed: 28,
+                ttl: 0.55,
+                color: 0xff5544,
+                colorEnd: 0x330000,
+                size: 1.4,
+              });
+            }
+            this.projectiles.remove(i);
+            consumedBySpot = true;
+            break;
+          }
+        }
+      }
+      if (consumedBySpot) continue;
+
+      maze.segmentVsWalls(p.prevPosition, p.position, result);
+      if (result.hit) {
+        this._spawnSparks(result.point.clone(), {
+          count: 14,
+          speed: 18,
+          ttl: 0.4,
+          color: 0xffb070,
+          colorEnd: 0x331100,
+          size: 1.1,
+        });
+        this.projectiles.remove(i);
+      }
+    }
+  }
+
   _getPlayerMaxHealthForLevel(levelConfig) {
     return levelConfig?.boss
       ? BASE_PLAYER_HEALTH * BOSS_PLAYER_HEALTH_MULTIPLIER
@@ -1830,6 +1960,88 @@ export class Game {
     const distance = toDisplayDistance(surfaceDistWorld);
 
     this.hud.updateBossIndicator(true, x, y, indicatorAngle, Math.max(1, distance), 'TRASHTEROID');
+  }
+
+  _updateWeakSpotIndicators(levelConfig) {
+    if (!this.hud || typeof this.hud.updateWeakSpotIndicators !== 'function') return;
+    const maze = this._tunnelMaze;
+    if (!maze || typeof maze.getWeakSpots !== 'function') {
+      this.hud.hideWeakSpotIndicators();
+      return;
+    }
+    const spots = maze.getWeakSpots();
+    if (!spots || spots.length === 0) {
+      this.hud.hideWeakSpotIndicators();
+      return;
+    }
+
+    if (!this._weakSpotIndicatorBuf) this._weakSpotIndicatorBuf = [];
+    const ranked = this._weakSpotIndicatorBuf;
+    ranked.length = 0;
+    const playerPos = this.player.mesh.position;
+    let aliveCount = 0;
+    for (const ws of spots) {
+      if (!ws.alive) continue;
+      aliveCount++;
+      const dx = ws.mesh.position.x - playerPos.x;
+      const dy = ws.mesh.position.y - playerPos.y;
+      const dz = ws.mesh.position.z - playerPos.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      ranked.push({ ws, distSq });
+    }
+    ranked.sort((a, b) => a.distSq - b.distSq);
+    const showCount = Math.min(3, ranked.length);
+
+    const indicators = [];
+    const centerX = window.innerWidth * 0.5;
+    const centerY = window.innerHeight * 0.5;
+    const radiusX = Math.max(120, window.innerWidth * 0.36);
+    const radiusY = Math.max(90, window.innerHeight * 0.26);
+    const camera = this.camera;
+    const camInv = this._weakSpotCamInv ?? (this._weakSpotCamInv = new THREE.Quaternion());
+    camInv.copy(camera.quaternion).invert();
+
+    for (let i = 0; i < showCount; i++) {
+      const entry = ranked[i];
+      const pos = entry.ws.mesh.position;
+      _targetScreenPos.copy(pos).project(camera);
+      const onScreen =
+        _targetScreenPos.z > -1 &&
+        _targetScreenPos.z < 1 &&
+        Math.abs(_targetScreenPos.x) <= 1 &&
+        Math.abs(_targetScreenPos.y) <= 1;
+      const projectedX = centerX + _targetScreenPos.x * centerX;
+      const projectedY = centerY - _targetScreenPos.y * centerY;
+
+      _targetOffset.copy(pos).sub(camera.position).applyQuaternion(camInv);
+      let angle = Math.atan2(_targetOffset.x, _targetOffset.y);
+      if (_targetOffset.z > 0) angle += Math.PI;
+
+      const x = onScreen ? projectedX : centerX + Math.sin(angle) * radiusX;
+      const y = onScreen ? projectedY : centerY - Math.cos(angle) * radiusY;
+      const dist = Math.sqrt(entry.distSq);
+      const displayDist = toDisplayDistance(dist);
+
+      // Closer + on-screen → bigger, more opaque. Distant ones smaller.
+      const proximity = THREE.MathUtils.clamp(1 - dist / 6000, 0, 1);
+      const scale = onScreen ? 0.85 + proximity * 0.6 : 1.0;
+      const opacity = onScreen ? 0.7 + proximity * 0.3 : 0.85;
+
+      indicators.push({
+        x,
+        y,
+        angle: onScreen ? 0 : angle,
+        onScreen,
+        scale,
+        opacity,
+        label: `${displayDist} km`,
+      });
+    }
+
+    const required = levelConfig?.mission?.primary?.weakSpotsRequired ?? 0;
+    const destroyed = this._weakSpotsDestroyed ?? 0;
+    const remaining = Math.max(0, required - destroyed);
+    this.hud.updateWeakSpotIndicators(indicators, remaining, aliveCount);
   }
 
   _updateTrashteroidRangeAlert() {
@@ -2673,10 +2885,16 @@ export class Game {
 
     // Update subsystems
     this.player.update(delta);
-    this.projectiles.update(delta);
     const playerPos = this.player.mesh.position;
     const playerQuat = this.player.baseQuaternion;
     const levelConfig = this.levels.getCurrentConfig();
+    if (levelConfig.interior && this._tunnelMaze) {
+      this._resolveTunnelPlayerCollision(delta);
+    }
+    this.projectiles.update(delta);
+    if (levelConfig.interior && this._tunnelMaze) {
+      this._resolveTunnelProjectileCollisions();
+    }
     const hasBossLevel = !!levelConfig.boss;
     const spawnConfig = this.levels.getSpawnConfig();
     const missionConfig = this.levels.getMissionConfig();
@@ -2790,6 +3008,11 @@ export class Game {
     this._updateMissionTargetIndicator();
     this._updateTrashteroidRangeAlert();
     this._updateMinimap();
+    if (levelConfig.interior && this._tunnelMaze) {
+      this._updateWeakSpotIndicators(levelConfig);
+    } else if (this.hud && typeof this.hud.hideWeakSpotIndicators === 'function') {
+      this.hud.hideWeakSpotIndicators();
+    }
 
     this.score = Math.max(0, this.score);
     this.hud.update(this.score, this.levels.current, this._getPlayerHullPercent());

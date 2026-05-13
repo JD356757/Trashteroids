@@ -62,6 +62,28 @@ export class HUD {
       this.hudRoot.appendChild(this.trashteroidRangeAlertEl);
       this.hudRoot.appendChild(this.bossVulnerabilityEl);
     }
+
+    // Weak-spot indicators: up to 3 simultaneous floating markers + a small
+    // counter badge. Only enabled on interior levels by the game.
+    this.weakSpotIndicators = [];
+    for (let i = 0; i < 3; i++) {
+      const wrap = document.createElement('div');
+      wrap.className = 'weakspot-indicator hidden';
+      const arrow = document.createElement('div');
+      arrow.className = 'weakspot-indicator-arrow';
+      const label = document.createElement('div');
+      label.className = 'weakspot-indicator-label';
+      label.textContent = '';
+      wrap.appendChild(arrow);
+      wrap.appendChild(label);
+      if (this.hudRoot) this.hudRoot.appendChild(wrap);
+      this.weakSpotIndicators.push({ wrap, arrow, label });
+    }
+    this.weakSpotCounter = document.createElement('div');
+    this.weakSpotCounter.id = 'weakspot-counter';
+    this.weakSpotCounter.className = 'hidden';
+    this.weakSpotCounter.textContent = '';
+    if (this.hudRoot) this.hudRoot.appendChild(this.weakSpotCounter);
     this._lowHealth = false;
     this._speedSamples = [];
     this._tutorialCalloutHideTimer = null;
@@ -106,6 +128,10 @@ export class HUD {
     if (this.bossContainer) this.bossContainer.classList.add('hidden');
     if (this.minimap) this.minimap.classList.add('hidden');
     if (this.bossIndicator) this.bossIndicator.classList.add('hidden');
+    if (this.weakSpotIndicators) {
+      for (const ind of this.weakSpotIndicators) ind.wrap.classList.add('hidden');
+    }
+    if (this.weakSpotCounter) this.weakSpotCounter.classList.add('hidden');
     if (this.trashteroidRangeAlertEl) this.trashteroidRangeAlertEl.classList.add('hidden');
     if (this.bossVulnerabilityEl) this.bossVulnerabilityEl.classList.add('hidden');
     if (this.tutorialCallout) this.tutorialCallout.classList.add('hidden');
@@ -209,6 +235,44 @@ export class HUD {
     this.bossIndicator.style.transform = `translate(-50%, -50%) rotate(${angle}rad)`;
     this.bossIndicatorDist.style.transform = `translateX(-50%) rotate(${-angle}rad)`;
     this.bossIndicatorDist.textContent = `${label} ${distance} km`;
+  }
+
+  updateWeakSpotIndicators(indicators, remaining, totalAlive) {
+    if (!this.weakSpotIndicators) return;
+    for (let i = 0; i < this.weakSpotIndicators.length; i++) {
+      const slot = this.weakSpotIndicators[i];
+      const data = indicators?.[i];
+      if (!data) {
+        if (!slot.wrap.classList.contains('hidden')) slot.wrap.classList.add('hidden');
+        continue;
+      }
+      slot.wrap.classList.remove('hidden');
+      slot.wrap.style.left = `${data.x}px`;
+      slot.wrap.style.top = `${data.y}px`;
+      slot.wrap.style.transform = `translate(-50%, -50%) rotate(${data.angle}rad)`;
+      slot.wrap.style.opacity = `${data.opacity}`;
+      slot.wrap.style.setProperty('--ws-scale', `${data.scale}`);
+      slot.arrow.classList.toggle('off-screen', !data.onScreen);
+      slot.label.style.transform = `rotate(${-data.angle}rad)`;
+      slot.label.textContent = data.label;
+    }
+
+    if (this.weakSpotCounter) {
+      if (typeof remaining !== 'number') {
+        this.weakSpotCounter.classList.add('hidden');
+      } else {
+        this.weakSpotCounter.classList.remove('hidden');
+        const aliveText = typeof totalAlive === 'number' ? ` (${totalAlive} marked)` : '';
+        this.weakSpotCounter.textContent = `WEAK SPOTS: ${remaining} REMAINING${aliveText}`;
+      }
+    }
+  }
+
+  hideWeakSpotIndicators() {
+    if (this.weakSpotIndicators) {
+      for (const slot of this.weakSpotIndicators) slot.wrap.classList.add('hidden');
+    }
+    if (this.weakSpotCounter) this.weakSpotCounter.classList.add('hidden');
   }
 
   updateMinimap(visible, bossPos, playerPos, camInvQuat, asteroids) {

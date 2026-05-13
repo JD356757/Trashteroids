@@ -1916,6 +1916,66 @@ body::before {
   white-space: nowrap;
 }
 
+.weakspot-indicator {
+  --ws-scale: 1;
+  position: fixed;
+  z-index: 12;
+  pointer-events: none;
+  transform-origin: center;
+}
+
+.weakspot-indicator-arrow {
+  font-size: calc(20px * var(--ws-scale));
+  color: #ff4a5c;
+  text-shadow:
+    0 0 10px rgba(255, 60, 80, 0.95),
+    0 0 22px rgba(255, 100, 120, 0.55);
+  line-height: 1;
+  text-align: center;
+}
+
+.weakspot-indicator-arrow::before {
+  content: '◆';
+}
+.weakspot-indicator-arrow.off-screen::before {
+  content: '▲';
+}
+.weakspot-indicator-arrow.off-screen {
+  font-size: calc(22px * var(--ws-scale));
+}
+
+.weakspot-indicator-label {
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  color: #ffd0d8;
+  letter-spacing: 0.16em;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.75);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+#weakspot-counter {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  pointer-events: none;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: #ffd0d8;
+  background: rgba(40, 8, 16, 0.55);
+  border: 1px solid rgba(255, 80, 100, 0.55);
+  border-radius: 4px;
+  padding: 6px 14px;
+  text-shadow: 0 0 8px rgba(255, 80, 100, 0.6);
+  box-shadow: 0 0 14px rgba(255, 80, 100, 0.25) inset;
+}
+
 #crosshair {
   position: fixed;
   top: 53%;
