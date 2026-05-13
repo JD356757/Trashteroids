@@ -53,7 +53,7 @@ export const LEVEL_CONFIGS = {
   2: {
     label: 'LEVEL 2 - Inside the trashteroid',
     briefingTagline: "Navigate the dark tunnels inside the trashteroid's core. Look for weak spots and destroy them. But if you spend too long inside, you won't survive...",
-    timer: 0,
+    timer: 180,
     interior: true,
     tunnelData: 'level2',
     bakedMeshUrl: '/models/level2_interior.glb',
@@ -61,7 +61,7 @@ export const LEVEL_CONFIGS = {
       successTitle: 'TRASHTEROID STRUCTURE COMPROMISED',
       successSubtitle: 'You weakened the outer shell of the Trashteroid. Now destroy it from the outside, once and for all.',
       primary: {
-        weakSpotsRequired: 7,
+        weakSpotsRequired: 6,
         weakSpotsTotal: 10,
       },
       bonus: {},
@@ -157,7 +157,7 @@ export const LEVEL_BRIEFINGS = {
   2: [
     { speaker: 'MISSION_CONTROL', text: "We identified structural weaknesses inside the Trashteroid's core. To destroy them, we've guided you inside the core, through a breach in the Trashteroid's surface." },
     { speaker: 'PILOT', text: "I am inside. Radar is showing narrow, branching tunnels, large chambers, and debris scattered all around." },
-    { speaker: 'MISSION_CONTROL', text: "Ten weak spots are distributed throughout the tunnels. They'll glow red once you get close. Destroy at least seven of them to weaken the Trashteroid." },
+    { speaker: 'MISSION_CONTROL', text: "Ten weak spots are distributed throughout the tunnels. They'll glow red once you get close. Destroy at least six of them to weaken the Trashteroid." },
     { speaker: 'MISSION_CONTROL', text: "Keep your speed under control and try to stay clear of the tunnel walls. We wouldn't want you crashing, now, would we..." },
     { speaker: 'PILOT', text: "Understood. Going after the weak spots now." },
   ],

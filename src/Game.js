@@ -1950,7 +1950,7 @@ export class Game {
     this.hud.updateBossIndicator(true, x, y, indicatorAngle, Math.max(1, distance), 'TRASHTEROID');
   }
 
-  _updateWeakSpotIndicators(levelConfig) {
+  _updateWeakSpotIndicators() {
     if (!this.hud || typeof this.hud.updateWeakSpotIndicators !== 'function') return;
     const maze = this._tunnelMaze;
     if (!maze || typeof maze.getWeakSpots !== 'function') {
@@ -1967,10 +1967,8 @@ export class Game {
     const ranked = this._weakSpotIndicatorBuf;
     ranked.length = 0;
     const playerPos = this.player.mesh.position;
-    let aliveCount = 0;
     for (const ws of spots) {
       if (!ws.alive) continue;
-      aliveCount++;
       const dx = ws.mesh.position.x - playerPos.x;
       const dy = ws.mesh.position.y - playerPos.y;
       const dz = ws.mesh.position.z - playerPos.z;
@@ -2043,10 +2041,7 @@ export class Game {
       });
     }
 
-    const required = levelConfig?.mission?.primary?.weakSpotsRequired ?? 0;
-    const destroyed = this._weakSpotsDestroyed ?? 0;
-    const remaining = Math.max(0, required - destroyed);
-    this.hud.updateWeakSpotIndicators(indicators, remaining, aliveCount);
+    this.hud.updateWeakSpotIndicators(indicators);
   }
 
   _updateTrashteroidRangeAlert() {
@@ -2283,6 +2278,17 @@ export class Game {
     this.player.turnInputYaw = 0;
     this.player.turnInputPitch = 0;
     this.player.manualRollInput = 0;
+
+    const levelConfig = this.levels.getCurrentConfig();
+    if (primaryComplete && levelConfig.interior && this._tunnelMaze) {
+      this._triggerTunnelCollapseFx();
+      // Hold the level-complete screen until the explosion sequence finishes
+      // (~2.1s) plus a small linger so the player sees the last bursts.
+      this._levelCompleteControlLockRemaining = Math.max(
+        this._levelCompleteControlLockRemaining,
+        2.6,
+      );
+    }
     this.hud.updateObjectives(state.objectives);
     this.hud.hideTimer();
     this.hud.setBossBarVisible(false);
@@ -3041,7 +3047,7 @@ export class Game {
     this._updateTrashteroidRangeAlert();
     this._updateMinimap();
     if (levelConfig.interior && this._tunnelMaze) {
-      this._updateWeakSpotIndicators(levelConfig);
+      this._updateWeakSpotIndicators();
     } else if (this.hud && typeof this.hud.hideWeakSpotIndicators === 'function') {
       this.hud.hideWeakSpotIndicators();
     }
@@ -5162,6 +5168,35 @@ export class Game {
   }
 
   // Larger explosion effect for debris destruction
+  _triggerTunnelCollapseFx() {
+    const maze = this._tunnelMaze;
+    if (!maze || typeof maze.getWallSamplePointsNear !== 'function') return;
+    const playerPos = this.player.mesh.position;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.player.baseQuaternion);
+    let points = maze.getWallSamplePointsNear(playerPos.clone(), 30, 1500, forward);
+    // If the player is in a tight pocket and not enough forward candidates
+    // exist, widen the search and drop the forward filter.
+    if (points.length < 8) {
+      points = maze.getWallSamplePointsNear(playerPos.clone(), 30, 2200, null);
+    }
+    if (!points.length) return;
+    const stagger = 70; // ms between bursts → total ~2.1s for 30 points
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      setTimeout(() => {
+        if (!this.running) return;
+        this._spawnExplosion(pt, {
+          count: 45,
+          ttl: 1.4,
+          sizeScale: 4.5,
+          velocityScale: 5.5,
+          smokeSizeMultiplier: 2.8,
+        });
+        if ((i % 4) === 0) this._playBoomSfx();
+      }, i * stagger);
+    }
+  }
+
   _spawnExplosion(pos, options = {}) {
     const reducedFlashing = this._isReducedFlashing();
     const baseCount = options.count || 220;

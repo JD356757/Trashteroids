@@ -85,9 +85,9 @@ export class TunnelMaze {
       const pulseRate = 3.2 * (1 + damage * 1.5);
       const pulse = 0.5 + 0.5 * Math.sin(this._pulseTime * pulseRate);
 
-      // Base scale grows from 1.0 → ~1.9 as HP depletes, plus pulse breathing.
-      const baseScale = 1 + damage * 0.9;
-      const breathe = 0.18 + damage * 0.25;
+      // Base scale grows from 1.0 → ~1.25 as HP depletes, plus pulse breathing.
+      const baseScale = 1 + damage * 0.25;
+      const breathe = 0.18 + damage * 0.15;
       entry.mesh.scale.setScalar(baseScale * (1 + breathe * pulse));
 
       // Emissive ramps from ~1.4 to ~6 across HP range, pulsing on top.
@@ -848,6 +848,164 @@ export class TunnelMaze {
 
   getWeakSpots() {
     return this._weakSpotMeshes;
+  }
+
+  getWallSamplePointsNear(center, count, range, forward = null) {
+    const points = [];
+    const segments = this._collisionSegments;
+    const spheres = this._collisionSpheres;
+    if (!segments || !spheres) return points;
+    const rangeSq = range * range;
+    // If forward is supplied, only accept candidate primitives whose closest
+    // wall point sits in front of the player (dot > FORWARD_THRESHOLD).
+    const FORWARD_THRESHOLD = 0.2; // ~78° forward cone — generous, not strict
+    const fx = forward?.x ?? 0;
+    const fy = forward?.y ?? 0;
+    const fz = forward?.z ?? 0;
+    const useForward = forward != null;
+
+    const candidates = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const abx = seg.bx - seg.ax;
+      const aby = seg.by - seg.ay;
+      const abz = seg.bz - seg.az;
+      const segLenSq = abx * abx + aby * aby + abz * abz;
+      const apx = center.x - seg.ax;
+      const apy = center.y - seg.ay;
+      const apz = center.z - seg.az;
+      let t = segLenSq > 1e-9 ? (apx * abx + apy * aby + apz * abz) / segLenSq : 0;
+      if (t < 0) t = 0; else if (t > 1) t = 1;
+      const cx = seg.ax + abx * t;
+      const cy = seg.ay + aby * t;
+      const cz = seg.az + abz * t;
+      const dx = cx - center.x;
+      const dy = cy - center.y;
+      const dz = cz - center.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq >= rangeSq) continue;
+      if (useForward) {
+        const d = Math.sqrt(distSq) || 1;
+        const fdot = (dx * fx + dy * fy + dz * fz) / d;
+        if (fdot < FORWARD_THRESHOLD) continue;
+      }
+      candidates.push({ kind: 'seg', seg, t });
+    }
+    for (let i = 0; i < spheres.length; i++) {
+      const sph = spheres[i];
+      const dx = sph.cx - center.x;
+      const dy = sph.cy - center.y;
+      const dz = sph.cz - center.z;
+      const distToCenter = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const wallDist = Math.abs(distToCenter - sph.radius);
+      if (wallDist >= range) continue;
+      if (useForward) {
+        const d = distToCenter || 1;
+        const fdot = (dx * fx + dy * fy + dz * fz) / d;
+        if (fdot < FORWARD_THRESHOLD) continue;
+      }
+      candidates.push({ kind: 'sph', sph });
+    }
+    if (!candidates.length) return points;
+
+    for (let i = 0; i < count; i++) {
+      const c = candidates[Math.floor(Math.random() * candidates.length)];
+      if (c.kind === 'sph') {
+        const sph = c.sph;
+        let nx = center.x - sph.cx;
+        let ny = center.y - sph.cy;
+        let nz = center.z - sph.cz;
+        let nLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (nLen < 1e-6) {
+          nx = Math.random() - 0.5;
+          ny = Math.random() - 0.5;
+          nz = Math.random() - 0.5;
+          nLen = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        }
+        nx /= nLen; ny /= nLen; nz /= nLen;
+        nx += (Math.random() - 0.5) * 0.7;
+        ny += (Math.random() - 0.5) * 0.7;
+        nz += (Math.random() - 0.5) * 0.7;
+        const jl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        nx /= jl; ny /= jl; nz /= jl;
+        points.push(new THREE.Vector3(
+          sph.cx + nx * sph.radius,
+          sph.cy + ny * sph.radius,
+          sph.cz + nz * sph.radius,
+        ));
+      } else {
+        const seg = c.seg;
+        const tt = Math.max(0, Math.min(1, c.t + (Math.random() - 0.5) * 0.3));
+        const cx = seg.ax + (seg.bx - seg.ax) * tt;
+        const cy = seg.ay + (seg.by - seg.ay) * tt;
+        const cz = seg.az + (seg.bz - seg.az) * tt;
+        const r = seg.ra * (1 - tt) + seg.rb * tt;
+        const abx = seg.bx - seg.ax;
+        const aby = seg.by - seg.ay;
+        const abz = seg.bz - seg.az;
+        const segLen = Math.sqrt(abx * abx + aby * aby + abz * abz) || 1;
+        const tx = abx / segLen;
+        const ty = aby / segLen;
+        const tz = abz / segLen;
+        let rx = center.x - cx;
+        let ry = center.y - cy;
+        let rz = center.z - cz;
+        const dot = rx * tx + ry * ty + rz * tz;
+        rx -= tx * dot;
+        ry -= ty * dot;
+        rz -= tz * dot;
+        let rLen = Math.sqrt(rx * rx + ry * ry + rz * rz);
+        if (rLen < 1e-6) {
+          rx = 1; ry = 0; rz = 0;
+        } else {
+          rx /= rLen; ry /= rLen; rz /= rLen;
+        }
+        rx += (Math.random() - 0.5) * 0.5;
+        ry += (Math.random() - 0.5) * 0.5;
+        rz += (Math.random() - 0.5) * 0.5;
+        const jl = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1;
+        rx /= jl; ry /= jl; rz /= jl;
+        points.push(new THREE.Vector3(cx + rx * r, cy + ry * r, cz + rz * r));
+      }
+    }
+    return points;
+  }
+
+  getWallSamplePoints(count) {
+    const points = [];
+    const segments = this._collisionSegments;
+    const spheres = this._collisionSpheres;
+    if (!segments || !spheres) return points;
+    const segLen = segments.length;
+    const sphLen = spheres.length;
+    const total = segLen + sphLen;
+    if (total === 0) return points;
+    const segWeight = segLen / total;
+    for (let i = 0; i < count; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const sinPhi = Math.sin(phi);
+      const dx = sinPhi * Math.cos(theta);
+      const dy = Math.cos(phi);
+      const dz = sinPhi * Math.sin(theta);
+      if (Math.random() < segWeight) {
+        const seg = segments[Math.floor(Math.random() * segLen)];
+        const t = Math.random();
+        const cx = seg.ax + (seg.bx - seg.ax) * t;
+        const cy = seg.ay + (seg.by - seg.ay) * t;
+        const cz = seg.az + (seg.bz - seg.az) * t;
+        const r = seg.ra * (1 - t) + seg.rb * t;
+        points.push(new THREE.Vector3(cx + dx * r, cy + dy * r, cz + dz * r));
+      } else {
+        const sph = spheres[Math.floor(Math.random() * sphLen)];
+        points.push(new THREE.Vector3(
+          sph.cx + dx * sph.radius,
+          sph.cy + dy * sph.radius,
+          sph.cz + dz * sph.radius,
+        ));
+      }
+    }
+    return points;
   }
 
   getRadarNetwork() {
