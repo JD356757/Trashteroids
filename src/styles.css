@@ -1068,10 +1068,13 @@ body::before {
 }
 
 #tutorial-callout[data-placement='top-left'] {
-  top: 63%;
-  left: 18px;
-  width: min(340px, calc(100vw - 36px));
-  transform: translateY(-50%) scale(1);
+  /* `top` is set dynamically from JS to sit right under the objectives
+     panel — see HUD._alignTutorialCalloutToObjectives. The default below
+     is just a fallback for the rare frame before measurement. */
+  top: 240px;
+  left: 32px;
+  width: min(340px, calc(100vw - 64px));
+  transform: scale(1);
   text-align: left;
 }
 
@@ -1094,7 +1097,7 @@ body::before {
 
 #tutorial-callout[data-placement='top-left'].tutorial-callout-entering,
 #tutorial-callout[data-placement='top-left'].tutorial-callout-leaving {
-  transform: translateY(calc(-50% - 10px)) scale(0.97);
+  transform: translateY(-10px) scale(0.97);
 }
 
 #tutorial-callout-kicker {
@@ -2526,10 +2529,11 @@ body::before {
   }
 
   #tutorial-callout[data-placement='top-left'] {
-    top: 50%;
+    /* top is set from JS — see HUD._alignTutorialCalloutToObjectives. */
+    top: 220px;
     left: 12px;
     width: min(300px, calc(100vw - 24px));
-    transform: translateY(-50%) scale(1);
+    transform: scale(1);
   }
 
   #tutorial-callout-timer {

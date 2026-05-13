@@ -61,7 +61,7 @@ export const LEVEL_CONFIGS = {
       successTitle: 'TRASHTEROID STRUCTURE COMPROMISED',
       successSubtitle: 'You weakened the outer shell of the Trashteroid. Now destroy it from the outside, once and for all.',
       primary: {
-        weakSpotsRequired: 6,
+        weakSpotsRequired: 1,
         weakSpotsTotal: 10,
       },
       bonus: {},

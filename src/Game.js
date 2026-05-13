@@ -1725,7 +1725,10 @@ export class Game {
     const trashteroid = this._trashteroid;
     if (!trashteroid?.active || !asteroids?.length) return;
 
-    const collisionRadius = trashteroid.collisionRadius;
+    // For asteroid bounces, use the visible hit radius (not the smaller
+    // inner collision radius the player uses) so asteroids deflect at the
+    // visible surface rather than disappearing into the trashteroid first.
+    const collisionRadius = trashteroid.hitRadius ?? trashteroid.collisionRadius;
 
     for (let i = 0; i < asteroids.length; i++) {
       const ast = asteroids[i];
@@ -3911,7 +3914,7 @@ export class Game {
 
     const onDone = () => {
       if (nextLevel) {
-        this._startLevelTransitionCutscene(nextLevel);
+        this._enterLevelWithOpeningBriefing(nextLevel);
       } else if (reqDone) {
         this._levelCompleteEl?.classList.add('hidden');
         if (typeof this._onReturnToLevelSelect === 'function') {
@@ -5172,15 +5175,15 @@ export class Game {
     const maze = this._tunnelMaze;
     if (!maze || typeof maze.getWallSamplePointsNear !== 'function') return;
     const playerPos = this.player.mesh.position;
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.player.baseQuaternion);
-    let points = maze.getWallSamplePointsNear(playerPos.clone(), 30, 1500, forward);
-    // If the player is in a tight pocket and not enough forward candidates
-    // exist, widen the search and drop the forward filter.
-    if (points.length < 8) {
-      points = maze.getWallSamplePointsNear(playerPos.clone(), 30, 2200, null);
+    // Sample wall points evenly around the player (no forward-cone filter)
+    // so the breach explosions surround the camera rather than clumping
+    // toward whichever direction the ship was facing.
+    let points = maze.getWallSamplePointsNear(playerPos.clone(), 200, 3500, null);
+    if (points.length < 50) {
+      points = maze.getWallSamplePointsNear(playerPos.clone(), 200, 5000, null);
     }
     if (!points.length) return;
-    const stagger = 70; // ms between bursts → total ~2.1s for 30 points
+    const stagger = 11; // ms between bursts → total ~2.2s for 200 points
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       setTimeout(() => {

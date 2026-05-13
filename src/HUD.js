@@ -546,6 +546,9 @@ export class HUD {
   updateObjectives(objectives) {
     if (!this.objectivesPanel) return;
     this.objectivesPanel.classList.remove('hidden');
+    // Objectives panel just changed size — keep the top-left tutorial
+    // callout (if any) glued to the panel's new bottom edge.
+    this._alignTutorialCalloutToObjectives();
 
     const required = objectives.filter(o => !o.bonus);
     const optional = objectives.filter(o => o.bonus);
@@ -742,6 +745,7 @@ export class HUD {
       this._tutorialCalloutAnimationFrame = window.requestAnimationFrame(() => {
         this._tutorialCalloutAnimationFrame = window.requestAnimationFrame(() => {
           this.tutorialCallout.dataset.placement = 'top-left';
+          this._alignTutorialCalloutToObjectives();
           this._tutorialCalloutAnimationFrame = null;
           this._tutorialCalloutRouteTimer = window.setTimeout(() => {
             this.tutorialCallout.classList.remove('tutorial-callout-routing-top-left');
@@ -753,6 +757,7 @@ export class HUD {
     }
 
     this.tutorialCallout.dataset.placement = placement;
+    this._alignTutorialCalloutToObjectives();
 
     if (animate) {
       this.tutorialCallout.classList.add('tutorial-callout-entering');
@@ -763,6 +768,29 @@ export class HUD {
     }
 
     this.tutorialCallout.classList.remove('hidden');
+  }
+
+  /**
+   * Top-left placement of the tutorial callout should always sit directly
+   * below the objectives panel. Both elements are position:fixed and the
+   * objectives panel's height changes as objectives are added/removed, so
+   * the anchor has to be measured in JS — pure CSS can't do it.
+   */
+  _alignTutorialCalloutToObjectives() {
+    if (!this.tutorialCallout) return;
+    if (this.tutorialCallout.dataset.placement !== 'top-left') {
+      // Other placements use stylesheet positioning; clear any inline
+      // anchoring we may have set from a prior top-left state.
+      this.tutorialCallout.style.top = '';
+      this.tutorialCallout.style.left = '';
+      return;
+    }
+    if (!this.objectivesPanel || this.objectivesPanel.classList.contains('hidden')) return;
+    const rect = this.objectivesPanel.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const gap = 16;
+    this.tutorialCallout.style.top = `${Math.round(rect.bottom + gap)}px`;
+    this.tutorialCallout.style.left = `${Math.round(rect.left)}px`;
   }
 
   hideTutorialCallout(options = {}) {
