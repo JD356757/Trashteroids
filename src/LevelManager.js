@@ -43,8 +43,8 @@ export const LEVEL_CONFIGS = {
   },
   2: {
     label: 'LEVEL 2 - Inside the trashteroid',
-    briefingTagline: '[PHASE 1 DEBUG] Fly through the tunnel layout. Cyan lines are tunnels, wireframe spheres are chambers/junctions, pulsing red spheres are weak spots.',
-    timer: 0,
+    briefingTagline: "Breach the trashteroid's shell and destroy 7 of its 10 weak spots to weaken its core. Find them lodged in the tunnel walls.",
+    timer: 180,
     interior: true,
     tunnelData: 'level2',
     bakedMeshUrl: '/models/level2_interior.glb',
@@ -52,7 +52,7 @@ export const LEVEL_CONFIGS = {
       successTitle: 'CORE STRUCTURE COMPROMISED',
       successSubtitle: 'Trashteroid weakened. Final assault window open.',
       primary: {
-        weakSpotsRequired: 5,
+        weakSpotsRequired: 7,
         weakSpotsTotal: 10,
       },
       bonus: {},

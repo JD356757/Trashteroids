@@ -4003,6 +4003,13 @@ export class Game {
   _updateMinimap() {
     const playerPos = this.player.mesh.position;
     const camInvQuat = this.camera.quaternion.clone().invert();
+    const levelConfig = this.levels.getCurrentConfig();
+    if (levelConfig.interior && this._tunnelMaze && typeof this._tunnelMaze.getRadarNetwork === 'function') {
+      const network = this._tunnelMaze.getRadarNetwork();
+      const weakSpots = this._tunnelMaze.getWeakSpots?.();
+      this.hud.updateInteriorMinimap(true, playerPos, camInvQuat, network, weakSpots);
+      return;
+    }
     this.hud.updateMinimap(
       true,
       this._getMissionTargetPosition(),

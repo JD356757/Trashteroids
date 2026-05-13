@@ -373,6 +373,118 @@ export class HUD {
     ctx.restore();
   }
 
+  updateInteriorMinimap(visible, playerPos, camInvQuat, network, weakSpots, maxRange = 8000) {
+    if (!visible || !this.minimapCanvas || !network) {
+      if (this.minimap && !this.minimap.classList.contains('hidden')) {
+        this.minimap.classList.add('hidden');
+      }
+      return;
+    }
+
+    this.minimap.classList.remove('hidden');
+
+    const ctx = this.minimapCtx;
+    ctx.clearRect(0, 0, 150, 150);
+
+    const cx = 75;
+    const cy = 75;
+    const radius = 75;
+
+    // Match Level 1 grid + center ring style for consistency.
+    ctx.strokeStyle = 'rgba(181, 232, 255, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, 0);
+    ctx.lineTo(cx, 150);
+    ctx.moveTo(0, cy);
+    ctx.lineTo(150, cy);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (!playerPos || !camInvQuat) {
+      // Still draw the player triangle even with no data.
+      this._drawMinimapPlayer(ctx, cx, cy);
+      return;
+    }
+
+    const offset = new THREE.Vector3();
+    const invRange = 1 / maxRange;
+    const project = (worldPos) => {
+      offset.copy(worldPos).sub(playerPos).applyQuaternion(camInvQuat);
+      return {
+        x: cx + (offset.x * invRange) * radius,
+        y: cy + (offset.z * invRange) * radius,
+      };
+    };
+
+    // Tunnel polylines — faint cyan lines drawn behind everything.
+    ctx.strokeStyle = 'rgba(140, 200, 230, 0.32)';
+    ctx.lineWidth = 1;
+    for (const poly of network.tunnels) {
+      ctx.beginPath();
+      for (let i = 0; i < poly.length; i++) {
+        const p = project(poly[i]);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+
+    // Chamber/junction dots — soft white markers at each node.
+    ctx.fillStyle = 'rgba(220, 235, 245, 0.4)';
+    for (const node of network.nodes) {
+      const p = project(node.pos);
+      const size = node.radius >= 700 ? 2.2 : 1.4;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Weak spots — alive ones glow pink/red matching the Level 1 boss
+    // dot palette for visual consistency. Dead ones go dim gray so the
+    // player can still see "this room is cleared."
+    if (Array.isArray(weakSpots)) {
+      for (const ws of weakSpots) {
+        const p = project(ws.mesh.position);
+        if (ws.alive) {
+          ctx.fillStyle = '#ff8ea4';
+          ctx.shadowColor = '#ff8ea4';
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.fillStyle = 'rgba(110, 90, 95, 0.55)';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    this._drawMinimapPlayer(ctx, cx, cy);
+  }
+
+  _drawMinimapPlayer(ctx, cx, cy) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.fillStyle = '#8ff7ef';
+    ctx.shadowColor = '#8ff7ef';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(4.5, 5);
+    ctx.lineTo(-4.5, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   update(score, level, lives) {
     this.scoreEl.textContent = `SCORE ${Math.max(0, Math.floor(score)).toString().padStart(6, '0')}`;
     // update hull progress bar and percent
