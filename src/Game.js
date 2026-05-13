@@ -210,66 +210,6 @@ const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, -3600);
 const VISIBLE_SUN_BACKGROUND_OFFSET = SUN_BACKGROUND_OFFSET.clone().setLength(80000);
 const VISIBLE_SUN_SCALE = VISIBLE_SUN_BACKGROUND_OFFSET.length() / SUN_BACKGROUND_OFFSET.length();
 const SUN_BACKGROUND_RENDER_ORDER = -1500;
-const TRASHTEROID_COLOR_LIT = new THREE.Color(0x9aa0a7);
-const TRASHTEROID_COLOR_SHADE = new THREE.Color(0x4d5563);
-const TRASHTEROID_RIM_COLOR = new THREE.Color(0xff7a4a);
-const TRASHTEROID_OUTLINE_COLOR = 0x1c1420;
-const TRASHTEROID_OUTLINE_SCALE = 1.025;
-const TRASHTEROID_BAKED_SUN_DIR = SUN_BACKGROUND_OFFSET.clone().normalize();
-
-function makeTrashteroidBakedMaterial() {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      uColorLit: { value: TRASHTEROID_COLOR_LIT },
-      uColorShade: { value: TRASHTEROID_COLOR_SHADE },
-      uRimColor: { value: TRASHTEROID_RIM_COLOR },
-      uSunDir: { value: TRASHTEROID_BAKED_SUN_DIR },
-    },
-    vertexShader: /* glsl */ `
-      varying vec3 vWorldNormal;
-      void main() {
-        vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 uColorLit;
-      uniform vec3 uColorShade;
-      uniform vec3 uRimColor;
-      uniform vec3 uSunDir;
-      varying vec3 vWorldNormal;
-      void main() {
-        float ndotl = dot(normalize(vWorldNormal), normalize(uSunDir));
-        float lit = smoothstep(-0.18, 0.28, ndotl);
-        vec3 color = mix(uColorShade, uColorLit, lit);
-        float rim = smoothstep(0.58, 1.0, ndotl) * 0.22;
-        color = mix(color, uRimColor, rim);
-        gl_FragColor = vec4(color, 1.0);
-      }
-    `,
-    depthWrite: true,
-    side: THREE.FrontSide,
-    fog: false,
-  });
-}
-
-function addTrashteroidOutline(mesh) {
-  const outlineMaterial = new THREE.MeshBasicMaterial({
-    color: TRASHTEROID_OUTLINE_COLOR,
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-  });
-  const outlineMesh = new THREE.Mesh(mesh.geometry, outlineMaterial);
-  outlineMesh.name = `${mesh.name || 'TrashteroidMesh'}Outline`;
-  outlineMesh.scale.setScalar(TRASHTEROID_OUTLINE_SCALE);
-  outlineMesh.castShadow = false;
-  outlineMesh.receiveShadow = false;
-  outlineMesh.frustumCulled = false;
-  outlineMesh.userData.isTrashteroidOutline = true;
-  mesh.add(outlineMesh);
-  return outlineMesh;
-}
 
 // Simple object pool to reduce memory allocations during collision detection
 class Vector3Pool {
@@ -949,12 +889,15 @@ export class Game {
 
     const fallbackShell = new THREE.Mesh(
       new THREE.IcosahedronGeometry(52, 1),
-      makeTrashteroidBakedMaterial()
+      new THREE.MeshStandardMaterial({
+        color: 0x58616f,
+        roughness: 0.96,
+        metalness: 0.12,
+        emissive: 0x10151d,
+        emissiveIntensity: 0.42,
+      })
     );
     fallbackShell.frustumCulled = false;
-    fallbackShell.castShadow = false;
-    fallbackShell.receiveShadow = false;
-    addTrashteroidOutline(fallbackShell);
     group.add(fallbackShell);
 
     const modelRoot = new THREE.Group();
@@ -1011,11 +954,25 @@ export class Game {
 
         model.traverse((child) => {
           child.frustumCulled = false;
-          if (!child.isMesh || child.userData.isTrashteroidOutline) return;
-          child.castShadow = false;
-          child.receiveShadow = false;
-          child.material = makeTrashteroidBakedMaterial();
-          addTrashteroidOutline(child);
+          if (!child.isMesh) return;
+          child.castShadow = true;
+          child.receiveShadow = true;
+
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          for (let i = 0; i < materials.length; i++) {
+            const material = materials[i];
+            if (!material) continue;
+            if ('roughness' in material) {
+              material.roughness = THREE.MathUtils.clamp((material.roughness ?? 0.7) + 0.16, 0, 1);
+            }
+            if ('metalness' in material) {
+              material.metalness = THREE.MathUtils.clamp((material.metalness ?? 0.1) + 0.08, 0, 1);
+            }
+            if ('emissive' in material && material.emissive) {
+              material.emissive.setHex(0x171b22);
+              material.emissiveIntensity = 0.24;
+            }
+          }
         });
 
         const bbox = new THREE.Box3().setFromObject(model);
