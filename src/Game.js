@@ -77,7 +77,7 @@ const DISPLAY_KM_PER_MILE = 10;
 const TUTORIAL_TIME_SCALE = 1.0;
 const TUTORIAL_BEAT_TRANSITION_DELAY = 0.38;
 const TUTORIAL_TIMED_BEAT_DURATION = 7;
-const TRASHTEROID_APPROACH_DISTANCE_WORLD = 20000 / DISPLAY_DISTANCE_SCALE;
+const TRASHTEROID_APPROACH_DISTANCE_WORLD = 25000 / (DISPLAY_DISTANCE_SCALE * DISPLAY_KM_PER_MILE);
 const TRASHTEROID_HIT_RADIUS = 55;
 const TRASHTEROID_COLLISION_RADIUS_SCALE = 0.7;
 const TRASHTEROID_SURFACE_OFFSET = 58;
@@ -114,6 +114,9 @@ const CUTSCENE_SURFACE_EXPLOSION_INTERVAL = 0.12;
 const CUTSCENE_DEBRIS_COUNT = 12;
 const CUTSCENE_SPECIAL_DEBRIS_COUNT = 4;
 const CUTSCENE_DEBRIS_EXPLODE_DELAY = 1.6;
+const LEVEL_TRANSITION_FADE_DURATION = 0.7;
+const LEVEL_TRANSITION_ENTRY_DURATION = 4.6;
+const LEVEL_TRANSITION_EXIT_DURATION = 4.2;
 const TUTORIAL_BEATS = {
   move: {
     title: 'Move & Look',
@@ -188,7 +191,7 @@ function toWorldSpeed(displaySpeed) {
 }
 
 function toWorldDistance(displayDistance) {
-  return displayDistance / DISPLAY_DISTANCE_SCALE;
+  return displayDistance / (DISPLAY_DISTANCE_SCALE * DISPLAY_KM_PER_MILE);
 }
 
 function toDisplayDistance(worldDistance) {
@@ -220,7 +223,7 @@ export class Game {
     this.trashHits = 0;
     this._pauseUnlockArmed = false;
     this._startLevel = startLevel;
-    this._tutorialMode = this._startLevel === 1 && (options.tutorialMode ?? true);
+    this._tutorialMode = this._startLevel === 1;
     this._onReturnToLevelSelect = options.onReturnToLevelSelect ?? null;
     this._onHideLevelSelect = options.onHideLevelSelect ?? null;
     this._returnToLevelSelectTimeout = null;
@@ -237,6 +240,7 @@ export class Game {
     this._deathSequenceTimer = 0;
     this._deathOverlayShown = false;
     this._destructionCutscene = null;
+    this._transitionCutscene = null;
     this._timeScale = 1;
     this._tutorial = this._createTutorialState();
     this._handleLevelNextClick = () => this._onLevelNext();
@@ -507,6 +511,7 @@ export class Game {
     this._debriefDialogue = null;
     this._levelCompleteEl?.classList.add('hidden');
     this.hud.overlay?.classList.add('hidden');
+    this._disposeTransitionCutscene();
     if (document.pointerLockElement === this.canvas) {
       document.exitPointerLock();
     }
@@ -689,6 +694,30 @@ export class Game {
         this._levelEntryFadeSafetyTimeout = window.setTimeout(finish, LEVEL_ENTRY_FADE_MS + 100);
       });
     }, LEVEL_ENTRY_FADE_HOLD_MS);
+  }
+
+  _runScreenFadeMidpoint(midpoint, durationMs = LEVEL_ENTRY_FADE_MS) {
+    if (!this._screenFadeEl) {
+      midpoint?.();
+      return;
+    }
+
+    const fadeMs = Math.max(0, Math.floor(durationMs));
+    this._setScreenFadeDuration(fadeMs);
+    this._screenFadeEl.classList.remove('hidden');
+    this._screenFadeEl.classList.add('visible');
+
+    window.setTimeout(() => {
+      midpoint?.();
+      requestAnimationFrame(() => {
+        this._screenFadeEl.classList.remove('visible');
+        const finish = () => {
+          this._screenFadeEl.classList.add('hidden');
+        };
+        this._screenFadeEl.addEventListener('transitionend', finish, { once: true });
+        window.setTimeout(finish, fadeMs + 100);
+      });
+    }, fadeMs);
   }
 
   _scheduleReturnToLevelSelect(delayMs = 2200, payload = {}) {
@@ -1258,6 +1287,11 @@ export class Game {
     const bossConfig = levelConfig.boss ?? null;
     const trashteroid = this._trashteroid;
     const configuredScale = Math.max(0.1, levelConfig.trashteroidScale ?? bossConfig?.bossScale ?? 1);
+    const hitRadius = TRASHTEROID_HIT_RADIUS * configuredScale;
+    const collisionRadius = bossConfig
+      ? (bossConfig.collisionRadius ?? TRASHTEROID_HIT_RADIUS) * configuredScale * TRASHTEROID_COLLISION_RADIUS_SCALE
+      : (TRASHTEROID_HIT_RADIUS - 6) * configuredScale * TRASHTEROID_COLLISION_RADIUS_SCALE;
+    const startDistanceDisplay = levelConfig.trashteroidStartDistanceDisplay ?? bossConfig?.startDistanceDisplay ?? null;
 
     this._clearTrashteroidProjectiles();
 
@@ -1270,7 +1304,9 @@ export class Game {
     }
 
     _shipForward.set(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize();
-    const startDistance = bossConfig?.startDistance ?? TRASHTEROID_APPROACH_DISTANCE_WORLD;
+    const startDistance = startDistanceDisplay != null
+      ? toWorldDistance(startDistanceDisplay) + collisionRadius
+      : (bossConfig?.startDistance ?? TRASHTEROID_APPROACH_DISTANCE_WORLD);
 
     trashteroid.group.position.copy(this.player.mesh.position).addScaledVector(_shipForward, startDistance);
     trashteroid.anchor.copy(trashteroid.group.position);
@@ -1290,11 +1326,8 @@ export class Game {
 
     if (bossConfig) {
       trashteroid.group.scale.setScalar(configuredScale);
-      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * configuredScale;
-      trashteroid.collisionRadius =
-        (bossConfig.collisionRadius ?? TRASHTEROID_HIT_RADIUS) *
-        configuredScale *
-        TRASHTEROID_COLLISION_RADIUS_SCALE;
+      trashteroid.hitRadius = hitRadius;
+      trashteroid.collisionRadius = collisionRadius;
       trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * configuredScale;
       // Start the trashteroid already moving towards Earth
       _bossMoveDelta.set(-1200, -600, -3500).normalize();
@@ -1309,9 +1342,8 @@ export class Game {
       this.hud.setBossVulnerabilityStatus('shielded', trashteroid.vulnerabilityTimer, true);
     } else {
       trashteroid.group.scale.setScalar(configuredScale);
-      trashteroid.hitRadius = TRASHTEROID_HIT_RADIUS * configuredScale;
-      trashteroid.collisionRadius =
-        (TRASHTEROID_HIT_RADIUS - 6) * configuredScale * TRASHTEROID_COLLISION_RADIUS_SCALE;
+      trashteroid.hitRadius = hitRadius;
+      trashteroid.collisionRadius = collisionRadius;
       trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * configuredScale;
       trashteroid.velocity.set(0, 0, 0);
       trashteroid.vulnerabilityState = null;
@@ -1808,7 +1840,6 @@ export class Game {
     if (!trashteroid?.active) return;
 
     const bossConfig = this.levels.getCurrentConfig().boss ?? null;
-    console.log(trashteroid.collisionRadius);
     const collisionRadius = trashteroid.collisionRadius ?? (TRASHTEROID_HIT_RADIUS - 6);
     const minDistance = PLAYER_COLLISION_RADIUS + collisionRadius;
 
@@ -1956,7 +1987,7 @@ export class Game {
     const y = onScreen ? projectedY : centerY - Math.cos(angle) * radiusY;
     const indicatorAngle = onScreen ? 0 : angle;
     const centerDist = targetPos.distanceTo(this.player.mesh.position);
-    const surfaceDistWorld = Math.max(0, centerDist - (this._trashteroid?.hitRadius ?? 0));
+    const surfaceDistWorld = Math.max(0, centerDist - (this._trashteroid?.collisionRadius ?? this._trashteroid?.hitRadius ?? 0));
     const distance = toDisplayDistance(surfaceDistWorld);
 
     this.hud.updateBossIndicator(true, x, y, indicatorAngle, Math.max(1, distance), 'TRASHTEROID');
@@ -2066,6 +2097,16 @@ export class Game {
     this.hud.setTrashteroidRangeAlert(outOfRange, 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.');
   }
 
+  _isRequiredTutorialComplete() {
+    const primary = this.levels.getCurrentConfig()?.mission?.primary ?? {};
+    if (!primary.tutorialRequired) return true;
+    if (!this._tutorialMode || this.levels.current !== 1) return true;
+
+    return this._tutorial.objectivesShown
+      && !this._tutorial.activeBeatId
+      && this._tutorial.transitionRemaining <= 0;
+  }
+
   _getMissionObjectiveState(finalizeShield = false) {
     const levelConfig = this.levels.getCurrentConfig();
     const mission = levelConfig.mission ?? {};
@@ -2073,6 +2114,18 @@ export class Game {
     const bonus = mission.bonus ?? {};
     const objectives = [];
     let primaryComplete = true;
+
+    if (primary.tutorialRequired) {
+      const tutorialComplete = this._isRequiredTutorialComplete();
+      objectives.push({
+        label: primary.tutorialLabel ?? 'Complete tutorial',
+        current: tutorialComplete ? 1 : 0,
+        target: 1,
+        complete: tutorialComplete,
+        bonus: false,
+      });
+      primaryComplete = primaryComplete && tutorialComplete;
+    }
 
     if (primary.trashRequired) {
       const complete = this._trashDestroyedRequired >= primary.trashRequired;
@@ -2109,11 +2162,13 @@ export class Game {
         ? toDisplayDistance(surfaceDist)
         : reachDistanceDisplay;
       const reached = surfaceDist != null ? surfaceDist <= reachDistanceWorld : false;
+      const reachLabel = primary.reachLabel ?? 'Reach Trashteroid';
+      const reachedLabel = primary.reachedLabel ?? reachLabel;
 
       objectives.push({
         label: reached
-          ? 'Reach Trashteroid'
-          : `Reach Trashteroid (${distanceDisplay} km out)`,
+          ? reachedLabel
+          : `${reachLabel} (${distanceDisplay} km out)`,
         current: reached ? 1 : 0,
         target: 1,
         complete: reached,
@@ -2768,6 +2823,12 @@ export class Game {
     requestAnimationFrame(() => this._loop());
 
     const rawDelta = this.clock.getDelta();
+
+    if (this._transitionCutscene) {
+      this._updateLevelTransitionCutscene(rawDelta);
+      this.input.resetPressed();
+      return;
+    }
 
     if (this._destructionCutscene) {
       this._updateDestructionCutscene(rawDelta);
@@ -3609,6 +3670,244 @@ export class Game {
 
   // ── Debrief dialogue ──────────────────────────────────────────────────────
 
+  _createTransitionCutsceneVisuals(kind, start, end, direction, up) {
+    const group = new THREE.Group();
+    const rings = [];
+
+    const ringColor = kind === 'breach-entry' ? 0x7fdcff : 0xffb27c;
+    const ringCount = kind === 'breach-entry' ? 10 : 12;
+    const ringRadius = kind === 'breach-entry' ? 34 : 28;
+    const ringSpacing = kind === 'breach-entry' ? 42 : 56;
+
+    const basisRight = new THREE.Vector3().crossVectors(direction, up).normalize();
+    const basisUp = new THREE.Vector3().crossVectors(basisRight, direction).normalize();
+
+    for (let i = 0; i < ringCount; i++) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(ringRadius, 1.7, 12, 40),
+        new THREE.MeshBasicMaterial({
+          color: ringColor,
+          transparent: true,
+          opacity: kind === 'breach-entry' ? 0.22 : 0.35,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        })
+      );
+      const t = i / Math.max(1, ringCount - 1);
+      ring.position.copy(start).lerp(end, t);
+      ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      ring.userData.baseOpacity = ring.material.opacity;
+      ring.userData.phase = Math.random() * Math.PI * 2;
+      rings.push(ring);
+      group.add(ring);
+    }
+
+    let portal = null;
+    if (kind === 'tunnel-exit') {
+      portal = new THREE.Mesh(
+        new THREE.CircleGeometry(26, 40),
+        new THREE.MeshBasicMaterial({
+          color: 0xfff1cf,
+          transparent: true,
+          opacity: 0.92,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        })
+      );
+      portal.position.copy(end);
+      portal.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      group.add(portal);
+    }
+
+    if (kind === 'breach-entry' && this._trashteroid?.group) {
+      const glow = new THREE.Mesh(
+        new THREE.CircleGeometry(30, 40),
+        new THREE.MeshBasicMaterial({
+          color: 0x8fe9ff,
+          transparent: true,
+          opacity: 0.3,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        })
+      );
+      glow.position.copy(end).addScaledVector(direction, 6);
+      glow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      portal = glow;
+      group.add(glow);
+    }
+
+    this.scene.add(group);
+    return { group, rings, portal, basisRight, basisUp };
+  }
+
+  _disposeTransitionCutscene() {
+    const cs = this._transitionCutscene;
+    if (!cs) return;
+
+    cs.visuals?.group?.traverse?.((child) => {
+      child.geometry?.dispose?.();
+      if (child.material) {
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) material?.dispose?.();
+      }
+    });
+    if (cs.visuals?.group?.parent) {
+      cs.visuals.group.parent.remove(cs.visuals.group);
+    }
+    this._transitionCutscene = null;
+  }
+
+  _enterLevelWithOpeningBriefing(level) {
+    this._levelCompleteEl?.classList.add('hidden');
+    this._levelComplete = false;
+    this.paused = false;
+    this._pauseUnlockArmed = false;
+    if (this.crosshair) this.crosshair.classList.add('hidden');
+    this._enterLevel(level, {
+      resetPlayerPosition: true,
+      resetRunStats: true,
+    });
+    this.paused = true;
+    this._showLevelOpeningBriefing(level);
+  }
+
+  _startLevelTransitionCutscene(nextLevel) {
+    const currentLevel = this.levels.current;
+    let kind = null;
+    if (currentLevel === 1 && nextLevel === 2) kind = 'breach-entry';
+    if (currentLevel === 2 && nextLevel === 3) kind = 'tunnel-exit';
+
+    if (!kind) {
+      this._enterLevelWithOpeningBriefing(nextLevel);
+      return;
+    }
+
+    this._levelCompleteEl?.classList.add('hidden');
+    this._cleanupCommsHandlers();
+    this._debriefDialogue = null;
+    this.paused = false;
+    this._pauseUnlockArmed = false;
+    this.boostActive = false;
+    this.input.releaseAll();
+    if (this.crosshair) this.crosshair.classList.add('hidden');
+    if (document.pointerLockElement) document.exitPointerLock();
+    soundtrackManager.setBoosting(false);
+    soundtrackManager.setThrusting(false);
+    this.hud.setPauseVisible(false);
+    this.hud.setGameplayVisible(false);
+
+    const ship = this.player.mesh;
+    ship.visible = true;
+
+    const up = new THREE.Vector3(0, 1, 0);
+    let start = ship.position.clone();
+    let end;
+    let direction;
+    let duration = LEVEL_TRANSITION_ENTRY_DURATION;
+
+    if (kind === 'breach-entry' && this._trashteroid?.group) {
+      end = this._trashteroid.group.position.clone();
+      direction = end.clone().sub(start).normalize();
+      start = end.clone().addScaledVector(direction, -(this._trashteroid.collisionRadius + 520));
+      end = end.clone().addScaledVector(direction, -(this._trashteroid.collisionRadius * 0.12));
+    } else {
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.player.baseQuaternion).normalize();
+      direction = forward.lengthSq() > 0 ? forward : new THREE.Vector3(0, 0, -1);
+      start = ship.position.clone();
+      end = start.clone().addScaledVector(direction, 720);
+      duration = LEVEL_TRANSITION_EXIT_DURATION;
+    }
+
+    ship.position.copy(start);
+    const lookQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), direction);
+    ship.quaternion.copy(lookQuat);
+    this.player.baseQuaternion.copy(lookQuat);
+
+    const visuals = this._createTransitionCutsceneVisuals(kind, start, end, direction, up);
+    this._transitionCutscene = {
+      kind,
+      nextLevel,
+      elapsed: 0,
+      duration,
+      start,
+      end,
+      direction,
+      up,
+      lookQuat,
+      visuals,
+      fadeStarted: false,
+    };
+  }
+
+  _updateLevelTransitionCutscene(rawDelta) {
+    const cs = this._transitionCutscene;
+    if (!cs) return;
+
+    const dt = Math.max(0, rawDelta);
+    cs.elapsed += dt;
+    const progress = THREE.MathUtils.clamp(cs.elapsed / cs.duration, 0, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+
+    soundtrackManager.setBoosting(false);
+    soundtrackManager.setThrusting(false);
+
+    const shipPos = cs.start.clone().lerp(cs.end, eased);
+    this.player.velocity.set(0, 0, 0);
+    this.player.mesh.position.copy(shipPos);
+    this.player.baseQuaternion.copy(cs.lookQuat);
+    this.player.mesh.quaternion.copy(cs.lookQuat);
+
+    const cameraDistance = cs.kind === 'breach-entry' ? 44 : 32;
+    const cameraLift = cs.kind === 'breach-entry' ? 12 : 8;
+    _camTarget.copy(shipPos)
+      .addScaledVector(cs.direction, -cameraDistance)
+      .addScaledVector(cs.up, cameraLift);
+    this.camera.position.copy(_camTarget);
+    _camLookTarget.copy(shipPos).addScaledVector(cs.direction, 140);
+    this.camera.up.copy(cs.up);
+    this.camera.lookAt(_camLookTarget);
+    const targetFov = cs.kind === 'breach-entry' ? 58 : 62;
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-4 * dt));
+    this.camera.updateProjectionMatrix();
+
+    for (let i = 0; i < cs.visuals.rings.length; i++) {
+      const ring = cs.visuals.rings[i];
+      ring.rotation.z += dt * (0.45 + i * 0.03);
+      const pulse = 0.72 + Math.sin(cs.elapsed * 2.6 + ring.userData.phase) * 0.28;
+      ring.material.opacity = ring.userData.baseOpacity * pulse;
+    }
+
+    if (cs.visuals.portal) {
+      const portalScale = cs.kind === 'tunnel-exit'
+        ? 1 + progress * 1.45
+        : 1 + Math.sin(cs.elapsed * 3.2) * 0.08;
+      cs.visuals.portal.scale.setScalar(portalScale);
+      if (cs.kind === 'tunnel-exit') {
+        cs.visuals.portal.material.opacity = THREE.MathUtils.lerp(0.65, 1, progress);
+      }
+    }
+
+    this._updateEffects(dt);
+    this._updateBackground(dt);
+    if (!this.levels.getCurrentConfig().interior) {
+      this.asteroidField.update(dt, this.player.mesh.position);
+    } else if (this._tunnelMaze) {
+      this._tunnelMaze.update(dt, this.player.mesh.position, this.player.baseQuaternion);
+    }
+    this.starfield.update(dt, this.camera);
+
+    if (!cs.fadeStarted && progress >= 1 - (LEVEL_TRANSITION_FADE_DURATION / cs.duration)) {
+      cs.fadeStarted = true;
+      this._runScreenFadeMidpoint(() => {
+        const targetLevel = cs.nextLevel;
+        this._disposeTransitionCutscene();
+        this._enterLevelWithOpeningBriefing(targetLevel);
+      }, LEVEL_TRANSITION_FADE_DURATION * 1000);
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
   _startPostLevelComms() {
     const summary = this._levelStatsSummary;
     const el = this._levelCompleteEl;
@@ -3646,7 +3945,7 @@ export class Game {
       stats: null,
       onDone: () => {
         if (nextLevel) {
-          this._startPreLevelBriefing(nextLevel);
+          this._startLevelTransitionCutscene(nextLevel);
         } else if (reqDone) {
           this._levelCompleteEl?.classList.add('hidden');
           if (typeof this._onReturnToLevelSelect === 'function') {
@@ -3661,45 +3960,6 @@ export class Game {
       this._addCommsMessageBubble(0);
     } else {
       this._debriefDialogue.onDone?.();
-    }
-  }
-
-  _startPreLevelBriefing(nextLevel) {
-    const el = this._levelCompleteEl;
-    if (!el) return;
-
-    const commsPanel = el.querySelector('#comms-panel');
-    const menuEl = el.querySelector('#level-complete-menu');
-    const messagesEl = el.querySelector('#comms-messages');
-    const promptEl = el.querySelector('#comms-prompt');
-
-    if (menuEl) menuEl.classList.add('hidden');
-    if (commsPanel) commsPanel.classList.remove('hidden');
-    if (messagesEl) messagesEl.innerHTML = '';
-    if (promptEl) promptEl.classList.add('hidden');
-    el.classList.remove('level-complete-reveal');
-
-    const lines = LEVEL_BRIEFINGS[nextLevel] ?? [];
-
-    this._debriefDialogue = {
-      lines,
-      lineIndex: 0,
-      charIndex: 0,
-      charTimer: 0.45,
-      waitingForAdvance: false,
-      done: false,
-      isPrelevel: true,
-      nextLevel,
-      currentTextEl: null,
-      stats: null,
-      onDone: () => this._launchNextLevel(nextLevel),
-    };
-
-    this._setupCommsHandlers();
-    if (lines.length > 0) {
-      this._addCommsMessageBubble(0);
-    } else {
-      this._launchNextLevel(nextLevel);
     }
   }
 

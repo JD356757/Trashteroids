@@ -22,9 +22,9 @@ const DEFAULT_ACCESSIBILITY_SETTINGS = {
 };
 
 const LEVEL_DATA = [
-  { id: 1, label: 'LEVEL 1', sub: '30,000 km from trashteroid', color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
-  { id: 2, label: 'LEVEL 2', sub: '20,000 km from trashteroid',   color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
-  { id: 3, label: 'LEVEL 3', sub: '10 km from trashteroid — BOSS FIGHT',             color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
+  { id: 1, label: 'LEVEL 1', sub: 'Outer debris field',        color: 0x00ff88, pos: new THREE.Vector3( -4, 3, -4) },
+  { id: 2, label: 'LEVEL 2', sub: 'Trashteroid tunnel system', color: 0xffaa00, pos: new THREE.Vector3(  4, 0, -8) },
+  { id: 3, label: 'LEVEL 3', sub: 'Exterior final assault',    color: 0xff2244, pos: new THREE.Vector3( 12, 3, -12) },
 ];
 
 function formatTrashLabel(count) {
@@ -35,6 +35,14 @@ function formatRecycleLabel(count) {
   return `Collect ${count} ${count === 1 ? 'recyclable' : 'recyclables'}`;
 }
 
+function formatWeakSpotLabel(required, total = required) {
+  return `Destroy ${required} of ${total} weak spots`;
+}
+
+function formatSpecialTrashLabel(count) {
+  return `Destroy ${count} special ${count === 1 ? 'piece' : 'pieces'} of trash`;
+}
+
 function getBriefing(levelId) {
   const config = LEVEL_CONFIGS[levelId];
   const mission = config?.mission;
@@ -43,14 +51,20 @@ function getBriefing(levelId) {
   const required = [];
   const bonusItems = [];
 
-  if (primary.reachTrashteroid) {
-    required.push('Reach Trashteroid');
+  if (primary.tutorialRequired) {
+    required.push(primary.tutorialLabel ?? 'Complete tutorial');
   }
   if (primary.trashRequired) {
     required.push(formatTrashLabel(primary.trashRequired));
   }
   if (primary.recycleRequired) {
     required.push(formatRecycleLabel(primary.recycleRequired));
+  }
+  if (primary.reachTrashteroid) {
+    required.push(primary.briefingReachLabel ?? primary.reachLabel ?? 'Reach Trashteroid');
+  }
+  if (primary.weakSpotsRequired) {
+    required.push(formatWeakSpotLabel(primary.weakSpotsRequired, primary.weakSpotsTotal));
   }
   if (primary.destroyTrashteroid) {
     required.push('Destroy Trashteroid');
@@ -63,6 +77,15 @@ function getBriefing(levelId) {
   }
   if (bonus.shieldThreshold != null) {
     bonusItems.push(`Finish with over ${bonus.shieldThreshold}% shield integrity`);
+  }
+  if (bonus.bonusTrashRequired) {
+    bonusItems.push(formatTrashLabel(bonus.bonusTrashRequired));
+  }
+  if (bonus.bonusRecycleRequired) {
+    bonusItems.push(formatRecycleLabel(bonus.bonusRecycleRequired));
+  }
+  if (bonus.specialRequired) {
+    bonusItems.push(formatSpecialTrashLabel(bonus.specialRequired));
   }
 
   return {
@@ -208,14 +231,14 @@ export class LevelSelect {
     this._briefingTagline = document.getElementById('briefing-tagline');
     this._briefingRequiredList = document.getElementById('briefing-required-list');
     this._briefingBonusList = document.getElementById('briefing-bonus-list');
+    this._briefingBonusTitle = this._briefingEl?.querySelector('.briefing-bonus-title') ?? null;
     this._briefingOptions = document.getElementById('briefing-options');
-    this._briefingTutorialToggle = document.getElementById('briefing-tutorial-mode');
     this._pendingLevelId = null;
     document.getElementById('briefing-start-btn').addEventListener('click', () => {
       this._briefingEl.classList.add('hidden');
       this.onLevelChosen({
         levelId: this._pendingLevelId,
-        tutorialMode: this._pendingLevelId === 1 && !!this._briefingTutorialToggle?.checked,
+        tutorialMode: this._pendingLevelId === 1,
       });
     });
 
@@ -288,9 +311,6 @@ export class LevelSelect {
     this._flightProgress = 1;
     this._orbitAngle = 0;
     this._hidePopup();
-    if (this._briefingTutorialToggle) {
-      this._briefingTutorialToggle.checked = true;
-    }
     if (this._settingsBtn) {
       this._settingsBtn.classList.remove('hidden');
     }
@@ -765,12 +785,12 @@ export class LevelSelect {
       li.textContent = item;
       this._briefingBonusList.appendChild(li);
     }
+    const hasBonusObjectives = (brief?.bonus?.length ?? 0) > 0;
+    this._briefingBonusList.classList.toggle('hidden', !hasBonusObjectives);
+    this._briefingBonusTitle?.classList.toggle('hidden', !hasBonusObjectives);
 
     if (this._briefingOptions) {
       this._briefingOptions.classList.toggle('hidden', id !== 1);
-    }
-    if (this._briefingTutorialToggle) {
-      this._briefingTutorialToggle.checked = true;
     }
 
     this._briefingEl.classList.remove('hidden');
