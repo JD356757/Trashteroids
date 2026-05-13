@@ -17,9 +17,6 @@ const EMBED_TRASH_PALETTE = [
   { url: '/models/brokechair.glb', scale: 144 },
   { url: '/models/oven.glb',      scale: 160 },
   { url: '/models/trashnew.glb',  scale: 128 },
-  { url: '/models/b1.glb',        scale: 112 },
-  { url: '/models/b2.glb',        scale: 112 },
-  { url: '/models/b3.glb',        scale: 112 },
 ];
 
 // One placement every ~PLACE_SPACING world units along a tunnel of density 1.
