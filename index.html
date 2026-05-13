@@ -228,9 +228,28 @@
           <span>LIVE</span>
         </div>
       </div>
-      <div id="comms-messages"></div>
+      <div id="comms-body">
+        <div id="comms-messages"></div>
+      </div>
+      <aside id="comms-briefing" class="hidden">
+        <div id="comms-briefing-header">
+          <div id="comms-briefing-level"></div>
+          <div id="comms-briefing-tagline"></div>
+        </div>
+        <div id="comms-briefing-objectives">
+          <div class="comms-briefing-col">
+            <div class="comms-briefing-section-title">REQUIRED OBJECTIVES</div>
+            <ul id="comms-briefing-required"></ul>
+          </div>
+          <div class="comms-briefing-col comms-briefing-col--bonus">
+            <div class="comms-briefing-section-title comms-briefing-bonus-title">BONUS OBJECTIVES</div>
+            <ul id="comms-briefing-bonus"></ul>
+          </div>
+        </div>
+      </aside>
       <div id="comms-footer">
         <span id="comms-prompt" class="hidden"></span>
+        <button id="comms-retry-btn" class="hidden">RETRY</button>
       </div>
     </div>
     <div id="level-complete-menu" class="hidden">
@@ -265,7 +284,7 @@
     </div>
     <div id="crawl-footer">
       <button id="crawl-continue" class="hidden">CONTINUE &rarr;</button>
-      <div id="crawl-skip">PRESS 9 TO SKIP</div>
+      <div id="crawl-skip">▶  SPACE TO SKIP</div>
     </div>
   </div>
 

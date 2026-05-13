@@ -53,14 +53,8 @@ export class HUD {
     this.trashteroidRangeAlertEl.classList.add('hidden');
     this.trashteroidRangeAlertEl.setAttribute('aria-live', 'polite');
     this.trashteroidRangeAlertEl.textContent = 'TRASHTEROID OUT OF RANGE, MOVE CLOSER.';
-    this.bossVulnerabilityEl = document.createElement('div');
-    this.bossVulnerabilityEl.id = 'boss-vulnerability-status';
-    this.bossVulnerabilityEl.classList.add('hidden');
-    this.bossVulnerabilityEl.setAttribute('aria-live', 'polite');
-    this.bossVulnerabilityEl.textContent = 'SHIELDED - 30S';
     if (this.hudRoot) {
       this.hudRoot.appendChild(this.trashteroidRangeAlertEl);
-      this.hudRoot.appendChild(this.bossVulnerabilityEl);
     }
 
     // Weak-spot indicators: up to 3 simultaneous floating markers + a small
@@ -133,7 +127,6 @@ export class HUD {
     }
     if (this.weakSpotCounter) this.weakSpotCounter.classList.add('hidden');
     if (this.trashteroidRangeAlertEl) this.trashteroidRangeAlertEl.classList.add('hidden');
-    if (this.bossVulnerabilityEl) this.bossVulnerabilityEl.classList.add('hidden');
     if (this.tutorialCallout) this.tutorialCallout.classList.add('hidden');
   }
 
@@ -141,21 +134,6 @@ export class HUD {
     if (!this.trashteroidRangeAlertEl) return;
     this.trashteroidRangeAlertEl.textContent = message;
     this.trashteroidRangeAlertEl.classList.toggle('hidden', !visible);
-  }
-
-  setBossVulnerabilityStatus(state = 'shielded', secondsRemaining = 0, visible = true) {
-    if (!this.bossVulnerabilityEl) return;
-    const safeSeconds = Math.max(0, Math.ceil(secondsRemaining));
-    if (state === 'vulnerable') {
-      this.bossVulnerabilityEl.textContent = `VULNERABLE! DESTROY THE TRASHTEROID: ${safeSeconds}`;
-      this.bossVulnerabilityEl.classList.add('vulnerable');
-      this.bossVulnerabilityEl.classList.remove('shielded');
-    } else {
-      this.bossVulnerabilityEl.textContent = `SHIELDED. VULNERABLE IN: ${safeSeconds}`;
-      this.bossVulnerabilityEl.classList.add('shielded');
-      this.bossVulnerabilityEl.classList.remove('vulnerable');
-    }
-    this.bossVulnerabilityEl.classList.toggle('hidden', !visible);
   }
 
   _setMusicVisualizerVisible(visible) {
@@ -557,9 +535,6 @@ export class HUD {
   setBossBarVisible(visible) {
     if (!this.bossContainer) return;
     this.bossContainer.classList.toggle('hidden', !visible);
-    if (!visible && this.bossVulnerabilityEl) {
-      this.bossVulnerabilityEl.classList.add('hidden');
-    }
   }
 
   updateSpeedometer(speed) {

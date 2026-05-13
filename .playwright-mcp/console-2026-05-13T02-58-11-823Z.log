@@ -21,3 +21,18 @@
 [  987564ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
 [ 1318099ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
 [ 1318124ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[ 2894489ms] [LOG] [vite] server connection lost. polling for restart... @ http://localhost:5173/@vite/client:287
+[ 2894491ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ http://localhost:5173/:0
+[ 3987937ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[ 3987978ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[ 3988056ms] [ERROR] Failed to load resource: net::ERR_CACHE_OPERATION_NOT_SUPPORTED @ http://localhost:5173/space.m4a:0
+[ 4746624ms] [LOG] [vite] server connection lost. polling for restart... @ http://localhost:5173/@vite/client:287
+[ 4746625ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ http://localhost:5173/:0
+[10538304ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[10538343ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[11155828ms] [LOG] [vite] server connection lost. polling for restart... @ http://localhost:5173/@vite/client:287
+[11155829ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ http://localhost:5173/:0
+[11434330ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[11434356ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[13088791ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297
+[13088820ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-HVPZSDQ2.js?v=91a5336d:297

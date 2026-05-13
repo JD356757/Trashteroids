@@ -5,7 +5,8 @@ import { DebrisManager } from './DebrisManager.js';
 import { SpecialDebrisManager } from './SpecialDebrisManager.js';
 import { RecycleDebrisManager } from './RecycleDebrisManager.js';
 import { ProjectileManager } from './ProjectileManager.js';
-import { LevelManager, unlockLevel, recordLevelStars, LEVEL_DIALOGUES, LEVEL_BRIEFINGS } from './LevelManager.js';
+import { LevelManager, unlockLevel, recordLevelStars, LEVEL_FAILURE_DIALOGUES, LEVEL_BRIEFINGS } from './LevelManager.js';
+import { getBriefing } from './LevelSelect.js';
 import { InputHandler } from './InputHandler.js';
 import { HUD } from './HUD.js';
 import { Starfield } from './Starfield.js';
@@ -84,8 +85,6 @@ const TRASHTEROID_SURFACE_OFFSET = 58;
 const TRASHTEROID_BOSS_SPEED_MULTIPLIER = 0.7;
 const TRASHTEROID_SCORE_PER_HIT = 35;
 const TRASHTEROID_SCORE_ON_DESTROY = 5000;
-const TRASHTEROID_INVULNERABLE_DURATION = 30;
-const TRASHTEROID_VULNERABLE_DURATION = 30;
 const WRONG_BEAM_PENALTY = 2000;
 const PLAYER_SHOOT_HITSCAN = true;
 const BOOM_SFX_URL = '/boom.m4a';
@@ -161,17 +160,16 @@ const TUTORIAL_BEATS = {
     ],
   },
   recycle: {
-    title: 'Recycle Beam',
-    message: 'Blue-outlined bins are recyclable! Hold Shift to fire the Recycle Beam and collect them.',
+    title: 'Recyclables',
+    message: 'Blue-outlined bins are recyclable. Fly straight into them to scoop them up.',
     placement: 'center',
     requirements: [
-      { id: 'recycle-fire', label: 'Hold Shift to fire the Recycle Beam' },
-      { id: 'recycle-trash', label: 'Collect 1 recyclable with the Recycle Beam' },
+      { id: 'recycle-collected', label: 'Fly into 1 recyclable to collect it' },
     ],
   },
   penalty: {
     title: 'Penalties',
-    message: 'Try not to recycle green or yellow trash, or vaporize blue recyclables. If you do, you\'ll lose some of your score!',
+    message: 'Do not vaporize the blue recyclables. If you do, you will lose some of your score!',
     placement: 'center',
   },
   crashing: {
@@ -181,7 +179,7 @@ const TUTORIAL_BEATS = {
   },
   objectives: {
     title: 'Objectives',
-    message: 'Look at the top-left to view your objectives. Some are optional, but to earn three stars you must complete them too. You can press the escape key at any time to pause the game. That\'s it for the tutorial... you\'re on your own now!.',
+    message: 'Look at the top-left to view your objectives. Some are optional, but to earn three stars you must complete them too. You can press the escape key at any time to pause the game. That\'s it for the tutorial... you\'re on your own now!',
     placement: 'top-left',
   },
 };
@@ -200,12 +198,15 @@ function toDisplayDistance(worldDistance) {
   return Math.round(kmDistance / roundStep) * roundStep;
 }
 
-const EARTH_BACKGROUND_OFFSET = new THREE.Vector3(-1200, -600, -3500);
+// Earth sits behind the player (positive Z, with camera-relative offset)
+// so launching from Earth visually maps to "fly forward, Earth recedes
+// behind you." Sun is on the opposite half-space for proper lighting.
+const EARTH_BACKGROUND_OFFSET = new THREE.Vector3(-1200, -600, 3500);
 const EARTH_ROTATION_X = Math.PI/10;
 const EARTH_ROTATION_Y =  - Math.PI / 3;
 const EARTH_ROTATION_Z = 0;
 // Keep the sun well separated from Earth in view direction (>= 120 degrees).
-const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, 3600);
+const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, -3600);
 
 export class Game {
   constructor(canvas, startLevel = 1, options = {}) {
@@ -1299,7 +1300,6 @@ export class Game {
       trashteroid.active = false;
       trashteroid.group.visible = false;
       this.hud.setBossBarVisible(false);
-      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       return;
     }
 
@@ -1330,27 +1330,19 @@ export class Game {
       trashteroid.collisionRadius = collisionRadius;
       trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * configuredScale;
       // Start the trashteroid already moving towards Earth
-      _bossMoveDelta.set(-1200, -600, -3500).normalize();
+      _bossMoveDelta.set(-1200, -600, 3500).normalize();
       trashteroid.velocity.copy(_bossMoveDelta).multiplyScalar(
         toWorldSpeed(150)
       );
-      trashteroid.vulnerabilityState = 'shielded';
-      trashteroid.vulnerabilityTimer = TRASHTEROID_INVULNERABLE_DURATION;
-      trashteroid.isVulnerable = false;
       trashteroid.cooldownHalved = false;
       this.hud.updateBossBar(trashteroid.health, trashteroid.maxHealth);
-      this.hud.setBossVulnerabilityStatus('shielded', trashteroid.vulnerabilityTimer, true);
     } else {
       trashteroid.group.scale.setScalar(configuredScale);
       trashteroid.hitRadius = hitRadius;
       trashteroid.collisionRadius = collisionRadius;
       trashteroid.surfaceOffset = TRASHTEROID_SURFACE_OFFSET * configuredScale;
       trashteroid.velocity.set(0, 0, 0);
-      trashteroid.vulnerabilityState = null;
-      trashteroid.vulnerabilityTimer = 0;
-      trashteroid.isVulnerable = true;
       trashteroid.cooldownHalved = false;
-      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
     }
   }
 
@@ -1668,7 +1660,7 @@ export class Game {
 
     // Earth model is camera-anchored in the far background, so drive the boss along
     // a fixed Earth-bearing vector rather than homing to the visual mesh position.
-    _bossMoveDelta.set(-1200, -600, -3500).normalize();
+    _bossMoveDelta.set(-1200, -600, 3500).normalize();
 
     // Desired velocity towards Earth; after asteroid bounces, steer back towards Earth
     const earthSpeed = (bossConfig.earthSpeed != null
@@ -1680,29 +1672,6 @@ export class Game {
 
     // Integrate position
     trashteroid.group.position.addScaledVector(trashteroid.velocity, delta);
-
-    if (!trashteroid.vulnerabilityState) {
-      trashteroid.vulnerabilityState = 'vulnerable';
-      trashteroid.vulnerabilityTimer = TRASHTEROID_INVULNERABLE_DURATION;
-    }
-
-    const vulnerabilityDelta = Math.max(0, rawDelta || 0);
-    trashteroid.vulnerabilityTimer -= vulnerabilityDelta;
-    while (trashteroid.vulnerabilityTimer <= 0) {
-      if (trashteroid.vulnerabilityState === 'shielded') {
-        trashteroid.vulnerabilityState = 'vulnerable';
-        trashteroid.vulnerabilityTimer += TRASHTEROID_VULNERABLE_DURATION;
-      } else {
-        trashteroid.vulnerabilityState = 'shielded';
-        trashteroid.vulnerabilityTimer += TRASHTEROID_INVULNERABLE_DURATION;
-      }
-    }
-    trashteroid.isVulnerable = trashteroid.vulnerabilityState === 'vulnerable';
-    this.hud.setBossVulnerabilityStatus(
-      trashteroid.vulnerabilityState,
-      trashteroid.vulnerabilityTimer,
-      true
-    );
 
     if (!trashteroid.cooldownHalved && trashteroid.maxHealth > 0 && trashteroid.health <= trashteroid.maxHealth * 0.5) {
       trashteroid.cooldownHalved = true;
@@ -1918,17 +1887,6 @@ export class Game {
         continue;
       }
 
-      if (!trashteroid.isVulnerable) {
-        this._spawnSparks(impactPoint, {
-          count: 16,
-          speed: 14,
-          ttl: 0.35,
-          color: 0x8fd8ff,
-          size: 1.25,
-        });
-        continue;
-      }
-
       trashteroid.health = Math.max(0, trashteroid.health - 1);
       this.score += TRASHTEROID_SCORE_PER_HIT;
       this._spawnSparks(impactPoint, {
@@ -1944,7 +1902,6 @@ export class Game {
 
       this.score += TRASHTEROID_SCORE_ON_DESTROY;
       this.hud.setBossBarVisible(false);
-      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       this._clearTrashteroidProjectiles();
       this._startDestructionCutscene();
       break;
@@ -1965,8 +1922,8 @@ export class Game {
     _targetScreenPos.copy(targetPos).project(this.camera);
     const centerX = window.innerWidth * 0.5;
     const centerY = window.innerHeight * 0.5;
-    const radiusX = Math.max(120, window.innerWidth * 0.36);
-    const radiusY = Math.max(90, window.innerHeight * 0.26);
+    const radiusX = Math.max(120, window.innerWidth * 0.46);
+    const radiusY = Math.max(90, window.innerHeight * 0.43);
     const projectedX = centerX + _targetScreenPos.x * centerX;
     const projectedY = centerY - _targetScreenPos.y * centerY;
     const onScreen =
@@ -2026,8 +1983,8 @@ export class Game {
     const indicators = [];
     const centerX = window.innerWidth * 0.5;
     const centerY = window.innerHeight * 0.5;
-    const radiusX = Math.max(120, window.innerWidth * 0.36);
-    const radiusY = Math.max(90, window.innerHeight * 0.26);
+    const radiusX = Math.max(120, window.innerWidth * 0.46);
+    const radiusY = Math.max(90, window.innerHeight * 0.43);
     const camera = this.camera;
     const camInv = this._weakSpotCamInv ?? (this._weakSpotCamInv = new THREE.Quaternion());
     camInv.copy(camera.quaternion).invert();
@@ -2035,16 +1992,34 @@ export class Game {
     for (let i = 0; i < showCount; i++) {
       const entry = ranked[i];
       const pos = entry.ws.mesh.position;
-      _targetScreenPos.copy(pos).project(camera);
-      const onScreen =
-        _targetScreenPos.z > -1 &&
-        _targetScreenPos.z < 1 &&
-        Math.abs(_targetScreenPos.x) <= 1 &&
-        Math.abs(_targetScreenPos.y) <= 1;
-      const projectedX = centerX + _targetScreenPos.x * centerX;
-      const projectedY = centerY - _targetScreenPos.y * centerY;
 
+      // Transform into camera space first so we can robustly check whether
+      // the target is in front of the camera. project() returns garbage when
+      // the homogeneous w is near zero or negative (target on or behind the
+      // near plane); doing the front/behind test in camera space avoids
+      // that whole class of jitter.
       _targetOffset.copy(pos).sub(camera.position).applyQuaternion(camInv);
+      const inFront = _targetOffset.z < -camera.near;
+
+      let projectedX = 0;
+      let projectedY = 0;
+      let onScreen = false;
+      if (inFront) {
+        _targetScreenPos.copy(pos).project(camera);
+        if (
+          _targetScreenPos.z > -1 &&
+          _targetScreenPos.z < 1 &&
+          Math.abs(_targetScreenPos.x) <= 1 &&
+          Math.abs(_targetScreenPos.y) <= 1
+        ) {
+          onScreen = true;
+          projectedX = centerX + _targetScreenPos.x * centerX;
+          projectedY = centerY - _targetScreenPos.y * centerY;
+        }
+      }
+
+      // Bearing for the off-screen edge clamp — always derived from camera-
+      // space offset so it's well-defined regardless of front/behind.
       let angle = Math.atan2(_targetOffset.x, _targetOffset.y);
       if (_targetOffset.z > 0) angle += Math.PI;
 
@@ -2053,7 +2028,6 @@ export class Game {
       const dist = Math.sqrt(entry.distSq);
       const displayDist = toDisplayDistance(dist);
 
-      // Closer + on-screen → bigger, more opaque. Distant ones smaller.
       const proximity = THREE.MathUtils.clamp(1 - dist / 6000, 0, 1);
       const scale = onScreen ? 0.85 + proximity * 0.6 : 1.0;
       const opacity = onScreen ? 0.7 + proximity * 0.3 : 0.85;
@@ -2312,7 +2286,6 @@ export class Game {
     this.hud.updateObjectives(state.objectives);
     this.hud.hideTimer();
     this.hud.setBossBarVisible(false);
-    this.hud.setBossVulnerabilityStatus('shielded', 0, false);
     this.hud.updateBossIndicator(false, 0, 0, 0, 0);
     const earnedStars = this._calculateMissionStars(
       primaryComplete,
@@ -2363,7 +2336,14 @@ export class Game {
       totalObjectives: summary.totalObjectives,
       nextLevel,
     };
-    this._showLevelStatsPanel(this._levelStatsSummary);
+
+    if (reqDone) {
+      this._showLevelStatsPanel(this._levelStatsSummary);
+    } else {
+      // Short comms-style failure screen with a retry button — no
+      // stars/score breakdown, no debrief sequence.
+      this._startPostLevelComms();
+    }
   }
 
   _createTutorialState() {
@@ -2410,7 +2390,7 @@ export class Game {
     if (beatId === 'boost') return { boosted: false };
     if (beatId === 'fire') return { fired: false, trashDestroyed: false };
     if (beatId === 'special') return { specialDestroyed: false };
-    if (beatId === 'recycle') return { recycleFired: false, recycleDestroyed: false };
+    if (beatId === 'recycle') return { recycleDestroyed: false };
     if (beatId === 'penalty' || beatId === 'crashing' || beatId === 'objectives') {
       return { remaining: TUTORIAL_TIMED_BEAT_DURATION, duration: TUTORIAL_TIMED_BEAT_DURATION };
     }
@@ -2454,8 +2434,7 @@ export class Game {
 
     if (beatId === 'recycle') {
       return [
-        { id: 'recycle-fire', label: 'Hold Shift to fire the Recycle Beam', complete: !!progress.recycleFired },
-        { id: 'recycle-trash', label: 'Collect 1 recyclable with the Recycle Beam', complete: !!progress.recycleDestroyed },
+        { id: 'recycle-collected', label: 'Fly into 1 recyclable to collect it', complete: !!progress.recycleDestroyed },
       ];
     }
 
@@ -2647,9 +2626,6 @@ export class Game {
     if (!this._tutorial.activeBeatProgress.recycleDestroyed) {
       this._tutorial.activeBeatProgress.recycleDestroyed = true;
       this._renderTutorialBeat('recycle');
-    }
-
-    if (this._tutorial.activeBeatProgress.recycleFired) {
       this._completeActiveTutorialBeat();
     }
   }
@@ -2719,12 +2695,7 @@ export class Game {
     }
 
     if (this._tutorial.activeBeatId === 'recycle') {
-      if (!progress.recycleFired && vaporizerFired > 0) {
-        progress.recycleFired = true;
-        this._updateTutorialBeatDisplay();
-      }
-
-      if (progress.recycleFired && progress.recycleDestroyed) {
+      if (progress.recycleDestroyed) {
         this._completeActiveTutorialBeat();
       }
       return;
@@ -2929,9 +2900,9 @@ export class Game {
       rollSeen = rollInput !== 0 || this.input.wasPressed('a') || this.input.wasPressed('d');
       this.player.manualRollInput = rollInput;
 
-      // Fire regular beam with mouse-left and vaporizer beam with Shift.
+      // Single tool: Trash Vaporizer on left-click. Recyclables are
+      // collected by flying into them, not fired at.
       fired = this.input.isDown('mouseleft') ? this._firePlayerBeam('normal', rawDelta) : 0;
-      vaporizerFired = this.input.isDown('shift') ? this._firePlayerBeam('vaporizer', rawDelta) : 0;
     }
 
     this._updateActiveTutorialProgress({
@@ -3318,17 +3289,6 @@ export class Game {
         return true;
       }
 
-      if (!trashteroid.isVulnerable) {
-        this._spawnSparks(impactPoint, {
-          count: 16,
-          speed: 14,
-          ttl: 0.35,
-          color: 0x8fd8ff,
-          size: 1.25,
-        });
-        return true;
-      }
-
       trashteroid.health = Math.max(0, trashteroid.health - 1);
       this.score += TRASHTEROID_SCORE_PER_HIT;
       this._spawnSparks(impactPoint, {
@@ -3344,7 +3304,6 @@ export class Game {
 
       this.score += TRASHTEROID_SCORE_ON_DESTROY;
       this.hud.setBossBarVisible(false);
-      this.hud.setBossVulnerabilityStatus('shielded', 0, false);
       this._clearTrashteroidProjectiles();
       this._startDestructionCutscene();
       return true;
@@ -3519,6 +3478,17 @@ export class Game {
       const sweptHit = this._segmentIntersectsSphere(segStart, segEnd, d.position, hitDistance);
 
       if (sweptHit) {
+        // Recyclables are collected by flying into them — score reward,
+        // no damage, no knockback. The bin disappears.
+        if (debrisManager === this.recycleDebris) {
+          const points = d.points || 500;
+          this.score += points;
+          this._recycleCollectedRequired++;
+          this._noteTutorialRecycleDestroyed();
+          debrisManager.remove(i);
+          continue;
+        }
+
         // Resolve by moving debris only; player motion stays smooth.
         _debrisAway.copy(d.position).sub(playerPos);
         if (_debrisAway.lengthSq() < 1e-6) {
@@ -3547,6 +3517,11 @@ export class Game {
       _toDebris.copy(d.position).sub(playerPos);
       const distSq = _toDebris.lengthSq();
       const forwardOffset = _toDebris.dot(_shipForward);
+
+      // Recyclables are collectible, not hostile — no graze damage, no
+      // penalty for drifting past, no nudge. They just sit there until you
+      // hit them or they fall off the playfield.
+      if (debrisManager === this.recycleDebris) continue;
 
       // Nudge nearby debris away to reduce frustrating glancing overlaps.
       if (distSq < reactDistance * reactDistance && distSq > hitDistance * hitDistance) {
@@ -3911,42 +3886,81 @@ export class Game {
     const menuEl = el.querySelector('#level-complete-menu');
     const messagesEl = el.querySelector('#comms-messages');
     const promptEl = el.querySelector('#comms-prompt');
+    const retryBtn = el.querySelector('#comms-retry-btn');
 
     if (menuEl) menuEl.classList.add('hidden');
     if (commsPanel) commsPanel.classList.remove('hidden');
     if (messagesEl) messagesEl.innerHTML = '';
     if (promptEl) promptEl.classList.add('hidden');
+    if (retryBtn) retryBtn.classList.add('hidden');
     el.classList.remove('level-complete-reveal');
+    el.classList.remove('hidden');
 
-    const { reqDone, stars, nextLevel } = summary;
+    // Briefing aside is pre-level only — hide it during failure debrief.
+    this._populateCommsBriefingAside(null);
+
+    const { reqDone, nextLevel } = summary;
     const scoreText = Math.round(this.score).toString().padStart(6, '0');
-    const outcome = reqDone ? 'success' : 'timeout';
-    const dialogueFn = LEVEL_DIALOGUES[this.levels.current]?.[outcome];
-    const lines = dialogueFn
-      ? (outcome === 'success' ? dialogueFn(scoreText, stars) : dialogueFn(scoreText))
-      : [];
-
     const completedLevel = this.levels.current;
+
+    const onDone = () => {
+      if (nextLevel) {
+        this._startLevelTransitionCutscene(nextLevel);
+      } else if (reqDone) {
+        this._levelCompleteEl?.classList.add('hidden');
+        if (typeof this._onReturnToLevelSelect === 'function') {
+          this._onReturnToLevelSelect({ level: completedLevel, outcome: 'complete' });
+        }
+      } else {
+        // Failure: surface a retry button inside the comms footer. The
+        // pointer-events check on the retry button is independent of the
+        // comms-panel click handler that advances dialogue.
+        if (retryBtn) {
+          retryBtn.classList.remove('hidden');
+          const fire = () => {
+            retryBtn.removeEventListener('click', this._commsRetryHandler);
+            window.removeEventListener('keydown', this._commsRetryKeyHandler);
+            this._commsRetryHandler = null;
+            this._commsRetryKeyHandler = null;
+            this._onLevelRetry();
+          };
+          this._commsRetryHandler = (e) => {
+            e.stopPropagation();
+            fire();
+          };
+          this._commsRetryKeyHandler = (e) => {
+            if (e.code === 'Space' || e.code === 'Enter') {
+              e.preventDefault();
+              fire();
+            }
+          };
+          retryBtn.addEventListener('click', this._commsRetryHandler);
+          window.addEventListener('keydown', this._commsRetryKeyHandler);
+        }
+      }
+    };
+
+    // Success path skips the debrief dialogue entirely — the player flows
+    // straight from one mission into the next (or the win screen).
+    if (reqDone) {
+      onDone();
+      return;
+    }
+
+    const dialogueFn = LEVEL_FAILURE_DIALOGUES[completedLevel];
+    const lines = dialogueFn ? dialogueFn(scoreText) : [];
+
     this._debriefDialogue = {
       lines,
       lineIndex: 0,
       charIndex: 0,
-      charTimer: 0.3,
+      charTimer: 0.2,
       waitingForAdvance: false,
       done: false,
       isPrelevel: false,
       currentTextEl: null,
       stats: null,
-      onDone: () => {
-        if (nextLevel) {
-          this._startLevelTransitionCutscene(nextLevel);
-        } else if (reqDone) {
-          this._levelCompleteEl?.classList.add('hidden');
-          if (typeof this._onReturnToLevelSelect === 'function') {
-            this._onReturnToLevelSelect({ level: completedLevel, outcome: 'complete' });
-          }
-        }
-      },
+      onDone,
     };
 
     this._setupCommsHandlers();
@@ -3955,6 +3969,62 @@ export class Game {
     } else {
       this._debriefDialogue.onDone?.();
     }
+  }
+
+  _populateCommsBriefingAside(level) {
+    const el = this._levelCompleteEl;
+    if (!el) return;
+    const aside = el.querySelector('#comms-briefing');
+    if (!aside) return;
+
+    if (!level) {
+      aside.classList.add('hidden');
+      return;
+    }
+
+    const config = this.levels.getConfig(level);
+    const brief = getBriefing(level);
+    const levelEl = aside.querySelector('#comms-briefing-level');
+    const taglineEl = aside.querySelector('#comms-briefing-tagline');
+    const reqEl = aside.querySelector('#comms-briefing-required');
+    const bonusEl = aside.querySelector('#comms-briefing-bonus');
+    const bonusTitle = aside.querySelector('.comms-briefing-bonus-title');
+
+    if (levelEl) levelEl.textContent = config?.label ?? `LEVEL ${level}`;
+    if (taglineEl) taglineEl.textContent = config?.briefingTagline ?? '';
+
+    if (reqEl) {
+      reqEl.innerHTML = '';
+      for (const item of brief?.required ?? []) {
+        const li = document.createElement('li');
+        li.textContent = item;
+        reqEl.appendChild(li);
+      }
+    }
+
+    const bonusItems = brief?.bonus ?? [];
+    const bonusCol = aside.querySelector('.comms-briefing-col--bonus');
+    if (bonusEl) {
+      bonusEl.innerHTML = '';
+      for (const item of bonusItems) {
+        const li = document.createElement('li');
+        li.textContent = item;
+        bonusEl.appendChild(li);
+      }
+    }
+    if (bonusCol) bonusCol.classList.toggle('hidden', bonusItems.length === 0);
+
+    // Content is populated, but the panel stays hidden until the comms
+    // dialogue finishes typing — see _revealCommsBriefingSummary.
+    aside.classList.add('hidden');
+  }
+
+  _revealCommsBriefingSummary() {
+    const aside = this._levelCompleteEl?.querySelector('#comms-briefing');
+    if (!aside) return;
+    if (!aside.classList.contains('hidden')) return; // already revealed this session
+    if (!aside.querySelector('#comms-briefing-level')?.textContent) return;
+    aside.classList.remove('hidden');
   }
 
   _showLevelOpeningBriefing(level) {
@@ -3972,13 +4042,22 @@ export class Game {
     if (promptEl) promptEl.classList.add('hidden');
     el.classList.remove('hidden', 'level-complete-reveal');
 
+    // Pointer lock was still active from gameplay (or the previous level)
+    // — release it so the OS cursor reappears and DOM clicks reach the
+    // comms-panel advance handler. Also hide the in-game crosshair.
+    if (document.pointerLockElement) document.exitPointerLock();
+    if (this.crosshair) this.crosshair.classList.add('hidden');
+    this.paused = true;
+
+    this._populateCommsBriefingAside(level);
+
     const lines = LEVEL_BRIEFINGS[level] ?? [];
 
     this._debriefDialogue = {
       lines,
       lineIndex: 0,
       charIndex: 0,
-      charTimer: 0.7,
+      charTimer: 0.47,
       waitingForAdvance: false,
       done: false,
       isPrelevel: true,
@@ -4044,6 +4123,12 @@ export class Game {
     const messagesEl = el.querySelector('#comms-messages');
     if (!messagesEl) return;
 
+    // Ensure the continue prompt is visible from the moment a line begins
+    // typing — not only after the line finishes. The launch label and the
+    // mission summary reveal happen only once the line finishes typing
+    // (see _typeCharForDebriefDialogue / _advanceDebriefDialogue).
+    this._showCommsPrompt(false);
+
     const isControl = line.speaker === 'MISSION_CONTROL';
     const msgEl = document.createElement('div');
     msgEl.className = `comms-msg ${isControl ? 'comms-msg--control' : 'comms-msg--pilot'}`;
@@ -4087,11 +4172,11 @@ export class Game {
     }
 
     if ('.!?'.includes(ch)) {
-      d.charTimer = 0.40;
+      d.charTimer = 0.27;
     } else if (ch === ',') {
-      d.charTimer = 0.12;
+      d.charTimer = 0.08;
     } else {
-      d.charTimer = 0.028;
+      d.charTimer = 0.019;
     }
   }
 
@@ -4121,18 +4206,22 @@ export class Game {
     }
 
     d.charIndex = 0;
-    d.charTimer = 0.20;
+    d.charTimer = 0.13;
     d.waitingForAdvance = false;
     d.currentTextEl = null;
-    this._hideCommsPrompt();
+    // Keep the continue prompt visible across line transitions; its label
+    // gets refreshed for the launch line when typing of that line finishes.
     this._addCommsMessageBubble(d.lineIndex);
   }
 
   _showCommsPrompt(isLaunch = false) {
     const promptEl = this._levelCompleteEl?.querySelector('#comms-prompt');
     if (!promptEl) return;
-    promptEl.textContent = isLaunch ? '▶  SPACE / CLICK TO LAUNCH' : '▼  SPACE / CLICK TO CONTINUE';
+    promptEl.textContent = isLaunch ? '▶  SPACE TO LAUNCH' : '▼  SPACE TO CONTINUE';
     promptEl.classList.remove('hidden');
+    // Reveal the mission summary panel exactly when the final pre-level
+    // line finishes typing, so the screen stays clean until the comms are done.
+    if (isLaunch) this._revealCommsBriefingSummary();
   }
 
   _hideCommsPrompt() {
@@ -4204,10 +4293,10 @@ export class Game {
 
     if (nextBtn) {
       if (reqDone && nextLevel) {
-        nextBtn.textContent = 'DEBRIEF';
+        nextBtn.textContent = 'NEXT';
         nextBtn.classList.remove('hidden');
       } else if (reqDone && !nextLevel) {
-        nextBtn.textContent = 'DEBRIEF';
+        nextBtn.textContent = 'NEXT';
         nextBtn.classList.remove('hidden');
       } else {
         nextBtn.classList.add('hidden');
@@ -4248,6 +4337,16 @@ export class Game {
   _onLevelRetry() {
     this._cancelLevelCompleteTransition();
     this._cleanupCommsHandlers();
+    const retryBtn = this._levelCompleteEl?.querySelector('#comms-retry-btn');
+    if (retryBtn && this._commsRetryHandler) {
+      retryBtn.removeEventListener('click', this._commsRetryHandler);
+      this._commsRetryHandler = null;
+    }
+    if (this._commsRetryKeyHandler) {
+      window.removeEventListener('keydown', this._commsRetryKeyHandler);
+      this._commsRetryKeyHandler = null;
+    }
+    if (retryBtn) retryBtn.classList.add('hidden');
     this._debriefDialogue = null;
     this._levelStatsSummary = null;
     this._levelCompleteEl?.classList.add('hidden');

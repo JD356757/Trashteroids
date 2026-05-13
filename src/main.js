@@ -154,8 +154,7 @@ function showCrawl(onComplete) {
     'IN AN UNPRECEDENTED EMERGENCY RESPONSE,\n' +
     'THE INTERNATIONAL SPACE AGENCY HAS SENT\n' +
     'YOU INTO EARTH ORBIT WITH\n' +
-    'TWO TOOLS: A TRASH VAPORIZER.\n' +
-    'AND A RECYCLING BEAM.\n\n' +
+    'A TRASH VAPORIZER.\n\n' +
     'YOUR MISSION:\n\n' +
     'OBLITERATE THE TRASHTEROID.\n' +
     'SAVE THE EARTH...';
@@ -234,11 +233,11 @@ function showCrawl(onComplete) {
     const ch = CRAWL_TEXT[i++];
     textEl.textContent += ch;
     queueScrollToBottom();
-    const delay = ch === '.' ? 620
-                : (ch === '!' || ch === '?') ? 560
-                : ch === ',' ? 170
-                : ch === '\n' ? 240
-                : 44;
+    const delay = ch === '.' ? 410
+                : (ch === '!' || ch === '?') ? 370
+                : ch === ',' ? 115
+                : ch === '\n' ? 160
+                : 30;
     timeout = setTimeout(type, delay);
   };
 
@@ -273,9 +272,15 @@ startBtn.addEventListener('click', () => {
   });
 });
 
-// Allow pressing 9 to skip cutscene / overlay straight to level select
+// Skip cutscene / overlay straight to level select. Space is the visible
+// hint shown in the crawl footer; 9 is kept as a hidden devtool fallback.
 window.addEventListener('keydown', (e) => {
-  if (e.key === '9') {
+  if (e.code === 'Space' || e.key === '9') {
+    const crawl = document.getElementById('mission-crawl');
+    // Only act while the crawl is up — otherwise Space here would interfere
+    // with the comms-panel advance handler and other gameplay bindings.
+    if (!crawl || crawl.classList.contains('hidden')) return;
+    e.preventDefault();
     soundtrackManager.start();
     showLevelSelect();
   }

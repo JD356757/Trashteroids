@@ -5,23 +5,24 @@
 
 export const LEVEL_CONFIGS = {
   1: {
-    label: 'LEVEL 1 - 25,000 km approach',
-    briefingTagline: 'Complete the mandatory flight checkout, clear a safe corridor through the debris field, then push to the trashteroid breach and enter the tunnel system.',
+    label: 'LEVEL 1 - Approach the Trashteroid',
+    briefingTagline: 'Complete the flight tutorial, clear a path through the debris field, and get to the trashteroid.',
     timer: 120,
-    trashteroidStartDistanceDisplay: 25000,
+    trashteroidStartDistanceDisplay: 62500,
+    trashteroidScale: 40,
     mission: {
-      successTitle: 'BREACH WINDOW LOCKED',
-      successSubtitle: 'Approach corridor secured. Tunnel insertion authorized.',
+      successTitle: 'TRASHTEROID REACHED',
+      successSubtitle: 'You successfully cleared out debris in your path and reached the Trashteroid.',
       primary: {
         tutorialRequired: true,
         tutorialLabel: 'Complete mandatory flight tutorial',
         trashRequired: 5,
         recycleRequired: 5,
         reachTrashteroid: true,
-        reachDistanceDisplay: 250,
-        reachLabel: 'Enter Trashteroid breach',
-        reachedLabel: 'Entered Trashteroid breach',
-        briefingReachLabel: 'Reach the Trashteroid and enter the breach',
+        reachDistanceDisplay: 5000,
+        reachLabel: 'Reach the Trashteroid',
+        reachedLabel: 'Reached the Trashteroid',
+        briefingReachLabel: 'Get to the Trashteroid',
       },
       bonus: {
         fastTrashRequired: 3,
@@ -51,14 +52,14 @@ export const LEVEL_CONFIGS = {
   },
   2: {
     label: 'LEVEL 2 - Inside the trashteroid',
-    briefingTagline: '[PHASE 1 DEBUG] Fly through the tunnel layout. Cyan lines are tunnels, wireframe spheres are chambers/junctions, pulsing red spheres are weak spots.',
+    briefingTagline: "Navigate the dark tunnels inside the trashteroid's core. Look for weak spots and destroy them. But if you spend too long inside, you won't survive...",
     timer: 0,
     interior: true,
     tunnelData: 'level2',
     bakedMeshUrl: '/models/level2_interior.glb',
     mission: {
-      successTitle: 'CORE STRUCTURE COMPROMISED',
-      successSubtitle: 'Outer shell weakened. Final exterior strike window open.',
+      successTitle: 'TRASHTEROID STRUCTURE COMPROMISED',
+      successSubtitle: 'You weakened the outer shell of the Trashteroid. Now destroy it from the outside, once and for all.',
       primary: {
         weakSpotsRequired: 7,
         weakSpotsTotal: 10,
@@ -86,12 +87,12 @@ export const LEVEL_CONFIGS = {
     },
   },
   3: {
-    label: 'LEVEL 3 - Exterior final assault',
-    briefingTagline: 'The interior strike blasted you back outside and cracked the shell. The trashteroid is vulnerable now. Stay on the exterior, survive the debris storm, and destroy it before it can hit Earth.',
+    label: 'LEVEL 3 - Destroy the trashteroid',
+    briefingTagline: "The interior destruction blasted you back into space but it weakened the trashteroid's outer shell. Survive the storm of debris flying out of it and destroy it before it can reach the earth.",
     timer: 300,
     mission: {
       successTitle: 'TRASHTEROID DESTROYED',
-      successSubtitle: 'Earth orbit is clear.',
+      successSubtitle: 'Threat neutralized. Good job, pilot.',
       primary: {
         destroyTrashteroid: true,
       },
@@ -147,85 +148,41 @@ export const LEVEL_CONFIGS = {
   },
 };
 
-function _starsText(stars) {
-  if (stars >= 3) return 'Three stars. Flawless.';
-  if (stars === 2) return 'Two stars. Solid work.';
-  return 'One star. Primary objective met.';
-}
-
 export const LEVEL_BRIEFINGS = {
   1: [
-    { speaker: 'MISSION_CONTROL', text: "Pilot, you are entering Earth's outer debris field on final approach to the Trashteroid." },
-    { speaker: 'MISSION_CONTROL', text: "Your flight checkout is mandatory. Once it is complete, destroy 5 trash clusters and collect 5 recyclables to clear a stable approach lane." },
-    { speaker: 'MISSION_CONTROL', text: "When the corridor is open, burn straight for the breach window we found on the surface and enter the tunnel system." },
-    { speaker: 'PILOT', text: "Copy. Finish the checkout, clear the lane, then punch into the Trashteroid." },
+    { speaker: 'MISSION_CONTROL', text: "Pilot, you've just entered Earth orbit. The first thing you should do is complete your flight tutorial to get a feel for the ship's controls." },
+    { speaker: 'MISSION_CONTROL', text: "Once you've done that, your real mission begins. Destroy 5 trash clusters and collect 5 recyclables. This will clear a path for you to get to the Trashteroid. Once you get there, we'll send you into its core to destroy it from the inside out." },
+    { speaker: 'PILOT', text: "Roger that. Finish the tutorial, clear out the debris, and get to the Trashteroid." },
   ],
   2: [
-    { speaker: 'MISSION_CONTROL', text: "We identified structural weaknesses in the Trashteroid's shell and guided you through a breach into its tunnel system." },
-    { speaker: 'PILOT', text: "I am inside. Reading narrow chambers, branching routes, and debris fused into the walls." },
-    { speaker: 'MISSION_CONTROL', text: "Ten weak spots are distributed through the network. Destroy at least five of them to make the outside more vulnerable." },
-    { speaker: 'MISSION_CONTROL', text: "Stay centered on the tunnel line, keep your speed controlled, and do not let the walls pin you down." },
-    { speaker: 'PILOT', text: "Understood. Hunting weak spots now." },
+    { speaker: 'MISSION_CONTROL', text: "We identified structural weaknesses inside the Trashteroid's core. To destroy them, we've guided you inside the core, through a breach in the Trashteroid's surface." },
+    { speaker: 'PILOT', text: "I am inside. Radar is showing narrow, branching tunnels, large chambers, and debris scattered all around." },
+    { speaker: 'MISSION_CONTROL', text: "Ten weak spots are distributed throughout the tunnels. They'll glow red once you get close. Destroy at least seven of them to weaken the Trashteroid." },
+    { speaker: 'MISSION_CONTROL', text: "Keep your speed under control and try to stay clear of the tunnel walls. We wouldn't want you crashing, now, would we..." },
+    { speaker: 'PILOT', text: "Understood. Going after the weak spots now." },
   ],
   3: [
-    { speaker: 'MISSION_CONTROL', text: "The interior collapse blew you back outside, but it did exactly what we needed. The shell is breaking apart." },
-    { speaker: 'PILOT', text: "I see the fractures. The whole surface is venting debris." },
-    { speaker: 'MISSION_CONTROL', text: "The Trashteroid is finally vulnerable. Stay outside, keep pressure on the main body, and destroy it before impact. You have five minutes." },
-    { speaker: 'PILOT', text: "Copy. Ending this now." },
+    { speaker: 'MISSION_CONTROL', text: "The interior collapse blew you back outside, but it did exactly what we needed. The Trashteroid's outer shell is breaking apart." },
+    { speaker: 'PILOT', text: "I can see that. The whole surface has debris shooting out of it." },
+    { speaker: 'MISSION_CONTROL', text: "Perfect, that means the job's half done. We just need you to finish it off. Here's the plan: you have to --- [STATIC] --- so that --- [STATIC] --- blow --- [STATIC]." },
+    { speaker: 'PILOT', text: "Mission Control, you're cutting out. I think the interior explosion must have damaged my comms system." },
+    { speaker: 'MISSION_CONTROL', text: "[STATIC]" },
+    { speaker: 'PILOT', text: "I'm on my own. If I keep grinding at the Trashteroid with my Vaporizer beam, I should be able to blow it up." },
   ],
 };
 
-export const LEVEL_DIALOGUES = {
-  1: {
-    success: (score, stars) => [
-      { speaker: 'MISSION_CONTROL', text: "Pilot, the debris lane is clear and our breach scan just stabilized." },
-      { speaker: 'PILOT', text: "I have the opening in sight." },
-      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. ${_starsText(stars)}` },
-      { speaker: 'MISSION_CONTROL', text: "We found structural weak points beneath the shell. We are feeding you a route into the tunnel system now." },
-      { speaker: 'PILOT', text: "Send it. I am going in." },
-    ],
-    timeout: (score) => [
-      { speaker: 'MISSION_CONTROL', text: "Pilot, the lane never opened. You are still too far out to make the breach." },
-      { speaker: 'PILOT', text: "Too much debris on the approach. I kept losing the corridor." },
-      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. Complete the tutorial, destroy 5 trash, collect 5 recyclables, then drive into the breach.` },
-      { speaker: 'MISSION_CONTROL', text: "Finish the checkout quickly, clear the center lane, and push straight at the target." },
-      { speaker: 'PILOT', text: "Copy. Resetting for another run." },
-    ],
-  },
-  2: {
-    success: (score, stars) => [
-      { speaker: 'MISSION_CONTROL', text: "Those weak spots are gone. Outer shell stress is spiking all across the surface." },
-      { speaker: 'PILOT', text: "The tunnels are venting. Something just threw me clear of the breach." },
-      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. ${_starsText(stars)}` },
-      { speaker: 'MISSION_CONTROL', text: "Good. You are back outside, and the Trashteroid is finally exposed." },
-      { speaker: 'PILOT', text: "Then this next pass is the kill shot." },
-      { speaker: 'MISSION_CONTROL', text: "Exactly. Finish it." },
-    ],
-    timeout: (score) => [
-      { speaker: 'MISSION_CONTROL', text: "Pilot, the weak point network is still holding." },
-      { speaker: 'PILOT', text: "The tunnel layout kept forcing me off the line." },
-      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. You need to destroy 5 of the 10 weak spots inside the Trashteroid.` },
-      { speaker: 'MISSION_CONTROL', text: "Stay centered in the tunnels, then make clean runs through the chambers." },
-      { speaker: 'PILOT', text: "Copy. Going back inside." },
-    ],
-  },
-  3: {
-    success: (score, stars) => [
-      { speaker: 'MISSION_CONTROL', text: "Pilot! We are reading a massive explosion on our scopes. Did you destroy it?" },
-      { speaker: 'PILOT', text: "It is gone, Control. Nothing left." },
-      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. ${_starsText(stars)}` },
-      { speaker: 'MISSION_CONTROL', text: "Earth orbit is clear. The Trashteroid is destroyed. You just saved everyone on the planet." },
-      { speaker: 'PILOT', text: "Just doing the job." },
-      { speaker: 'MISSION_CONTROL', text: "Come home, pilot. You earned it." },
-    ],
-    timeout: (score) => [
-      { speaker: 'MISSION_CONTROL', text: "Pilot, the timer ran out. The Trashteroid is still intact." },
-      { speaker: 'PILOT', text: "I could not break through the debris field in time." },
-      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. You need to destroy the Trashteroid itself. Keep firing at it.` },
-      { speaker: 'MISSION_CONTROL', text: "Ignore the small debris if you can and focus all fire on the Trashteroid." },
-      { speaker: 'PILOT', text: "Going back in." },
-    ],
-  },
+// Played only on level failure (timeout / missed primary objective). Success
+// skips straight to the next level's pre-level briefing — no debrief.
+export const LEVEL_FAILURE_DIALOGUES = {
+  1: () => [
+    { speaker: 'MISSION_CONTROL', text: "Pilot, you ran out of time. The Trashteroid got too close to Earth." },
+  ],
+  2: () => [
+    { speaker: 'MISSION_CONTROL', text: "Pilot, you didn't destroy enough weak spots. Get back in there and finish the job." },
+  ],
+  3: () => [
+    { speaker: 'MISSION_CONTROL', text: "Pilot, you ran out of time. The Trashteroid got too close to Earth, and gravity is only speeding it up now. We can't stop it anymore." },
+  ],
 };
 
 const LEVEL_UNLOCK_STORAGE_KEY = 'trashteroid_unlocked_level';

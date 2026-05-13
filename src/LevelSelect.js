@@ -43,7 +43,7 @@ function formatSpecialTrashLabel(count) {
   return `Destroy ${count} special ${count === 1 ? 'piece' : 'pieces'} of trash`;
 }
 
-function getBriefing(levelId) {
+export function getBriefing(levelId) {
   const config = LEVEL_CONFIGS[levelId];
   const mission = config?.mission;
   const primary = mission?.primary ?? {};
@@ -270,6 +270,12 @@ export class LevelSelect {
     this._onKeyDown = this._onKeyDown.bind(this);
     this._onResize = this._onResize.bind(this);
     this._frame = this._frame.bind(this);
+    this._hoverMouse = new THREE.Vector2(-2, -2); // off-screen sentinel
+    this._onMouseMove = (e) => {
+      this._hoverMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      this._hoverMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    };
+    this._createFirstVisitPointerEl();
     this._onSettingsButtonClick = this._onSettingsButtonClick.bind(this);
     this._onSettingsRootClick = this._onSettingsRootClick.bind(this);
     this._onSettingsInput = this._onSettingsInput.bind(this);
@@ -316,11 +322,30 @@ export class LevelSelect {
     }
     this._hideSettingsPanel();
 
+    // Defensive: clear any stale inline cursor styles a prior game session
+    // may have left behind (pointer lock / OS state can leave the canvas
+    // with a non-default cursor).
+    this.canvas.style.cursor = '';
+    document.body.style.cursor = '';
+
     window.addEventListener('click', this._onClick);
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('resize', this._onResize);
+    window.addEventListener('mousemove', this._onMouseMove);
     this._clock.start();
     this._frame();
+
+    // First-visit pointer arrow: shown only on a brand-new save (Level 1 is
+    // the only unlocked level) and only the first time the player ever sees
+    // the level select.
+    const seenKey = 'trashteroid_seen_level_select';
+    let hasSeen = false;
+    try { hasSeen = !!window.localStorage.getItem(seenKey); } catch { /* ignore */ }
+    const onlyLevel1Unlocked = this._unlockedLevel === 1;
+    const shouldShowPointer = !hasSeen && onlyLevel1Unlocked;
+    if (this._firstVisitPointerEl) {
+      this._firstVisitPointerEl.classList.toggle('hidden', !shouldShowPointer);
+    }
 
     if (focusLevel != null) {
       const levelData = LEVEL_DATA.find(l => l.id === focusLevel);
@@ -348,6 +373,9 @@ export class LevelSelect {
     window.removeEventListener('click', this._onClick);
     window.removeEventListener('keydown', this._onKeyDown);
     window.removeEventListener('resize', this._onResize);
+    window.removeEventListener('mousemove', this._onMouseMove);
+    if (this._firstVisitPointerEl) this._firstVisitPointerEl.classList.add('hidden');
+    this.canvas.style.cursor = '';
     if (this._rafId) cancelAnimationFrame(this._rafId);
     this._rafId = null;
   }
@@ -367,6 +395,8 @@ export class LevelSelect {
     this._animateShip(delta);
     this._animateNodes(delta);
     this._animateCamera(delta);
+    this._updateHoverCursor();
+    this._updateFirstVisitPointer();
     this._updateMusicVisualizer(delta);
 
     // IntroScene renders the starfield in its own RAF loop; render level-select scene on top
@@ -566,6 +596,7 @@ export class LevelSelect {
         if (!this._isLevelUnlocked(id)) {
           return;
         }
+        this._dismissFirstVisitPointer();
         const levelData = LEVEL_DATA.find(l => l.id === id);
         if (levelData) {
           this._selectedLevel = levelData;
@@ -584,6 +615,61 @@ export class LevelSelect {
     if (!this.active) return;
     if (e.key !== '5') return;
     this._unlockBypass = true;
+  }
+
+  /* ── hover cursor + first-visit pointer ── */
+
+  _createFirstVisitPointerEl() {
+    const el = document.createElement('div');
+    el.id = 'level-select-pointer';
+    el.className = 'hidden';
+    el.textContent = '▼ CLICK';
+    document.body.appendChild(el);
+    this._firstVisitPointerEl = el;
+  }
+
+  _updateHoverCursor() {
+    if (!this.active) return;
+    // The settings panel is a full-screen overlay — disable scene hover
+    // when it's up. The level popup is only a small bottom card, so the
+    // level nodes above remain hoverable while it's open.
+    if (this._settingsRoot && !this._settingsRoot.classList.contains('hidden')) {
+      this.canvas.style.cursor = '';
+      return;
+    }
+
+    this.raycaster.setFromCamera(this._hoverMouse, this.camera);
+    const meshes = [];
+    for (const n of this.nodes) {
+      if (!this._isLevelUnlocked(n.data.id)) continue;
+      meshes.push(n.mesh, n.ring, n.label, n.starsLabel);
+    }
+    if (this._earthMesh) meshes.push(this._earthMesh, this._earthRing, this._earthLabel);
+    const hit = meshes.length > 0 && this.raycaster.intersectObjects(meshes).length > 0;
+    this.canvas.style.cursor = hit ? 'pointer' : '';
+  }
+
+  _updateFirstVisitPointer() {
+    const el = this._firstVisitPointerEl;
+    if (!el || el.classList.contains('hidden')) return;
+    const node = this.nodes.find((n) => n.data.id === 1);
+    if (!node) return;
+
+    // Project the level 1 node's world position to screen space.
+    const v = node.mesh.position.clone();
+    v.project(this.camera);
+    const x = (v.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    el.style.left = `${x}px`;
+    // Float the arrow above the level node so it doesn't obscure it.
+    el.style.top = `${y - 70}px`;
+  }
+
+  _dismissFirstVisitPointer() {
+    if (this._firstVisitPointerEl) {
+      this._firstVisitPointerEl.classList.add('hidden');
+    }
+    try { window.localStorage.setItem('trashteroid_seen_level_select', '1'); } catch { /* ignore */ }
   }
 
   _syncSettingsControls() {
