@@ -208,6 +208,55 @@ const EARTH_ROTATION_Z = 0;
 // Keep the sun well separated from Earth in view direction (>= 120 degrees).
 const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, -3600);
 
+// Simple object pool to reduce memory allocations during collision detection
+class Vector3Pool {
+  constructor(initialSize = 256) {
+    this._available = [];
+    this._inUse = new Set();
+    for (let i = 0; i < initialSize; i++) {
+      this._available.push(new THREE.Vector3());
+    }
+  }
+
+  acquire() {
+    let v;
+    if (this._available.length > 0) {
+      v = this._available.pop();
+    } else {
+      v = new THREE.Vector3();
+    }
+    this._inUse.add(v);
+    return v;
+  }
+
+  release(v) {
+    if (this._inUse.has(v)) {
+      this._inUse.delete(v);
+      this._available.push(v);
+    }
+  }
+
+  releaseAll() {
+    this._inUse.forEach(v => this._available.push(v));
+    this._inUse.clear();
+  }
+
+  dispose() {
+    this._available.length = 0;
+    this._inUse.clear();
+  }
+}
+
+// Easing functions for smooth animations
+const Easing = {
+  linear: (t) => t,
+  easeInOut: (t) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
+  easeOut: (t) => 1 - Math.pow(1 - t, 3),
+  easeIn: (t) => t * t * t,
+  easeOutQuart: (t) => 1 - Math.pow(1 - t, 4),
+  easeInOutQuart: (t) => t < 0.5 ? 8 * t * t * t * t : 1 - 8 * (--t) * t * t * t,
+};
+
 export class Game {
   constructor(canvas, startLevel = 1, options = {}) {
     this.canvas = canvas;
@@ -290,6 +339,9 @@ export class Game {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x000011, 0.000001);
     //change fog here 0 is no fog
+
+    // Performance: Vector pool for collision detection
+    this._vectorPool = new Vector3Pool(512);
 
     // Camera — extend far plane for distant planet
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 200000);
@@ -516,6 +568,7 @@ export class Game {
     if (document.pointerLockElement === this.canvas) {
       document.exitPointerLock();
     }
+    this._vectorPool?.dispose?.();
     this.renderer.dispose();
   }
 
@@ -1042,6 +1095,7 @@ export class Game {
   _setExteriorLightingForInterior(interior) {
     // Stash the exterior fog/background and sun/ambient settings the first
     // time we swap to interior mode, then restore them on the way out.
+    // Now with smooth easing over 0.5s
     if (interior) {
       if (this._exteriorLightingState == null) {
         this._exteriorLightingState = {
@@ -1053,24 +1107,65 @@ export class Game {
           sunMeshVisible: this.sunMesh?.visible ?? true,
           sunGlowVisible: this.sunGlowSprite?.visible ?? true,
         };
+
+        // Start lighting transition animation (0.5s)
+        this._lightingTransitionStart = this._elapsed;
+        this._lightingTransitionDuration = 0.5;
+        this._lightingTransitionTarget = 'interior';
       }
-      this.scene.fog = new THREE.FogExp2(0x07050a, 0.00045);
-      this.scene.background = new THREE.Color(0x05030a);
-      if (this.sunLight) this.sunLight.intensity = 0;
-      if (this.ambientLight) this.ambientLight.intensity = 0;
-      if (this.hemiLight) this.hemiLight.intensity = 0;
-      if (this.sunMesh) this.sunMesh.visible = false;
-      if (this.sunGlowSprite) this.sunGlowSprite.visible = false;
     } else if (this._exteriorLightingState) {
       const s = this._exteriorLightingState;
-      this.scene.fog = s.fog;
-      this.scene.background = s.background;
-      if (this.sunLight) this.sunLight.intensity = s.sunIntensity;
-      if (this.ambientLight) this.ambientLight.intensity = s.ambientIntensity;
-      if (this.hemiLight) this.hemiLight.intensity = s.hemiIntensity;
-      if (this.sunMesh) this.sunMesh.visible = s.sunMeshVisible;
-      if (this.sunGlowSprite) this.sunGlowSprite.visible = s.sunGlowVisible;
+      
+      // Start transition back to exterior (0.5s)
+      this._lightingTransitionStart = this._elapsed;
+      this._lightingTransitionDuration = 0.5;
+      this._lightingTransitionTarget = 'exterior';
       this._exteriorLightingState = null;
+    }
+  }
+
+  _updateLightingTransition(delta) {
+    if (!this._lightingTransitionStart && this._lightingTransitionStart !== 0) return;
+
+    const elapsed = this._elapsed - this._lightingTransitionStart;
+    const t = Math.min(1, elapsed / this._lightingTransitionDuration);
+    const eased = Easing.easeInOut(t);
+
+    if (this._lightingTransitionTarget === 'interior') {
+      // Transition to interior
+      if (this.sunLight) this.sunLight.intensity = (1 - eased) * (this._exteriorLightingState?.sunIntensity ?? 0);
+      if (this.ambientLight) this.ambientLight.intensity = (1 - eased) * (this._exteriorLightingState?.ambientIntensity ?? 0);
+      if (this.hemiLight) this.hemiLight.intensity = (1 - eased) * (this._exteriorLightingState?.hemiIntensity ?? 0);
+    } else if (this._lightingTransitionTarget === 'exterior' && this._exteriorLightingState) {
+      // Transition to exterior
+      if (this.sunLight) this.sunLight.intensity = eased * (this._exteriorLightingState.sunIntensity ?? 0);
+      if (this.ambientLight) this.ambientLight.intensity = eased * (this._exteriorLightingState.ambientIntensity ?? 0);
+      if (this.hemiLight) this.hemiLight.intensity = eased * (this._exteriorLightingState.hemiIntensity ?? 0);
+    }
+
+    // Final snap at end of transition
+    if (t >= 1) {
+      if (this._lightingTransitionTarget === 'interior') {
+        this.scene.fog = new THREE.FogExp2(0x07050a, 0.00045);
+        this.scene.background = new THREE.Color(0x05030a);
+        if (this.sunLight) this.sunLight.intensity = 0;
+        if (this.ambientLight) this.ambientLight.intensity = 0;
+        if (this.hemiLight) this.hemiLight.intensity = 0;
+        if (this.sunMesh) this.sunMesh.visible = false;
+        if (this.sunGlowSprite) this.sunGlowSprite.visible = false;
+      } else if (this._lightingTransitionTarget === 'exterior' && this._exteriorLightingState) {
+        const s = this._exteriorLightingState;
+        this.scene.fog = s.fog;
+        this.scene.background = s.background;
+        if (this.sunLight) this.sunLight.intensity = s.sunIntensity;
+        if (this.ambientLight) this.ambientLight.intensity = s.ambientIntensity;
+        if (this.hemiLight) this.hemiLight.intensity = s.hemiIntensity;
+        if (this.sunMesh) this.sunMesh.visible = s.sunMeshVisible;
+        if (this.sunGlowSprite) this.sunGlowSprite.visible = s.sunGlowVisible;
+        this._exteriorLightingState = null;
+      }
+      this._lightingTransitionStart = null;
+      this._lightingTransitionTarget = null;
     }
   }
 
@@ -3023,6 +3118,9 @@ export class Game {
 
     // Keep sun and planet locked relative to camera (unreachable background)
     this._updateBackground(delta);
+
+    // Update lighting transitions (interior/exterior fading)
+    this._updateLightingTransition(delta);
 
     // Starfield should be centered after the camera has moved to avoid
     // one-frame parallax/zoom artifacts when the camera follows the ship.
