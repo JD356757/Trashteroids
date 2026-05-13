@@ -51,7 +51,7 @@ export const LEVEL_CONFIGS = {
   },
   2: {
     label: 'LEVEL 2 - Inside the trashteroid',
-    briefingTagline: 'Mission Control identified structural weaknesses in the trashteroid and guided you into its tunnel system. Fly the chambers, destroy the weak spots, and expose the exterior for the final assault.',
+    briefingTagline: '[PHASE 1 DEBUG] Fly through the tunnel layout. Cyan lines are tunnels, wireframe spheres are chambers/junctions, pulsing red spheres are weak spots.',
     timer: 0,
     interior: true,
     tunnelData: 'level2',
@@ -60,7 +60,7 @@ export const LEVEL_CONFIGS = {
       successTitle: 'CORE STRUCTURE COMPROMISED',
       successSubtitle: 'Outer shell weakened. Final exterior strike window open.',
       primary: {
-        weakSpotsRequired: 5,
+        weakSpotsRequired: 7,
         weakSpotsTotal: 10,
       },
       bonus: {},

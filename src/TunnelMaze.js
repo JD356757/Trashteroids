@@ -59,6 +59,7 @@ export class TunnelMaze {
 
     if (bakedMeshUrl) {
       this._buildInteriorLighting();
+      this._buildAtmosphericLights();
       this._loadBakedMesh(bakedMeshUrl);
       this._embedTrash();
     }
@@ -249,12 +250,12 @@ export class TunnelMaze {
   }
 
   _buildInteriorLighting() {
-    const ambient = new THREE.AmbientLight(0x4a3a2c, 0.15);
+    const ambient = new THREE.AmbientLight(0x3a4434, 0.15);
     this.group.add(ambient);
     this._interiorAmbient = ambient;
 
     const spot = new THREE.SpotLight(
-      0xfff0d6,
+      0xeaf2dc,
       18,
       8000,
       Math.PI / 2.4,
@@ -268,6 +269,38 @@ export class TunnelMaze {
     spot.target = target;
     this._playerSpot = spot;
     this._playerSpotTarget = target;
+  }
+
+  _buildAtmosphericLights() {
+    // Soft warm point lights inside the biggest chambers so each one feels
+    // like a lit room and walls/openings read at a glance. Only chambers
+    // with radius >= threshold get a light — narrows and dead ends rely on
+    // the player's headlight to stay atmospheric. Light count is kept
+    // small because every point light is evaluated per fragment of the
+    // wall shader.
+    const CHAMBER_LIGHT_THRESHOLD = 700;
+    const nodes = this.data.nodes ?? {};
+    for (const [name, node] of Object.entries(nodes)) {
+      const r = node.radius ?? 0;
+      if (r < CHAMBER_LIGHT_THRESHOLD) continue;
+      // High intensity + slow decay so the light actually reaches the walls
+      // at maze scale (chambers are ~1000 units across). Range cuts off
+      // beyond the chamber so adjacent rooms don't double-illuminate.
+      const light = new THREE.PointLight(0xe0eed8, 28, r * 8, 0.5);
+      light.position.fromArray(node.pos);
+      light.name = `chamberLight:${name}`;
+      this.group.add(light);
+    }
+
+    // A cooler-toned light at the entry node so the player can orient
+    // themselves when control first hands over.
+    const entry = nodes.entry;
+    if (entry) {
+      const entryLight = new THREE.PointLight(0xa8c8ff, 22, (entry.radius ?? 500) * 10, 0.5);
+      entryLight.position.fromArray(entry.pos);
+      entryLight.name = 'entryLight';
+      this.group.add(entryLight);
+    }
   }
 
   _embedTrash() {
@@ -446,10 +479,10 @@ export class TunnelMaze {
   _loadBakedMesh(url) {
     const loader = new GLTFLoader();
     const material = new THREE.MeshStandardMaterial({
-      color: 0x8a7a60,
-      roughness: 0.85,
+      color: 0x4e5a40,
+      roughness: 0.88,
       metalness: 0.0,
-      emissive: 0x2a2218,
+      emissive: 0x161c12,
       emissiveIntensity: 0.4,
       side: THREE.BackSide,
     });
@@ -815,6 +848,41 @@ export class TunnelMaze {
 
   getWeakSpots() {
     return this._weakSpotMeshes;
+  }
+
+  getRadarNetwork() {
+    if (this._radarNetworkCache) return this._radarNetworkCache;
+    const tunnels = [];
+    const tunnelData = this.data.tunnels ?? [];
+    const samplesPerTunnel = 12;
+    const tmp = new THREE.Vector3();
+    for (const t of tunnelData) {
+      const from = this.data.nodes?.[t.from];
+      const to = this.data.nodes?.[t.to];
+      if (!from || !to) continue;
+      const ctrl = [new THREE.Vector3().fromArray(from.pos)];
+      if (Array.isArray(t.midpoints)) {
+        for (const mp of t.midpoints) ctrl.push(new THREE.Vector3().fromArray(mp.pos));
+      }
+      ctrl.push(new THREE.Vector3().fromArray(to.pos));
+      const curve = new THREE.CatmullRomCurve3(ctrl, false, 'catmullrom', 0.5);
+      const pts = [];
+      for (let i = 0; i <= samplesPerTunnel; i++) {
+        const v = new THREE.Vector3();
+        curve.getPointAt(i / samplesPerTunnel, v);
+        pts.push(v);
+      }
+      tunnels.push(pts);
+    }
+    const nodes = [];
+    for (const node of Object.values(this.data.nodes ?? {})) {
+      nodes.push({
+        pos: new THREE.Vector3().fromArray(node.pos),
+        radius: node.radius ?? 0,
+      });
+    }
+    this._radarNetworkCache = { tunnels, nodes };
+    return this._radarNetworkCache;
   }
 
   damageWeakSpot(index, damage) {
