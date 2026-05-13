@@ -25,8 +25,8 @@ export class Player {
     this.dampening = 0.98;
     this.manualRollSpeed = 5.0;
     this.maxRoll = Math.PI / 4;
-    this.rollLiftPower = 180;
-    this.rollYawCoupling = 1;
+    this.rollLiftPower = 420;
+    this.rollYawCoupling = 2.2;
 
     this.modelScale = 1;
     this.velocity = new THREE.Vector3();

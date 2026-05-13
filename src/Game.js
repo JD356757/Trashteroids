@@ -5,12 +5,14 @@ import { DebrisManager } from './DebrisManager.js';
 import { SpecialDebrisManager } from './SpecialDebrisManager.js';
 import { RecycleDebrisManager } from './RecycleDebrisManager.js';
 import { ProjectileManager } from './ProjectileManager.js';
-import { LevelManager, unlockLevel, recordLevelStars } from './LevelManager.js';
+import { LevelManager, unlockLevel, recordLevelStars, LEVEL_DIALOGUES, LEVEL_BRIEFINGS } from './LevelManager.js';
 import { InputHandler } from './InputHandler.js';
 import { HUD } from './HUD.js';
 import { Starfield } from './Starfield.js';
 import { AsteroidField } from './AsteroidField.js';
 import { soundtrackManager } from './AudioManager.js';
+import { TunnelMaze } from './TunnelMaze.js';
+import { getTunnelData } from './levels/tunnelRegistry.js';
 const _camOffset = new THREE.Vector3(0, 6, 22);
 const _camTarget = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
@@ -94,7 +96,7 @@ const LEVEL_ENTRY_FADE_HOLD_MS = 280;
 const LEVEL_ENTRY_FADE_MS = 420;
 const LEVEL_COMPLETE_FADE_HOLD_MS = 220;
 const LEVEL_COMPLETE_FADE_MS = 1000;
-const LEVEL_COMPLETE_CONTROL_LOCK_SECONDS = 2.6;
+const LEVEL_COMPLETE_CONTROL_LOCK_SECONDS = 0.6;
 const DEATH_SEQUENCE_DURATION = 1.25;
 const DEATH_OVERLAY_REVEAL_DELAY = 0.36;
 const GAME_OVER_RETURN_DELAY_MS = 2600;
@@ -250,11 +252,16 @@ export class Game {
     this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
     this._specialTrashDestroyed = 0;
+    this._weakSpotsDestroyed = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(200);
     this._levelComplete = false;
     this._levelCompleteControlLockRemaining = 0;
     this._pendingLevelCompleteSummary = null;
     this._scoreCounterRaf = null;
+    this._debriefDialogue = null;
+    this._levelStatsSummary = null;
+    this._commsAdvanceClickHandler = null;
+    this._commsAdvanceKeyHandler = null;
     this.clock = new THREE.Clock();
     this.crosshair = document.getElementById('crosshair');
 
@@ -440,6 +447,11 @@ export class Game {
     this.clock.start();
     this._resetTutorialState();
     this._enterLevel(this._startLevel, { resetPlayerPosition: true });
+    const hasBriefing = (LEVEL_BRIEFINGS[this._startLevel]?.length ?? 0) > 0;
+    if (hasBriefing) {
+      this.paused = true;
+      this._showLevelOpeningBriefing(this._startLevel);
+    }
     this._loop();
   }
 
@@ -462,6 +474,7 @@ export class Game {
     this.recycleDebris.clear();
     this._clearTrashteroidProjectiles();
     this._clearTransientEffects();
+    this._teardownTunnelMaze();
     this.input?.dispose?.();
     window.removeEventListener('resize', this._handleWindowResize);
     document.getElementById('level-next-btn')?.removeEventListener('click', this._handleLevelNextClick);
@@ -484,6 +497,8 @@ export class Game {
       pickupSfx.pause();
       pickupSfx.currentTime = 0;
     }
+    this._cleanupCommsHandlers();
+    this._debriefDialogue = null;
     this._levelCompleteEl?.classList.add('hidden');
     this.hud.overlay?.classList.add('hidden');
     if (document.pointerLockElement === this.canvas) {
@@ -953,6 +968,45 @@ export class Game {
     }
   }
 
+  _buildTunnelMaze(key) {
+    const data = getTunnelData(key);
+    if (!data) {
+      console.warn(`TunnelMaze data not found for key "${key}"`);
+      return;
+    }
+    this._tunnelMaze = new TunnelMaze(this.scene, data, { debug: true });
+    const start = data.playerStart;
+    if (start && Array.isArray(start.pos)) {
+      this.player.mesh.position.fromArray(start.pos);
+      this.player.velocity.set(0, 0, 0);
+      if (Array.isArray(start.lookAt)) {
+        const lookAt = new THREE.Vector3().fromArray(start.lookAt);
+        const forward = lookAt.sub(this.player.mesh.position).normalize();
+        if (forward.lengthSq() > 0) {
+          const defaultForward = new THREE.Vector3(0, 0, -1);
+          this.player.baseQuaternion.setFromUnitVectors(defaultForward, forward);
+          this.player.mesh.quaternion.copy(this.player.baseQuaternion);
+        }
+      }
+      this._prevPlayerPos.copy(this.player.mesh.position);
+    }
+  }
+
+  _teardownTunnelMaze() {
+    if (this._tunnelMaze) {
+      this._tunnelMaze.dispose();
+      this._tunnelMaze = null;
+    }
+  }
+
+  _setAsteroidFieldVisible(visible) {
+    const instances = this.asteroidField?.instances;
+    if (!instances) return;
+    for (const inst of instances) {
+      if (inst.mesh) inst.mesh.visible = visible;
+    }
+  }
+
   _getPlayerMaxHealthForLevel(levelConfig) {
     return levelConfig?.boss
       ? BASE_PLAYER_HEALTH * BOSS_PLAYER_HEALTH_MULTIPLIER
@@ -984,6 +1038,7 @@ export class Game {
     this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
     this._specialTrashDestroyed = 0;
+    this._weakSpotsDestroyed = 0;
     this._bonusFastThresholdWorld = toWorldSpeed(fastSpeedDisplay);
     this._levelCompleteControlLockRemaining = 0;
     this._pendingLevelCompleteSummary = null;
@@ -1009,6 +1064,11 @@ export class Game {
     this.recycleDebris.clear();
     this._clearTransientEffects();
     this._resetPlayerState(resetPlayerPosition);
+    this._teardownTunnelMaze();
+    if (levelConfig.interior && levelConfig.tunnelData) {
+      this._buildTunnelMaze(levelConfig.tunnelData);
+    }
+    this._setAsteroidFieldVisible(!levelConfig.interior);
     this._configureTrashteroidForLevel(levelConfig);
     this.hud.setGameplayVisible(true);
     this.hud.setBossBarVisible(!!levelConfig.boss);
@@ -1813,6 +1873,20 @@ export class Game {
       primaryComplete = primaryComplete && reached;
     }
 
+    if (primary.weakSpotsRequired) {
+      const totalCount = primary.weakSpotsTotal ?? primary.weakSpotsRequired;
+      const destroyed = this._weakSpotsDestroyed ?? 0;
+      const complete = destroyed >= primary.weakSpotsRequired;
+      objectives.push({
+        label: `Destroy ${primary.weakSpotsRequired} of ${totalCount} weak spots`,
+        current: destroyed,
+        target: primary.weakSpotsRequired,
+        complete,
+        bonus: false,
+      });
+      primaryComplete = primaryComplete && complete;
+    }
+
     if (primary.destroyTrashteroid) {
       const maxHealth = this._trashteroid?.maxHealth ?? 1;
       const remainingHealth = this._trashteroid?.health ?? 0;
@@ -1959,11 +2033,28 @@ export class Game {
 
     const summary = this._pendingLevelCompleteSummary;
     this._pendingLevelCompleteSummary = null;
-    this._showLevelCompleteScreen(summary.primaryComplete, {
-      stars: summary.stars,
+
+    const reqDone = summary.primaryComplete;
+    const stars = summary.stars;
+    const nextLevel = reqDone ? this.levels.getNextLevel() : null;
+
+    if (reqDone && nextLevel) unlockLevel(nextLevel);
+    if (reqDone) recordLevelStars(this.levels.current, stars);
+
+    this.paused = true;
+    this.hud.setGameplayVisible(true);
+    this.hud.hideTimer();
+    if (this.crosshair) this.crosshair.classList.add('hidden');
+    if (document.pointerLockElement) document.exitPointerLock();
+
+    this._levelStatsSummary = {
+      reqDone,
+      stars,
       completedObjectives: summary.completedObjectives,
       totalObjectives: summary.totalObjectives,
-    });
+      nextLevel,
+    };
+    this._showLevelStatsPanel(this._levelStatsSummary);
   }
 
   _createTutorialState() {
@@ -2459,6 +2550,7 @@ export class Game {
     const delta = rawDelta * this._timeScale;
 
     if (this.paused) {
+      this._updateDebriefDialogue(rawDelta);
       soundtrackManager.setBoosting(false);
       soundtrackManager.setThrusting(false);
       this.hud.updateBoostBar(this.boostCharge, false);
@@ -2556,7 +2648,9 @@ export class Game {
       ? Math.max(0, this._trashteroid.group.position.distanceTo(playerPos) - trashteroidSurfaceRadius)
       : Infinity;
     const nearTrashteroid = distToTrashteroidSurface <= ASTEROID_SUPPRESS_DISTANCE_WORLD;
-    if (nearTrashteroid) {
+    if (levelConfig.interior) {
+      this.asteroidField.setTargetCount(0);
+    } else if (nearTrashteroid) {
       // Freeze the target at the current count so no new asteroids spawn,
       // but existing ones are not forcibly removed.
       this.asteroidField.setTargetCount(this.asteroidField.instances.length);
@@ -2567,7 +2661,10 @@ export class Game {
       noSpawnNearTarget ? this._trashteroid.group.position : null,
       noSpawnNearTarget ? trashteroidSurfaceRadius * 2 : 0,
     );
-    this.asteroidField.update(delta, playerPos);
+    if (!levelConfig.interior) {
+      this.asteroidField.update(delta, playerPos);
+    }
+    if (this._tunnelMaze) this._tunnelMaze.update(delta);
     const noSpawnRadius = trashteroidSurfaceRadius * 1.7;
     // Lock debris spawning when the player is within one collisionRadius of the trashteroid surface.
     const nearTargetSpawnLock = noSpawnNearTarget
@@ -2677,7 +2774,7 @@ export class Game {
 
     if (state.primaryComplete) {
       this._finalizeLevel(true);
-    } else if (this._levelTimer <= 0) {
+    } else if (this._levelTimerRunning && this._levelTimer <= 0) {
       this._timedOut = true;
       this._startGameOverSequence();
     }
@@ -3239,62 +3336,334 @@ export class Game {
     return true;
   }
 
-  _showLevelCompleteScreen(reqDone, starSummary = {}) {
-    this.paused = true;
-    this.hud.setGameplayVisible(true);
-    this.hud.hideTimer();
-    if (this.crosshair) this.crosshair.classList.add('hidden');
-    if (document.pointerLockElement) document.exitPointerLock();
+  // ── Debrief dialogue ──────────────────────────────────────────────────────
 
+  _startPostLevelComms() {
+    const summary = this._levelStatsSummary;
+    const el = this._levelCompleteEl;
+    if (!el || !summary) return;
+
+    const commsPanel = el.querySelector('#comms-panel');
+    const menuEl = el.querySelector('#level-complete-menu');
+    const messagesEl = el.querySelector('#comms-messages');
+    const promptEl = el.querySelector('#comms-prompt');
+
+    if (menuEl) menuEl.classList.add('hidden');
+    if (commsPanel) commsPanel.classList.remove('hidden');
+    if (messagesEl) messagesEl.innerHTML = '';
+    if (promptEl) promptEl.classList.add('hidden');
+    el.classList.remove('level-complete-reveal');
+
+    const { reqDone, stars, nextLevel } = summary;
+    const scoreText = Math.round(this.score).toString().padStart(6, '0');
+    const outcome = reqDone ? 'success' : 'timeout';
+    const dialogueFn = LEVEL_DIALOGUES[this.levels.current]?.[outcome];
+    const lines = dialogueFn
+      ? (outcome === 'success' ? dialogueFn(scoreText, stars) : dialogueFn(scoreText))
+      : [];
+
+    const completedLevel = this.levels.current;
+    this._debriefDialogue = {
+      lines,
+      lineIndex: 0,
+      charIndex: 0,
+      charTimer: 0.3,
+      waitingForAdvance: false,
+      done: false,
+      isPrelevel: false,
+      currentTextEl: null,
+      stats: null,
+      onDone: () => {
+        if (nextLevel) {
+          this._startPreLevelBriefing(nextLevel);
+        } else if (reqDone) {
+          this._levelCompleteEl?.classList.add('hidden');
+          if (typeof this._onReturnToLevelSelect === 'function') {
+            this._onReturnToLevelSelect({ level: completedLevel, outcome: 'complete' });
+          }
+        }
+      },
+    };
+
+    this._setupCommsHandlers();
+    if (lines.length > 0) {
+      this._addCommsMessageBubble(0);
+    } else {
+      this._debriefDialogue.onDone?.();
+    }
+  }
+
+  _startPreLevelBriefing(nextLevel) {
     const el = this._levelCompleteEl;
     if (!el) return;
 
+    const commsPanel = el.querySelector('#comms-panel');
+    const menuEl = el.querySelector('#level-complete-menu');
+    const messagesEl = el.querySelector('#comms-messages');
+    const promptEl = el.querySelector('#comms-prompt');
+
+    if (menuEl) menuEl.classList.add('hidden');
+    if (commsPanel) commsPanel.classList.remove('hidden');
+    if (messagesEl) messagesEl.innerHTML = '';
+    if (promptEl) promptEl.classList.add('hidden');
+    el.classList.remove('level-complete-reveal');
+
+    const lines = LEVEL_BRIEFINGS[nextLevel] ?? [];
+
+    this._debriefDialogue = {
+      lines,
+      lineIndex: 0,
+      charIndex: 0,
+      charTimer: 0.45,
+      waitingForAdvance: false,
+      done: false,
+      isPrelevel: true,
+      nextLevel,
+      currentTextEl: null,
+      stats: null,
+      onDone: () => this._launchNextLevel(nextLevel),
+    };
+
+    this._setupCommsHandlers();
+    if (lines.length > 0) {
+      this._addCommsMessageBubble(0);
+    } else {
+      this._launchNextLevel(nextLevel);
+    }
+  }
+
+  _showLevelOpeningBriefing(level) {
+    const el = this._levelCompleteEl;
+    if (!el) return;
+
+    const commsPanel = el.querySelector('#comms-panel');
+    const menuEl = el.querySelector('#level-complete-menu');
+    const messagesEl = el.querySelector('#comms-messages');
+    const promptEl = el.querySelector('#comms-prompt');
+
+    if (menuEl) menuEl.classList.add('hidden');
+    if (commsPanel) commsPanel.classList.remove('hidden');
+    if (messagesEl) messagesEl.innerHTML = '';
+    if (promptEl) promptEl.classList.add('hidden');
+    el.classList.remove('hidden', 'level-complete-reveal');
+
+    const lines = LEVEL_BRIEFINGS[level] ?? [];
+
+    this._debriefDialogue = {
+      lines,
+      lineIndex: 0,
+      charIndex: 0,
+      charTimer: 0.7,
+      waitingForAdvance: false,
+      done: false,
+      isPrelevel: true,
+      nextLevel: null,
+      currentTextEl: null,
+      stats: null,
+      onDone: () => {
+        const screenEl = this._levelCompleteEl;
+        if (screenEl) screenEl.classList.add('hidden');
+        this._debriefDialogue = null;
+        this.paused = false;
+        this._pauseUnlockArmed = false;
+        if (this.crosshair) this.crosshair.classList.remove('hidden');
+        this.canvas.requestPointerLock();
+      },
+    };
+
+    this._setupCommsHandlers();
+    if (lines.length > 0) {
+      this._addCommsMessageBubble(0);
+    } else {
+      this._debriefDialogue.onDone?.();
+    }
+  }
+
+  _setupCommsHandlers() {
+    this._cleanupCommsHandlers();
+    const commsPanel = this._levelCompleteEl?.querySelector('#comms-panel');
+    if (!commsPanel) return;
+
+    this._commsAdvanceClickHandler = (e) => {
+      if (e.target.closest('button')) return;
+      this._advanceDebriefDialogue();
+    };
+    commsPanel.addEventListener('click', this._commsAdvanceClickHandler);
+
+    this._commsAdvanceKeyHandler = (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        this._advanceDebriefDialogue();
+      }
+    };
+    window.addEventListener('keydown', this._commsAdvanceKeyHandler);
+  }
+
+  _cleanupCommsHandlers() {
+    const commsPanel = this._levelCompleteEl?.querySelector('#comms-panel');
+    if (this._commsAdvanceClickHandler) {
+      commsPanel?.removeEventListener('click', this._commsAdvanceClickHandler);
+      this._commsAdvanceClickHandler = null;
+    }
+    if (this._commsAdvanceKeyHandler) {
+      window.removeEventListener('keydown', this._commsAdvanceKeyHandler);
+      this._commsAdvanceKeyHandler = null;
+    }
+  }
+
+  _addCommsMessageBubble(lineIndex) {
+    const d = this._debriefDialogue;
+    const line = d?.lines[lineIndex];
+    const el = this._levelCompleteEl;
+    if (!el || !line) return;
+    const messagesEl = el.querySelector('#comms-messages');
+    if (!messagesEl) return;
+
+    const isControl = line.speaker === 'MISSION_CONTROL';
+    const msgEl = document.createElement('div');
+    msgEl.className = `comms-msg ${isControl ? 'comms-msg--control' : 'comms-msg--pilot'}`;
+
+    const speakerEl = document.createElement('span');
+    speakerEl.className = 'comms-speaker';
+    speakerEl.textContent = isControl ? 'MISSION CONTROL' : 'YOU';
+
+    const textEl = document.createElement('span');
+    textEl.className = 'comms-text';
+
+    msgEl.appendChild(speakerEl);
+    msgEl.appendChild(textEl);
+    messagesEl.appendChild(msgEl);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    d.currentTextEl = textEl;
+  }
+
+  _updateDebriefDialogue(delta) {
+    const d = this._debriefDialogue;
+    if (!d || d.done || d.waitingForAdvance) return;
+
+    d.charTimer -= delta;
+    if (d.charTimer > 0) return;
+
+    const line = d.lines[d.lineIndex];
+    if (!line) return;
+
+    if (d.charIndex >= line.text.length) {
+      d.waitingForAdvance = true;
+      this._showCommsPrompt(d.lineIndex === d.lines.length - 1 && d.isPrelevel);
+      return;
+    }
+
+    const ch = line.text[d.charIndex++];
+    if (d.currentTextEl) {
+      d.currentTextEl.textContent += ch;
+      const messagesEl = this._levelCompleteEl?.querySelector('#comms-messages');
+      if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    if ('.!?'.includes(ch)) {
+      d.charTimer = 0.40;
+    } else if (ch === ',') {
+      d.charTimer = 0.12;
+    } else {
+      d.charTimer = 0.028;
+    }
+  }
+
+  _advanceDebriefDialogue() {
+    const d = this._debriefDialogue;
+    if (!d || d.done) return;
+
+    if (!d.waitingForAdvance) {
+      const line = d.lines[d.lineIndex];
+      if (line && d.currentTextEl) d.currentTextEl.textContent = line.text;
+      const messagesEl = this._levelCompleteEl?.querySelector('#comms-messages');
+      if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+      d.charIndex = line?.text.length ?? 0;
+      d.waitingForAdvance = true;
+      this._showCommsPrompt(d.lineIndex === d.lines.length - 1 && d.isPrelevel);
+      return;
+    }
+
+    d.lineIndex++;
+
+    if (d.lineIndex >= d.lines.length) {
+      d.done = true;
+      this._hideCommsPrompt();
+      this._cleanupCommsHandlers();
+      d.onDone?.();
+      return;
+    }
+
+    d.charIndex = 0;
+    d.charTimer = 0.20;
+    d.waitingForAdvance = false;
+    d.currentTextEl = null;
+    this._hideCommsPrompt();
+    this._addCommsMessageBubble(d.lineIndex);
+  }
+
+  _showCommsPrompt(isLaunch = false) {
+    const promptEl = this._levelCompleteEl?.querySelector('#comms-prompt');
+    if (!promptEl) return;
+    promptEl.textContent = isLaunch ? '▶  SPACE / CLICK TO LAUNCH' : '▼  SPACE / CLICK TO CONTINUE';
+    promptEl.classList.remove('hidden');
+  }
+
+  _hideCommsPrompt() {
+    const promptEl = this._levelCompleteEl?.querySelector('#comms-prompt');
+    if (promptEl) promptEl.classList.add('hidden');
+  }
+
+  _onDebriefDialogueDone() {
+    this._showLevelStatsPanel(this._debriefDialogue?.stats);
+  }
+
+  _showLevelStatsPanel(stats) {
+    const el = this._levelCompleteEl;
+    if (!el) return;
+
+    const commsPanel = el.querySelector('#comms-panel');
+    const menuEl = el.querySelector('#level-complete-menu');
+    if (!menuEl) return;
+
+    if (commsPanel) commsPanel.classList.add('hidden');
+
+    const { reqDone, stars, completedObjectives, totalObjectives, nextLevel } = stats ?? {};
     const mission = this.levels.getMissionConfig();
-    const nextLevel = reqDone ? this.levels.getNextLevel() : null;
-    const stars = Math.min(3, Math.max(0, Math.floor(starSummary.stars ?? 0)));
-    const completedObjectives = Math.max(0, Math.floor(starSummary.completedObjectives ?? 0));
-    const totalObjectives = Math.max(0, Math.floor(starSummary.totalObjectives ?? 0));
 
-    if (reqDone && nextLevel) {
-      unlockLevel(nextLevel);
-    }
-    if (reqDone) {
-      recordLevelStars(this.levels.current, stars);
-    }
-
-    const title = el.querySelector('#level-complete-title');
+    const titleEl = el.querySelector('#level-complete-title');
     const starSpans = el.querySelectorAll('.lc-star');
     const objectivesEl = el.querySelector('#level-complete-objectives');
     const scoreEl = el.querySelector('#level-complete-score');
     const nextBtn = el.querySelector('#level-next-btn');
     const retryBtn = el.querySelector('#level-retry-btn');
 
-    if (title) {
-      title.textContent = reqDone
+    if (titleEl) {
+      titleEl.textContent = reqDone
         ? (mission?.successTitle ?? `LEVEL ${this.levels.current} CLEARED`)
         : 'TIME UP';
     }
 
     starSpans.forEach((span, i) => {
-      const filled = i < stars;
+      const filled = i < (stars ?? 0);
       span.textContent = filled ? '★' : '☆';
       span.classList.toggle('filled', filled);
     });
 
     if (objectivesEl) {
-      objectivesEl.textContent = `${completedObjectives}/${totalObjectives} objectives completed`;
+      objectivesEl.textContent = `${completedObjectives ?? 0}/${totalObjectives ?? 0} objectives completed`;
     }
 
     const finalScore = Math.max(0, Math.floor(this.score));
     if (scoreEl) {
-      scoreEl.textContent = '0'.padStart(6, '0');
-      // Cancel any previous counter
+      scoreEl.textContent = '000000';
       if (this._scoreCounterRaf) {
         cancelAnimationFrame(this._scoreCounterRaf);
         this._scoreCounterRaf = null;
       }
-      const COUNTER_START_DELAY = 1100;
-      const COUNTER_DURATION = 1500;
+      const COUNTER_START_DELAY = 500;
+      const COUNTER_DURATION = 1200;
       const startTime = performance.now();
       const tick = (now) => {
         const elapsed = now - startTime - COUNTER_START_DELAY;
@@ -3308,27 +3677,54 @@ export class Game {
       this._scoreCounterRaf = requestAnimationFrame(tick);
     }
 
-    if (nextBtn) nextBtn.textContent = 'CONTINUE';
+    if (nextBtn) {
+      if (reqDone && nextLevel) {
+        nextBtn.textContent = 'DEBRIEF';
+        nextBtn.classList.remove('hidden');
+      } else if (reqDone && !nextLevel) {
+        nextBtn.textContent = 'DEBRIEF';
+        nextBtn.classList.remove('hidden');
+      } else {
+        nextBtn.classList.add('hidden');
+      }
+    }
     if (retryBtn) retryBtn.textContent = 'RETRY';
 
+    menuEl.classList.remove('hidden', 'level-complete-reveal');
     el.classList.remove('hidden', 'level-complete-reveal');
     void el.offsetWidth;
     el.classList.add('level-complete-reveal');
   }
 
+  _launchNextLevel(nextLevel) {
+    const el = this._levelCompleteEl;
+    if (el) el.classList.add('hidden');
+    if (this._scoreCounterRaf) {
+      cancelAnimationFrame(this._scoreCounterRaf);
+      this._scoreCounterRaf = null;
+    }
+    this._debriefDialogue = null;
+    this._levelComplete = false;
+    this.paused = false;
+    this._pauseUnlockArmed = false;
+    if (this.crosshair) this.crosshair.classList.remove('hidden');
+    this.canvas.requestPointerLock();
+    this._enterLevel(nextLevel, {
+      resetPlayerPosition: true,
+      resetRunStats: true,
+    });
+  }
+
   _onLevelNext() {
     this._cancelLevelCompleteTransition();
-    this._levelCompleteEl?.classList.add('hidden');
-    const completedLevel = this.levels.current;
-    if (typeof this._onReturnToLevelSelect === 'function') {
-      this._onReturnToLevelSelect({ level: completedLevel, outcome: 'complete' });
-    } else {
-      window.location.reload();
-    }
+    this._startPostLevelComms();
   }
 
   _onLevelRetry() {
     this._cancelLevelCompleteTransition();
+    this._cleanupCommsHandlers();
+    this._debriefDialogue = null;
+    this._levelStatsSummary = null;
     this._levelCompleteEl?.classList.add('hidden');
     this._pauseUnlockArmed = false;
     this._enterLevel(this.levels.current, {

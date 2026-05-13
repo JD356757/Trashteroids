@@ -12,8 +12,8 @@ export const LEVEL_CONFIGS = {
       successTitle: 'SECTOR 1 CLEARED',
       successSubtitle: 'Required objective complete.',
       primary: {
-        trashRequired: 20,
-        recycleRequired: 9,
+        trashRequired: 1,
+        recycleRequired: 1,
       },
       bonus: {
         fastTrashRequired: 3,
@@ -42,43 +42,38 @@ export const LEVEL_CONFIGS = {
     },
   },
   2: {
-    label: 'LEVEL 2 - 25,000 km to trashteroid',
-    briefingTagline: 'Get to the trashteroid. Clear the path by destroying more trash.',
-    timer: 180,
-    trashteroidScale: 70,
+    label: 'LEVEL 2 - Inside the trashteroid',
+    briefingTagline: '[PHASE 1 DEBUG] Fly through the tunnel layout. Cyan lines are tunnels, wireframe spheres are chambers/junctions, pulsing red spheres are weak spots.',
+    timer: 0,
+    interior: true,
+    tunnelData: 'level2',
     mission: {
-      successTitle: 'SECTOR 2 CLEARED',
-      successSubtitle: 'Trashteroid reached. Final assault window open.',
+      successTitle: 'CORE STRUCTURE COMPROMISED',
+      successSubtitle: 'Trashteroid weakened. Final assault window open.',
       primary: {
-        trashRequired: 40,
-        recycleRequired: 15,
-        reachTrashteroid: true,
-        reachDistanceDisplay: 1500,
+        weakSpotsRequired: 5,
+        weakSpotsTotal: 10,
       },
-      bonus: {
-        fastTrashRequired: 4,
-        fastSpeedDisplay: 250,
-        specialRequired: 15,
-      },
+      bonus: {},
     },
     spawn: {
-      maxActive: 26,
-      bootstrapActive: 12,
-      forwardSpawnMin: 1025,
-      forwardSpawnMax: 1450,
-      lateralSpread: 250,
-      verticalRange: 130,
-      minGap: 76,
-      modelScale: 15.6,
-      scaleMin: 0.88,
-      scaleMax: 1.2,
-      backwardDrift: 13,
-      lateralDrift: 6,
-      rotationSpeed: 0.44,
-      progressPerSpawn: 72,
-      despawnDistance: 2350,
-      recycleBehindDistance: 180,
-      points: 325,
+      maxActive: 0,
+      bootstrapActive: 0,
+      forwardSpawnMin: 1000,
+      forwardSpawnMax: 1500,
+      lateralSpread: 0,
+      verticalRange: 0,
+      minGap: 100,
+      modelScale: 14,
+      scaleMin: 1,
+      scaleMax: 1,
+      backwardDrift: 0,
+      lateralDrift: 0,
+      rotationSpeed: 0,
+      progressPerSpawn: 99999,
+      despawnDistance: 200,
+      recycleBehindDistance: 100,
+      points: 0,
     },
   },
   3: {
@@ -140,6 +135,90 @@ export const LEVEL_CONFIGS = {
       recycleBehindDistance: 210,
       points: 400,
     },
+  },
+};
+
+function _starsText(stars) {
+  if (stars >= 3) return 'Three stars. Flawless.';
+  if (stars === 2) return 'Two stars. Solid work.';
+  return 'One star. Primary objective met.';
+}
+
+export const LEVEL_BRIEFINGS = {
+  1: [
+    { speaker: 'MISSION_CONTROL', text: "Pilot, this is Mission Control. You are now in Earth's outer debris field." },
+    { speaker: 'PILOT', text: "Copy. I am reading a lot of contacts on scope." },
+    { speaker: 'MISSION_CONTROL', text: "A century of garbage that humanity launched into orbit. All of it is still up here, and now it is falling back." },
+    { speaker: 'MISSION_CONTROL', text: "Your mission: destroy 20 trash clusters and collect 9 recyclables before the two minute timer runs out." },
+    { speaker: 'MISSION_CONTROL', text: "Use your vaporizer on trash. Use your recycling beam on the green canisters." },
+    { speaker: 'PILOT', text: "Understood. Starting my run." },
+  ],
+  2: [
+    { speaker: 'MISSION_CONTROL', text: "[PHASE 1 DEBUG] You are inside the trashteroid tunnel layout." },
+    { speaker: 'MISSION_CONTROL', text: "Cyan lines mark tunnel centerlines. Wireframe spheres are chambers and junctions." },
+    { speaker: 'MISSION_CONTROL', text: "Ten pulsing red spheres are the weak spots. Walls are not built yet — fly through and validate the topology." },
+    { speaker: 'PILOT', text: "Copy. Just feeling out the layout." },
+  ],
+  3: [
+    { speaker: 'MISSION_CONTROL', text: "Pilot. The Trashteroid is right in front of you." },
+    { speaker: 'PILOT', text: "I see it. The thing is the size of a moon." },
+    { speaker: 'MISSION_CONTROL', text: "It is shedding large debris chunks at high speed. Shoot them down or dodge them." },
+    { speaker: 'MISSION_CONTROL', text: "Your mission: destroy the Trashteroid. Keep firing your vaporizer at it until it is gone. You have five minutes." },
+    { speaker: 'PILOT', text: "Going in." },
+  ],
+};
+
+export const LEVEL_DIALOGUES = {
+  1: {
+    success: (score, stars) => [
+      { speaker: 'MISSION_CONTROL', text: "Pilot, Sector One is clear. Good work out there." },
+      { speaker: 'PILOT', text: "It was close. That last wave came in fast." },
+      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. ${_starsText(stars)}` },
+      { speaker: 'MISSION_CONTROL', text: "Long range scan is confirming the Trashteroid. It is much bigger than we expected." },
+      { speaker: 'PILOT', text: "How much bigger?" },
+      { speaker: 'MISSION_CONTROL', text: "Think less asteroid, more second moon. Get moving. Sector Two is next." },
+    ],
+    timeout: (score) => [
+      { speaker: 'MISSION_CONTROL', text: "Pilot, the timer ran out. Sector One is not cleared." },
+      { speaker: 'PILOT', text: "The debris kept regenerating faster than I could hit it." },
+      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. You need 20 trash and 9 recyclables in under two minutes.` },
+      { speaker: 'MISSION_CONTROL', text: "Try focusing on the clusters directly in your path. Do not chase everything." },
+      { speaker: 'PILOT', text: "Got it. Going again." },
+    ],
+  },
+  2: {
+    success: (score, stars) => [
+      { speaker: 'MISSION_CONTROL', text: "You reached it. Pilot, you are right next to the Trashteroid." },
+      { speaker: 'PILOT', text: "This thing is gigantic. I can see old satellites crushed into the surface." },
+      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. ${_starsText(stars)}` },
+      { speaker: 'MISSION_CONTROL', text: "Our sensors found a weak point at the core. You need to hit it from close range." },
+      { speaker: 'PILOT', text: "How do I get to it?" },
+      { speaker: 'MISSION_CONTROL', text: "Fight through the debris around it. The core will be exposed. Keep firing." },
+    ],
+    timeout: (score) => [
+      { speaker: 'MISSION_CONTROL', text: "Time is up. You did not reach the Trashteroid." },
+      { speaker: 'PILOT', text: "The debris density was too high. I kept getting blocked." },
+      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. You need 40 trash, 15 recyclables, then close 1,500 km to the Trashteroid.` },
+      { speaker: 'MISSION_CONTROL', text: "Clear the trash first, then push forward without stopping." },
+      { speaker: 'PILOT', text: "Understood. Trying again." },
+    ],
+  },
+  3: {
+    success: (score, stars) => [
+      { speaker: 'MISSION_CONTROL', text: "Pilot! We are reading a massive explosion on our scopes. Did you destroy it?" },
+      { speaker: 'PILOT', text: "It is gone, Control. Nothing left." },
+      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. ${_starsText(stars)}` },
+      { speaker: 'MISSION_CONTROL', text: "Earth orbit is clear. The Trashteroid is destroyed. You just saved everyone on the planet." },
+      { speaker: 'PILOT', text: "Just doing the job." },
+      { speaker: 'MISSION_CONTROL', text: "Come home, pilot. You earned it." },
+    ],
+    timeout: (score) => [
+      { speaker: 'MISSION_CONTROL', text: "Pilot, the timer ran out. The Trashteroid is still intact." },
+      { speaker: 'PILOT', text: "I could not break through the debris field in time." },
+      { speaker: 'MISSION_CONTROL', text: `Score: ${score}. You need to destroy the Trashteroid itself. Keep firing at it.` },
+      { speaker: 'MISSION_CONTROL', text: "Ignore the small debris if you can and focus all fire on the Trashteroid." },
+      { speaker: 'PILOT', text: "Going back in." },
+    ],
   },
 };
 

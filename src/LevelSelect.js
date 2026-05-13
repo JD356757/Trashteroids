@@ -741,7 +741,7 @@ export class LevelSelect {
     const id = this._selectedLevel.id;
     this._hidePopup();
     this.hide();
-    this._showBriefing(id);
+    this.onLevelChosen({ levelId: id, tutorialMode: id === 1 });
   }
 
   _showBriefing(id) {

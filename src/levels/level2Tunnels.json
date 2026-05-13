@@ -1,0 +1,55 @@
+{
+  "id": "level2",
+  "bounds": { "min": [-7500, -4125, -4875], "max": [7875, 3750, 7875] },
+  "nodes": {
+    "entry":      { "pos": [     0,      0,  7125], "radius":  525 },
+    "hubA":       { "pos": [     0,    474,  4500], "radius":  939 },
+    "narrowN":    { "pos": [ -1314,   1314,  3000], "radius":  189 },
+    "chamberUpW": { "pos": [ -3000,   2064,   750], "radius": 1035 },
+    "deadendW":   { "pos": [ -6189,    564,  1875], "radius":  339 },
+    "narrowMid":  { "pos": [  1689,   -474,  3375], "radius":  150 },
+    "chamberCtr": { "pos": [   750,   -750,  1125], "radius": 1314 },
+    "pillarE":    { "pos": [  3939,    564,     0], "radius":  225 },
+    "chamberE":   { "pos": [  5439,   1125, -1875], "radius": 1125 },
+    "deadendE":   { "pos": [  7125,    564, -3939], "radius":  375 },
+    "dropS":      { "pos": [   939,  -2439,  -939], "radius":  264 },
+    "chamberS":   { "pos": [  -564,  -3189, -2814], "radius":  939 },
+    "loopback":   { "pos": [ -3750,  -1125, -1689], "radius":  375 },
+    "spire":      { "pos": [  1125,   3000,  1500], "radius":  414 }
+  },
+  "tunnels": [
+    { "from": "entry",      "to": "hubA",       "midpoints": [],                                                            "embedTrashDensity": 0.5 },
+    { "from": "hubA",       "to": "narrowN",    "midpoints": [{ "pos": [ -564,   939,  3750], "radius": 264 }],             "embedTrashDensity": 0.6 },
+    { "from": "hubA",       "to": "narrowMid",  "midpoints": [{ "pos": [ 1125,     0,  4050], "radius": 264 }],             "embedTrashDensity": 0.7 },
+    { "from": "hubA",       "to": "spire",      "midpoints": [{ "pos": [  564,  1875,  3000], "radius": 339 }],             "embedTrashDensity": 0.4 },
+    { "from": "hubA",       "to": "chamberCtr", "midpoints": [{ "pos": [  375,   -99,  2814], "radius": 564 }],             "embedTrashDensity": 0.5 },
+    { "from": "narrowN",    "to": "chamberUpW", "midpoints": [{ "pos": [-2250,  1785,  1875], "radius": 300 }],             "embedTrashDensity": 0.6 },
+    { "from": "chamberUpW", "to": "deadendW",   "midpoints": [{ "pos": [-4689,  1314,  1500], "radius": 300 }],             "embedTrashDensity": 0.5 },
+    { "from": "chamberUpW", "to": "loopback",   "midpoints": [{ "pos": [-3750,   375,  -189], "radius": 339 }],             "embedTrashDensity": 0.5 },
+    { "from": "narrowMid",  "to": "chamberCtr", "midpoints": [{ "pos": [ 1314,  -660,  2250], "radius": 225 }],             "embedTrashDensity": 0.6 },
+    { "from": "chamberCtr", "to": "pillarE",    "midpoints": [{ "pos": [ 2439,     0,   564], "radius": 300 }],             "embedTrashDensity": 0.7 },
+    { "from": "chamberCtr", "to": "dropS",      "midpoints": [{ "pos": [  849, -1689,   189], "radius": 339 }],             "embedTrashDensity": 0.5 },
+    { "from": "chamberCtr", "to": "loopback",   "midpoints": [{ "pos": [-1875,  -750,     0], "radius": 414 }],             "embedTrashDensity": 0.5 },
+    { "from": "pillarE",    "to": "chamberE",   "midpoints": [{ "pos": [ 4785,   939, -1035], "radius": 339 }],             "embedTrashDensity": 0.6 },
+    { "from": "chamberE",   "to": "deadendE",   "midpoints": [{ "pos": [ 6375,   939, -3000], "radius": 339 }],             "embedTrashDensity": 0.5 },
+    { "from": "chamberE",   "to": "dropS",      "midpoints": [{ "pos": [ 3375,  -939, -1689], "radius": 375 }],             "embedTrashDensity": 0.5 },
+    { "from": "dropS",      "to": "chamberS",   "midpoints": [{ "pos": [  189, -3000, -2064], "radius": 339 }],             "embedTrashDensity": 0.6 },
+    { "from": "chamberS",   "to": "loopback",   "midpoints": [{ "pos": [-2439, -2250, -2250], "radius": 375 }],             "embedTrashDensity": 0.5 }
+  ],
+  "weakSpots": [
+    { "id": "ws_hub",       "pos": [   375,    564,  4500], "hp": 120 },
+    { "id": "ws_upW",       "pos": [ -3000,   1974,   339], "hp": 120 },
+    { "id": "ws_ctr",       "pos": [  1125,   -660,  1410], "hp": 120 },
+    { "id": "ws_east",      "pos": [  5439,   1224, -2064], "hp": 120 },
+    { "id": "ws_deadendE",  "pos": [  7125,    564, -4035], "hp": 120 },
+    { "id": "ws_south",     "pos": [  -660,  -3189, -2910], "hp": 120 },
+    { "id": "ws_loop",      "pos": [ -3849,  -1125, -1599], "hp": 120 },
+    { "id": "ws_spire",     "pos": [  1125,   3000,  1500], "hp": 120 },
+    { "id": "ws_deadendW",  "pos": [ -6189,    564,  1875], "hp": 120 },
+    { "id": "ws_narrow",    "pos": [  1689,   -375,  3375], "hp": 120 }
+  ],
+  "playerStart": {
+    "pos":    [0, 0, 7125],
+    "lookAt": [0, 474, 4500]
+  }
+}
