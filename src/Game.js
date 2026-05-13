@@ -1108,10 +1108,11 @@ export class Game {
     }
   }
 
-  _setExteriorLightingForInterior(interior) {
+  _setExteriorLightingForInterior(interior, { instant = false } = {}) {
     // Stash the exterior fog/background and sun/ambient settings the first
     // time we swap to interior mode, then restore them on the way out.
-    // Now with smooth easing over 0.5s
+    // Smooth easing over 0.5s unless `instant` is requested (e.g. on a fresh
+    // level load, where any animation would just be a bright flash).
     if (interior) {
       if (this._exteriorLightingState == null) {
         this._exteriorLightingState = {
@@ -1124,19 +1125,42 @@ export class Game {
           sunGlowVisible: this.sunGlowSprite?.visible ?? true,
         };
 
-        // Start lighting transition animation (0.5s)
-        this._lightingTransitionStart = this._elapsed;
-        this._lightingTransitionDuration = 0.5;
-        this._lightingTransitionTarget = 'interior';
+        if (instant) {
+          this.scene.fog = new THREE.FogExp2(0x07050a, 0.00045);
+          this.scene.background = new THREE.Color(0x05030a);
+          if (this.sunLight) this.sunLight.intensity = 0;
+          if (this.ambientLight) this.ambientLight.intensity = 0;
+          if (this.hemiLight) this.hemiLight.intensity = 0;
+          if (this.sunMesh) this.sunMesh.visible = false;
+          if (this.sunGlowSprite) this.sunGlowSprite.visible = false;
+          this._lightingTransitionStart = null;
+          this._lightingTransitionTarget = null;
+        } else {
+          this._lightingTransitionStart = this._elapsed;
+          this._lightingTransitionDuration = 0.5;
+          this._lightingTransitionTarget = 'interior';
+        }
       }
     } else if (this._exteriorLightingState) {
       const s = this._exteriorLightingState;
-      
-      // Start transition back to exterior (0.5s)
-      this._lightingTransitionStart = this._elapsed;
-      this._lightingTransitionDuration = 0.5;
-      this._lightingTransitionTarget = 'exterior';
-      this._exteriorLightingState = null;
+
+      if (instant) {
+        this.scene.fog = s.fog;
+        this.scene.background = s.background;
+        if (this.sunLight) this.sunLight.intensity = s.sunIntensity;
+        if (this.ambientLight) this.ambientLight.intensity = s.ambientIntensity;
+        if (this.hemiLight) this.hemiLight.intensity = s.hemiIntensity;
+        if (this.sunMesh) this.sunMesh.visible = s.sunMeshVisible;
+        if (this.sunGlowSprite) this.sunGlowSprite.visible = s.sunGlowVisible;
+        this._lightingTransitionStart = null;
+        this._lightingTransitionTarget = null;
+        this._exteriorLightingState = null;
+      } else {
+        this._lightingTransitionStart = this._elapsed;
+        this._lightingTransitionDuration = 0.5;
+        this._lightingTransitionTarget = 'exterior';
+        this._exteriorLightingState = null;
+      }
     }
   }
 
@@ -1383,7 +1407,7 @@ export class Game {
       this._buildTunnelMaze(levelConfig.tunnelData, levelConfig);
     }
     this._setAsteroidFieldVisible(!levelConfig.interior);
-    this._setExteriorLightingForInterior(!!levelConfig.interior);
+    this._setExteriorLightingForInterior(!!levelConfig.interior, { instant: true });
     this._configureTrashteroidForLevel(levelConfig);
     this.hud.setGameplayVisible(true);
     this.hud.setBossBarVisible(!!levelConfig.boss);
@@ -3610,6 +3634,7 @@ export class Game {
           this.score += points;
           this._recycleCollectedRequired++;
           this._noteTutorialRecycleDestroyed();
+          this._playPickupSfx();
           debrisManager.remove(i);
           continue;
         }
