@@ -1,0 +1,6 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic:
+      - heading "TRASHTEROID" [level=1]
+    - button "START MISSION" [ref=e4]
+  - text: ▍ RADAR

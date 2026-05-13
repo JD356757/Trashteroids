@@ -47,6 +47,7 @@ export const LEVEL_CONFIGS = {
     timer: 0,
     interior: true,
     tunnelData: 'level2',
+    bakedMeshUrl: '/models/level2_interior.glb',
     mission: {
       successTitle: 'CORE STRUCTURE COMPROMISED',
       successSubtitle: 'Trashteroid weakened. Final assault window open.',

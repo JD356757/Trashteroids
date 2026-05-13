@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bake:level2": "blender --background --python scripts/bake_tunnel_maze.py -- src/levels/level2Tunnels.json public/models/level2_interior.glb"
   },
   "keywords": [
     "threejs",

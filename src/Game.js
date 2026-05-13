@@ -291,10 +291,12 @@ export class Game {
     const AMBIENT_INTENSITY = 0.2;
     const ambient = new THREE.AmbientLight(0xffffff, AMBIENT_INTENSITY);
     this.scene.add(ambient);
+    this.ambientLight = ambient;
 
     // Subtle hemisphere fill to give shadowed sides some color/blend
     const hemi = new THREE.HemisphereLight(0x666688, 0x111122, 0.12);
     this.scene.add(hemi);
+    this.hemiLight = hemi;
 
     // Sun — a warm directional light from far away, locked in the background
     this.sunLight = new THREE.DirectionalLight(0xfff5e0, 2);
@@ -968,13 +970,17 @@ export class Game {
     }
   }
 
-  _buildTunnelMaze(key) {
+  _buildTunnelMaze(key, levelConfig = null) {
     const data = getTunnelData(key);
     if (!data) {
       console.warn(`TunnelMaze data not found for key "${key}"`);
       return;
     }
-    this._tunnelMaze = new TunnelMaze(this.scene, data, { debug: true });
+    const bakedMeshUrl = levelConfig?.bakedMeshUrl ?? null;
+    this._tunnelMaze = new TunnelMaze(this.scene, data, {
+      debug: !bakedMeshUrl,
+      bakedMeshUrl,
+    });
     const start = data.playerStart;
     if (start && Array.isArray(start.pos)) {
       this.player.mesh.position.fromArray(start.pos);
@@ -996,6 +1002,41 @@ export class Game {
     if (this._tunnelMaze) {
       this._tunnelMaze.dispose();
       this._tunnelMaze = null;
+    }
+  }
+
+  _setExteriorLightingForInterior(interior) {
+    // Stash the exterior fog/background and sun/ambient settings the first
+    // time we swap to interior mode, then restore them on the way out.
+    if (interior) {
+      if (this._exteriorLightingState == null) {
+        this._exteriorLightingState = {
+          fog: this.scene.fog,
+          background: this.scene.background,
+          sunIntensity: this.sunLight?.intensity ?? 0,
+          ambientIntensity: this.ambientLight?.intensity ?? 0,
+          hemiIntensity: this.hemiLight?.intensity ?? 0,
+          sunMeshVisible: this.sunMesh?.visible ?? true,
+          sunGlowVisible: this.sunGlowSprite?.visible ?? true,
+        };
+      }
+      this.scene.fog = new THREE.FogExp2(0x07050a, 0.00045);
+      this.scene.background = new THREE.Color(0x05030a);
+      if (this.sunLight) this.sunLight.intensity = 0;
+      if (this.ambientLight) this.ambientLight.intensity = 0;
+      if (this.hemiLight) this.hemiLight.intensity = 0;
+      if (this.sunMesh) this.sunMesh.visible = false;
+      if (this.sunGlowSprite) this.sunGlowSprite.visible = false;
+    } else if (this._exteriorLightingState) {
+      const s = this._exteriorLightingState;
+      this.scene.fog = s.fog;
+      this.scene.background = s.background;
+      if (this.sunLight) this.sunLight.intensity = s.sunIntensity;
+      if (this.ambientLight) this.ambientLight.intensity = s.ambientIntensity;
+      if (this.hemiLight) this.hemiLight.intensity = s.hemiIntensity;
+      if (this.sunMesh) this.sunMesh.visible = s.sunMeshVisible;
+      if (this.sunGlowSprite) this.sunGlowSprite.visible = s.sunGlowVisible;
+      this._exteriorLightingState = null;
     }
   }
 
@@ -1066,9 +1107,10 @@ export class Game {
     this._resetPlayerState(resetPlayerPosition);
     this._teardownTunnelMaze();
     if (levelConfig.interior && levelConfig.tunnelData) {
-      this._buildTunnelMaze(levelConfig.tunnelData);
+      this._buildTunnelMaze(levelConfig.tunnelData, levelConfig);
     }
     this._setAsteroidFieldVisible(!levelConfig.interior);
+    this._setExteriorLightingForInterior(!!levelConfig.interior);
     this._configureTrashteroidForLevel(levelConfig);
     this.hud.setGameplayVisible(true);
     this.hud.setBossBarVisible(!!levelConfig.boss);
@@ -2664,7 +2706,7 @@ export class Game {
     if (!levelConfig.interior) {
       this.asteroidField.update(delta, playerPos);
     }
-    if (this._tunnelMaze) this._tunnelMaze.update(delta);
+    if (this._tunnelMaze) this._tunnelMaze.update(delta, playerPos, playerQuat);
     const noSpawnRadius = trashteroidSurfaceRadius * 1.7;
     // Lock debris spawning when the player is within one collisionRadius of the trashteroid surface.
     const nearTargetSpawnLock = noSpawnNearTarget
