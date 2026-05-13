@@ -200,13 +200,14 @@ function toDisplayDistance(worldDistance) {
 
 // Earth sits behind the player (positive Z, with camera-relative offset)
 // so launching from Earth visually maps to "fly forward, Earth recedes
-// behind you." Sun is on the opposite half-space for proper lighting.
+// behind you." Sun is kept on the far side of the background from Earth.
 const EARTH_BACKGROUND_OFFSET = new THREE.Vector3(-1200, -600, 3500);
 const EARTH_ROTATION_X = Math.PI/10;
 const EARTH_ROTATION_Y =  - Math.PI / 3;
 const EARTH_ROTATION_Z = 0;
-// Keep the sun well separated from Earth in view direction (>= 120 degrees).
-const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, -3600);
+const EARTH_SPIN_SPEED = 0.045;
+// Keep the sun well separated from Earth in screen direction.
+const SUN_BACKGROUND_OFFSET = new THREE.Vector3(1800, 900, 3600);
 const VISIBLE_SUN_BACKGROUND_OFFSET = SUN_BACKGROUND_OFFSET.clone().setLength(80000);
 const VISIBLE_SUN_SCALE = VISIBLE_SUN_BACKGROUND_OFFSET.length() / SUN_BACKGROUND_OFFSET.length();
 const SUN_BACKGROUND_RENDER_ORDER = -1500;
@@ -5578,7 +5579,11 @@ export class Game {
         camPos.y + EARTH_BACKGROUND_OFFSET.y,
         camPos.z + EARTH_BACKGROUND_OFFSET.z
       );
-      this.planet.rotation.set(EARTH_ROTATION_X, EARTH_ROTATION_Y, EARTH_ROTATION_Z);
+      this.planet.rotation.set(
+        EARTH_ROTATION_X,
+        EARTH_ROTATION_Y + this._elapsed * EARTH_SPIN_SPEED,
+        EARTH_ROTATION_Z
+      );
     }
   }
 
