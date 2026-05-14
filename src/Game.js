@@ -296,6 +296,7 @@ export class Game {
     this._destructionCutscene = null;
     this._transitionCutscene = null;
     this._timeScale = 1;
+    this._tutorialCompletedThisSession = false;
     this._tutorial = this._createTutorialState();
     this._handleLevelNextClick = () => this._onLevelNext();
     this._handleLevelRetryClick = () => this._onLevelRetry();
@@ -1371,7 +1372,8 @@ export class Game {
     this.paused = false;
     this._levelComplete = false;
     this._levelTimer = levelConfig.timer ?? 0;
-    this._levelTimerRunning = this._levelTimer > 0 && !this._isTutorialActiveForCurrentLevel();
+    this._levelTimerRunning = this._levelTimer > 0
+      && (!this._isTutorialActiveForCurrentLevel() || this._isRequiredTutorialComplete());
     this._trashDestroyedRequired = 0;
     this._recycleCollectedRequired = 0;
     this._trashDestroyedFast = 0;
@@ -2215,6 +2217,7 @@ export class Game {
     const primary = this.levels.getCurrentConfig()?.mission?.primary ?? {};
     if (!primary.tutorialRequired) return true;
     if (!this._tutorialMode || this.levels.current !== 1) return true;
+    if (this._tutorialCompletedThisSession) return true;
 
     return this._tutorial.objectivesShown
       && !this._tutorial.activeBeatId
@@ -2492,18 +2495,18 @@ export class Game {
     }
   }
 
-  _createTutorialState() {
+  _createTutorialState(completed = false) {
     return {
-      activePlayTime: 0,
-      moveShown: false,
-      rollShown: false,
-      boostShown: false,
-      fireShown: false,
-      specialShown: false,
-      recycleShown: false,
-      penaltyShown: false,
-      crashingShown: false,
-      objectivesShown: false,
+      activePlayTime: completed ? 1.5 : 0,
+      moveShown: completed,
+      rollShown: completed,
+      boostShown: completed,
+      fireShown: completed,
+      specialShown: completed,
+      recycleShown: completed,
+      penaltyShown: completed,
+      crashingShown: completed,
+      objectivesShown: completed,
       transitionRemaining: 0,
       activeBeatId: null,
       activeBeatProgress: null,
@@ -2512,7 +2515,10 @@ export class Game {
 
   _resetTutorialState() {
     this._timeScale = 1;
-    this._tutorial = this._createTutorialState();
+    const completed = this._tutorialCompletedThisSession
+      && this._tutorialMode
+      && this.levels.current === 1;
+    this._tutorial = this._createTutorialState(completed);
     this.hud.hideTutorialCallout();
   }
 
@@ -2630,6 +2636,10 @@ export class Game {
 
     // Keep the mission timer frozen during tutorial and only start it after
     // the final tutorial beat has completed.
+    if (completedBeatId === 'objectives' && this._isTutorialActiveForCurrentLevel()) {
+      this._tutorialCompletedThisSession = true;
+    }
+
     if (
       completedBeatId === 'objectives' &&
       this._isTutorialActiveForCurrentLevel() &&

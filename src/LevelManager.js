@@ -1,8 +1,3 @@
-/**
- * Manages level configs and current level state.
- * Objective and boss behavior both key off this shared config.
- */
-
 export const LEVEL_CONFIGS = {
   1: {
     label: 'LEVEL 1 - Approach the Trashteroid',
